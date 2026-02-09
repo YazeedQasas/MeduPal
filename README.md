@@ -1,6 +1,6 @@
 # MeduPal - OSCE Clinical Skills Training Platform
 
-MeduPal is a comprehensive admin dashboard for managing OSCE (Objective Structured Clinical Examination) clinical skills training sessions, students, cases, and hardware sensors.
+MeduPal is a comprehensive dashboard for managing OSCE (Objective Structured Clinical Examination) clinical skills training sessions, students, cases, and hardware sensors.
 
 ![MeduPal Dashboard](https://img.shields.io/badge/React-18.3-blue) ![Supabase](https://img.shields.io/badge/Backend-Supabase-green) ![Vite](https://img.shields.io/badge/Build-Vite-purple)
 
@@ -150,29 +150,6 @@ MeduPal uses Supabase Authentication. To set up user authentication:
 3. (Optional) Enable social providers (Google, GitHub, etc.)
 4. Create test users in **Authentication** → **Users**
 
-## 🚀 Deployment
-
-### Deploy to Vercel (Recommended)
-
-1. Push your code to GitHub
-2. Go to [Vercel](https://vercel.com/)
-3. Click **"New Project"** and import your repository
-4. Add environment variables:
-   - `VITE_SUPABASE_URL`
-   - `VITE_SUPABASE_ANON_KEY`
-5. Click **"Deploy"**
-
-### Deploy to Netlify
-
-1. Push your code to GitHub
-2. Go to [Netlify](https://netlify.com/)
-3. Click **"Add new site"** → **"Import an existing project"**
-4. Connect your repository
-5. Build settings:
-   - **Build command**: `npm run build`
-   - **Publish directory**: `dist`
-6. Add environment variables in **Site settings** → **Environment variables**
-7. Click **"Deploy site"**
 
 ## 📝 Available Scripts
 
@@ -242,11 +219,3 @@ This project is licensed under the MIT License.
 - Backend powered by [Supabase](https://supabase.com/)
 - UI components styled with [Tailwind CSS](https://tailwindcss.com/)
 - Icons from [Lucide React](https://lucide.dev/)
-
-## 📞 Support
-
-For support, email your-email@example.com or open an issue on GitHub.
-
----
-
-**Made with ❤️ for medical education**
