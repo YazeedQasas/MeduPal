@@ -1,28 +1,33 @@
-import { useState } from 'react';
-import { MainLayout } from './components/layout/MainLayout';
-import { StatCards } from './components/dashboard/StatCards';
-import { ActiveStations } from './components/dashboard/ActiveStations';
-import { SystemHealth } from './components/dashboard/SystemHealth';
-import { AlertsFeed } from './components/dashboard/AlertsFeed';
-import { LearningPerformance } from './components/dashboard/LearningPerformance';
-import { QuickActions } from './components/dashboard/QuickActions';
-import { Cases } from './components/dashboard/Cases';
-import { Sessions } from './components/dashboard/Sessions';
-import { Students } from './components/dashboard/Students';
-import { Hardware } from './components/dashboard/Hardware';
-import { Settings } from './components/dashboard/Settings';
-import { StationsMap } from './components/dashboard/StationsMap';
+import { useState } from "react";
+import { MainLayout } from "./components/layout/MainLayout";
+import { StatCards } from "./components/dashboard/StatCards";
+import { ActiveStations } from "./components/dashboard/ActiveStations";
+import { SystemHealth } from "./components/dashboard/SystemHealth";
+import { AlertsFeed } from "./components/dashboard/AlertsFeed";
+import { LearningPerformance } from "./components/dashboard/LearningPerformance";
+import { QuickActions } from "./components/dashboard/QuickActions";
+import { Cases } from "./components/dashboard/Cases";
+import { Sessions } from "./components/dashboard/Sessions";
+import { Students } from "./components/dashboard/Students";
+import { Hardware } from "./components/dashboard/Hardware";
+import { Settings } from "./components/dashboard/Settings";
+import { StationsMap } from "./components/dashboard/StationsMap";
+import  LandingPage  from "./components/landingPage/LandingPage";
 
 function App() {
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState("landing");
 
   const renderContent = () => {
     switch (activeTab) {
-      case 'dashboard':
+      case 'landing':
+  return <LandingPage setActiveTab={setActiveTab} />;
+
+
+      case "dashboard":
         return (
           <div className="max-w-[1600px] mx-auto space-y-6">
             <StatCards />
-            <ActiveStations onViewAll={() => setActiveTab('stations')} />
+            <ActiveStations onViewAll={() => setActiveTab("stations")} />
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[500px]">
               <div className="lg:col-span-1 h-full">
                 <SystemHealth />
@@ -41,24 +46,28 @@ function App() {
             </div>
           </div>
         );
-      case 'cases':
+      case "cases":
         return <Cases />;
-      case 'sessions':
+      case "sessions":
         return <Sessions />;
-      case 'students':
+      case "students":
         return <Students />;
-      case 'hardware':
+      case "hardware":
         return <Hardware />;
-      case 'stations':
+      case "stations":
         return <StationsMap />;
-      case 'settings':
+      case "settings":
         return <Settings />;
       default:
         return (
           <div className="flex items-center justify-center h-[500px]">
             <div className="text-center">
-              <h2 className="text-2xl font-bold text-muted-foreground capitalize">{activeTab} Page</h2>
-              <p className="text-muted-foreground mt-2">This page is under development.</p>
+              <h2 className="text-2xl font-bold text-muted-foreground capitalize">
+                {activeTab} Page
+              </h2>
+              <p className="text-muted-foreground mt-2">
+                This page is under development.
+              </p>
             </div>
           </div>
         );
@@ -69,7 +78,7 @@ function App() {
     <MainLayout activeTab={activeTab} setActiveTab={setActiveTab}>
       {renderContent()}
     </MainLayout>
-  )
+  );
 }
 
-export default App
+export default App;
