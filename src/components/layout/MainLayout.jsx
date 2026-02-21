@@ -3,7 +3,7 @@ import { Header } from './Header';
 import { useState } from 'react';
 
 export function MainLayout({ children, activeTab, setActiveTab }) {
- const hideLandingChrome = activeTab === 'landing';
+ const hideLandingChrome = activeTab === 'landing' || activeTab === 'auth';
 
   return (
     <div className="flex min-h-screen bg-background text-foreground font-sans">

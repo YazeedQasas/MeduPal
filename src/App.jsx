@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { MainLayout } from "./components/layout/MainLayout";
 import { StatCards } from "./components/dashboard/StatCards";
 import { ActiveStations } from "./components/dashboard/ActiveStations";
@@ -12,18 +12,66 @@ import { Students } from "./components/dashboard/Students";
 import { Hardware } from "./components/dashboard/Hardware";
 import { Settings } from "./components/dashboard/Settings";
 import { StationsMap } from "./components/dashboard/StationsMap";
-import  LandingPage  from "./components/landingPage/LandingPage";
+import LandingPage from "./components/landingPage/LandingPage";
+import AuthPage from "./components/auth/AuthPage";
+import { AuthProvider, useAuth } from "./context/AuthContext";
 
-function App() {
+function AppContent() {
   const [activeTab, setActiveTab] = useState("landing");
+  const { user, loading, role } = useAuth();
+
+  // When auth has finished loading, restore route:
+  // - if there's no user, send to landing
+  // - if there is a user, send admins to admin dashboard, others to cases (for now)
+  useEffect(() => {
+    if (loading) return;
+
+    if (!user && activeTab !== "landing" && activeTab !== "auth") {
+      setActiveTab("landing");
+      return;
+    }
+
+    if (user && (activeTab === "landing" || activeTab === "auth")) {
+      if (role === "admin") {
+        setActiveTab("dashboard");
+      } else {
+        setActiveTab("cases");
+      }
+    }
+  }, [loading, user, role, activeTab]);
+
+  // Don't show landing/dashboard until we know auth state (avoids flash of landing on refresh)
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <p className="text-muted-foreground">Loading...</p>
+      </div>
+    );
+  }
 
   const renderContent = () => {
     switch (activeTab) {
-      case 'landing':
-  return <LandingPage setActiveTab={setActiveTab} />;
+      case "landing":
+        return <LandingPage setActiveTab={setActiveTab} />;
 
+      case "auth":
+        return <AuthPage setActiveTab={setActiveTab} />;
 
       case "dashboard":
+        if (role !== "admin") {
+          return (
+            <div className="flex items-center justify-center h-[500px]">
+              <div className="text-center">
+                <h2 className="text-2xl font-bold text-muted-foreground">
+                  Admin area
+                </h2>
+                <p className="text-muted-foreground mt-2">
+                  You don't have permission to view the admin dashboard.
+                </p>
+              </div>
+            </div>
+          );
+        }
         return (
           <div className="max-w-[1600px] mx-auto space-y-6">
             <StatCards />
@@ -58,6 +106,29 @@ function App() {
         return <StationsMap />;
       case "settings":
         return <Settings />;
+      case "users":
+        if (role !== "admin") {
+          return (
+            <div className="flex items-center justify-center h-[500px]">
+              <div className="text-center">
+                <h2 className="text-2xl font-bold text-muted-foreground">
+                  Admin area
+                </h2>
+                <p className="text-muted-foreground mt-2">
+                  You don't have permission to manage users.
+                </p>
+              </div>
+            </div>
+          );
+        }
+        return (
+          <div className="max-w-[1200px] mx-auto space-y-4">
+            <h1 className="text-2xl font-bold">Users</h1>
+            <p className="text-muted-foreground">
+              Admin user management (create users, assign roles) will go here.
+            </p>
+          </div>
+        );
       default:
         return (
           <div className="flex items-center justify-center h-[500px]">
@@ -78,6 +149,14 @@ function App() {
     <MainLayout activeTab={activeTab} setActiveTab={setActiveTab}>
       {renderContent()}
     </MainLayout>
+  );
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }
 

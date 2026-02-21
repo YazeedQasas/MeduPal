@@ -6,7 +6,7 @@ create table profiles (
   id uuid references auth.users not null primary key,
   email text,
   full_name text,
-  role text check (role in ('admin', 'faculty', 'technician')),
+  role text check (role in ('admin', 'faculty', 'technician', 'student')),
   avatar_url text,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
