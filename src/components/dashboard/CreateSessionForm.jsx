@@ -1,17 +1,21 @@
 import { useState, useEffect } from 'react';
-import { X, Save, AlertCircle } from 'lucide-react';
+import { X, Save, AlertCircle, Play } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../context/AuthContext';
 
-export function CreateSessionForm({ onClose, onCreated, advisedStudentIds = null, defaultStudentId = null }) {
+export function CreateSessionForm({ onClose, onCreated, advisedStudentIds = null, defaultStudentId = null, sessionMode = null }) {
+    const { user, role } = useAuth();
+    const isStudentTraining = sessionMode === 'training' && role === 'student';
+
     const [loading, setLoading] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState(null);
     const [formData, setFormData] = useState({
         case_id: '',
-        student_id: '',
+        student_id: isStudentTraining ? user?.id : '',
         station_id: '',
-        status: 'Scheduled',
-        start_time: new Date().toISOString().slice(0, 16) // Default to now
+        status: isStudentTraining ? 'In Progress' : 'Scheduled',
+        start_time: new Date().toISOString().slice(0, 16)
     });
     const [options, setOptions] = useState({
         cases: [],
@@ -37,9 +41,11 @@ export function CreateSessionForm({ onClose, onCreated, advisedStudentIds = null
                     stations: stations || []
                 });
 
-                const defaultStudent = defaultStudentId && studentProfiles.some((s) => s.id === defaultStudentId)
-                    ? defaultStudentId
-                    : studentProfiles?.[0]?.id || '';
+                const defaultStudent = isStudentTraining
+                    ? user?.id
+                    : (defaultStudentId && studentProfiles.some((s) => s.id === defaultStudentId)
+                        ? defaultStudentId
+                        : studentProfiles?.[0]?.id || '');
 
                 setFormData(prev => ({
                     ...prev,
@@ -55,7 +61,7 @@ export function CreateSessionForm({ onClose, onCreated, advisedStudentIds = null
             }
         };
         fetchOptions();
-    }, [advisedStudentIds, defaultStudentId]);
+    }, [advisedStudentIds, defaultStudentId, isStudentTraining, user?.id]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -108,9 +114,13 @@ export function CreateSessionForm({ onClose, onCreated, advisedStudentIds = null
                     <X size={20} />
                 </button>
 
-                <h2 className="text-xl font-bold text-foreground mb-1">Schedule New Session</h2>
+                <h2 className="text-xl font-bold text-foreground mb-1">
+                    {isStudentTraining ? 'Start Training Session' : 'Schedule New Session'}
+                </h2>
                 <p className="text-sm text-muted-foreground mb-6">
-                    {advisedStudentIds ? 'Assign one of your advisees to a clinical case and station.' : 'Assign a student to a clinical case and station.'}
+                    {isStudentTraining
+                        ? 'Choose a case and station to begin your practice session.'
+                        : (advisedStudentIds ? 'Assign one of your advisees to a clinical case and station.' : 'Assign a student to a clinical case and station.')}
                 </p>
 
                 {error && (
@@ -135,23 +145,25 @@ export function CreateSessionForm({ onClose, onCreated, advisedStudentIds = null
                         </select>
                     </div>
 
-                    <div className="space-y-2">
-                        <label className="text-sm font-medium text-foreground">Select Student</label>
-                        {options.students.length === 0 && advisedStudentIds?.length > 0 ? (
-                            <p className="text-sm text-muted-foreground py-2">You have no advisees yet. Advise students from the Students tab first.</p>
-                        ) : (
-                            <select
-                                required
-                                className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/50 outline-none"
-                                value={formData.student_id}
-                                onChange={e => setFormData({ ...formData, student_id: e.target.value })}
-                            >
-                                {options.students.map(s => (
-                                    <option key={s.id} value={s.id}>{s.full_name || 'Unnamed'} {s.email ? `(${s.email})` : ''}</option>
-                                ))}
-                            </select>
-                        )}
-                    </div>
+                    {!isStudentTraining && (
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-foreground">Select Student</label>
+                            {options.students.length === 0 && advisedStudentIds?.length > 0 ? (
+                                <p className="text-sm text-muted-foreground py-2">You have no advisees yet. Advise students from the Students tab first.</p>
+                            ) : (
+                                <select
+                                    required
+                                    className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/50 outline-none"
+                                    value={formData.student_id}
+                                    onChange={e => setFormData({ ...formData, student_id: e.target.value })}
+                                >
+                                    {options.students.map(s => (
+                                        <option key={s.id} value={s.id}>{s.full_name || 'Unnamed'} {s.email ? `(${s.email})` : ''}</option>
+                                    ))}
+                                </select>
+                            )}
+                        </div>
+                    )}
 
                     <div className="space-y-2">
                         <label className="text-sm font-medium text-foreground">Select Station</label>
@@ -167,28 +179,30 @@ export function CreateSessionForm({ onClose, onCreated, advisedStudentIds = null
                         </select>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium text-foreground">Initial Status</label>
-                            <select
-                                className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/50 outline-none"
-                                value={formData.status}
-                                onChange={e => setFormData({ ...formData, status: e.target.value })}
-                            >
-                                <option value="Scheduled">Scheduled</option>
-                                <option value="In Progress">Start Immediately (In Progress)</option>
-                            </select>
+                    {!isStudentTraining && (
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-foreground">Initial Status</label>
+                                <select
+                                    className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/50 outline-none"
+                                    value={formData.status}
+                                    onChange={e => setFormData({ ...formData, status: e.target.value })}
+                                >
+                                    <option value="Scheduled">Scheduled</option>
+                                    <option value="In Progress">Start Immediately (In Progress)</option>
+                                </select>
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-foreground">Start Time</label>
+                                <input
+                                    type="datetime-local"
+                                    className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/50 outline-none"
+                                    value={formData.start_time}
+                                    onChange={e => setFormData({ ...formData, start_time: e.target.value })}
+                                />
+                            </div>
                         </div>
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium text-foreground">Start Time</label>
-                            <input
-                                type="datetime-local"
-                                className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/50 outline-none"
-                                value={formData.start_time}
-                                onChange={e => setFormData({ ...formData, start_time: e.target.value })}
-                            />
-                        </div>
-                    </div>
+                    )}
 
                     <div className="pt-4 flex justify-end gap-3">
                         <button
@@ -200,13 +214,13 @@ export function CreateSessionForm({ onClose, onCreated, advisedStudentIds = null
                         </button>
                         <button
                             type="submit"
-                            disabled={submitting || (advisedStudentIds?.length > 0 && options.students.length === 0)}
+                            disabled={submitting || (!isStudentTraining && advisedStudentIds?.length > 0 && options.students.length === 0)}
                             className="bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors flex items-center gap-2 disabled:opacity-50"
                         >
-                            {submitting ? 'Scheduling...' : (
+                            {submitting ? (isStudentTraining ? 'Starting...' : 'Scheduling...') : (
                                 <>
-                                    <Save size={16} />
-                                    Schedule Session
+                                    {isStudentTraining ? <Play size={16} /> : <Save size={16} />}
+                                    {isStudentTraining ? 'Start Training' : 'Schedule Session'}
                                 </>
                             )}
                         </button>

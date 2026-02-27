@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+
 import {
     Search,
     Filter,
@@ -18,6 +19,9 @@ import { cn } from '../../lib/utils';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { CreateSessionForm } from './CreateSessionForm';
+import SessionTypeSelect from './SessionTypeSelect';
+import AssignedExamStart from './AssignedExamStart';
+import SessionWorkspace from './SessionWorkspace';
 
 function Sessions() {
     const { user, role } = useAuth();
@@ -28,6 +32,10 @@ function Sessions() {
     const [statusFilter, setStatusFilter] = useState('All');
     const [sessions, setSessions] = useState([]);
     const [isCreating, setIsCreating] = useState(false);
+    const [showTypeSelect, setShowTypeSelect] = useState(false);
+    const [selectedMode, setSelectedMode] = useState(null);
+    const [showAssignedExam, setShowAssignedExam] = useState(false);
+    const [activeSession, setActiveSession] = useState(null);
 
     const fetchMyAdvisees = useCallback(async () => {
         if (!isInstructor || !user?.id) return;
@@ -100,6 +108,45 @@ function Sessions() {
         // TODO: Navigate to session runner
     };
 
+    const handleStartSession = () => {
+        if (isInstructor) {
+            setIsCreating(true);
+        } else {
+            setShowTypeSelect(true);
+        }
+    };
+
+    const handleTypeSelect = (mode) => {
+        setSelectedMode(mode);
+        setShowTypeSelect(false);
+        if (mode === 'training') {
+            // TODO: Later replace with real session creation via CreateSessionForm
+            // For now, directly start a local training session
+            setActiveSession({
+                id: 'local-training-1',
+                type: 'training',
+                caseName: 'Training Case (placeholder)',
+                stationName: 'Training Station (placeholder)'
+            });
+        } else if (mode === 'exam') {
+            setShowAssignedExam(true);
+        }
+    };
+
+    const handleExamStart = (examInfo) => {
+        setShowAssignedExam(false);
+        setActiveSession({
+            id: 'local-exam-1',
+            type: 'exam',
+            caseName: examInfo.caseName,
+            stationName: examInfo.stationName
+        });
+    };
+
+    const handleExitSession = () => {
+        setActiveSession(null);
+    };
+
     const filteredSessions = sessions.filter(session => {
         const matchesSearch = session.student.toLowerCase().includes(searchTerm.toLowerCase()) ||
             session.caseTitle.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -108,13 +155,37 @@ function Sessions() {
         return matchesSearch && matchesStatus;
     });
 
+    if (activeSession) {
+        return (
+            <SessionWorkspace
+                session={activeSession}
+                onExit={handleExitSession}
+            />
+        );
+    }
+
     return (
         <div className="space-y-6 relative">
+            {showTypeSelect && (
+                <SessionTypeSelect
+                    onClose={() => setShowTypeSelect(false)}
+                    onSelect={handleTypeSelect}
+                />
+            )}
+
             {isCreating && (
                 <CreateSessionForm
                     onClose={() => setIsCreating(false)}
                     onCreated={() => { fetchSessions(); fetchMyAdvisees(); }}
                     advisedStudentIds={isInstructor ? advisedStudentIds : null}
+                    sessionMode={selectedMode}
+                />
+            )}
+
+            {showAssignedExam && (
+                <AssignedExamStart
+                    onBack={() => setShowAssignedExam(false)}
+                    onStart={handleExamStart}
                 />
             )}
 
@@ -125,7 +196,7 @@ function Sessions() {
                     <p className="text-muted-foreground mt-1">Monitor live exams and review historical performance data.</p>
                 </div>
                 <button
-                    onClick={() => setIsCreating(true)}
+                    onClick={handleStartSession}
                     className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg font-medium hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20"
                 >
                     <Plus size={18} />
