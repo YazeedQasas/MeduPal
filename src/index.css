@@ -1,32 +1,33 @@
+/* Aligned with landing: pure black, near-black cards, subtle borders, teal accents */
 :root {
-  --background: 224 71% 4%;
-  --foreground: 213 31% 91%;
+  --background: 0 0% 0%;
+  --foreground: 0 0% 91%;
 
-  --card: 224 71% 4%;
-  --card-foreground: 213 31% 91%;
+  --card: 0 0% 3%;
+  --card-foreground: 0 0% 91%;
 
-  --popover: 224 71% 4%;
-  --popover-foreground: 213 31% 91%;
+  --popover: 0 0% 3%;
+  --popover-foreground: 0 0% 91%;
 
-  --primary: 210 40% 98%;
-  --primary-foreground: 222.2 47.4% 11.2%;
+  --primary: 160 25% 53%;
+  --primary-foreground: 0 0% 100%;
 
-  --secondary: 217.2 32.6% 17.5%;
-  --secondary-foreground: 210 40% 98%;
+  --secondary: 0 0% 12%;
+  --secondary-foreground: 0 0% 91%;
 
-  --muted: 217.2 32.6% 17.5%;
-  --muted-foreground: 215 20.2% 65.1%;
+  --muted: 0 0% 12%;
+  --muted-foreground: 0 0% 55%;
 
-  --accent: 217.2 32.6% 17.5%;
-  --accent-foreground: 210 40% 98%;
+  --accent: 0 0% 12%;
+  --accent-foreground: 0 0% 91%;
 
   --destructive: 0 62.8% 30.6%;
-  --destructive-foreground: 210 40% 98%;
+  --destructive-foreground: 0 0% 100%;
 
-  --border: 217.2 32.6% 17.5%;
-  --input: 217.2 32.6% 17.5%;
-  --ring: 212.7 26.8% 83.9%;
-  --radius: 0.5rem;
+  --border: 0 0% 100% / 0.1;
+  --input: 0 0% 100% / 0.08;
+  --ring: 160 25% 53% / 0.4;
+  --radius: 0.75rem;
 }
 
 * {
@@ -34,6 +35,91 @@
 }
 
 body {
+  font-family: 'Poppins', system-ui, sans-serif;
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
+}
+
+/* Text selection — theme teal instead of default blue */
+::selection {
+  background: rgba(100, 170, 145, 0.35);
+  color: #fff;
+}
+::-moz-selection {
+  background: rgba(100, 170, 145, 0.35);
+  color: #fff;
+}
+
+/* Sign-in / Sign-up page animations */
+@keyframes fadeSlideIn {
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+}
+@keyframes slideRightIn {
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateX(0);
+  }
+}
+@keyframes testimonialIn {
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-element {
+  opacity: 0;
+  filter: blur(4px);
+  transform: translateY(10px);
+  animation: fadeSlideIn 0.6s ease-out forwards;
+}
+.animate-slide-right {
+  opacity: 0;
+  filter: blur(4px);
+  transform: translateX(20px);
+  animation: slideRightIn 0.8s ease-out forwards;
+}
+.animate-testimonial {
+  opacity: 0;
+  filter: blur(4px);
+  transform: translateY(10px) scale(0.98);
+  animation: testimonialIn 0.6s ease-out forwards;
+}
+
+.animate-delay-100 { animation-delay: 100ms; }
+.animate-delay-200 { animation-delay: 200ms; }
+.animate-delay-300 { animation-delay: 300ms; }
+.animate-delay-350 { animation-delay: 350ms; }
+.animate-delay-400 { animation-delay: 400ms; }
+.animate-delay-450 { animation-delay: 450ms; }
+.animate-delay-500 { animation-delay: 500ms; }
+.animate-delay-600 { animation-delay: 600ms; }
+.animate-delay-700 { animation-delay: 700ms; }
+.animate-delay-800 { animation-delay: 800ms; }
+.animate-delay-900 { animation-delay: 900ms; }
+.animate-delay-1000 { animation-delay: 1000ms; }
+.animate-delay-1200 { animation-delay: 1200ms; }
+.animate-delay-1400 { animation-delay: 1400ms; }
+
+/* Three-dot loading bounce */
+@keyframes loading-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.6;
+  }
+  30% {
+    transform: translateY(-6px);
+    opacity: 1;
+  }
+}
+.animate-loading-bounce {
+  animation: loading-bounce 0.9s ease-in-out infinite;
 }

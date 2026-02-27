@@ -23,7 +23,7 @@ export function ActiveStations({ onViewAll }) {
                     station_id,
                     start_time,
                     case:cases(title),
-                    student:students(full_name)
+                    student:profiles!student_id(full_name)
                 `)
                 .eq('status', 'In Progress');
 
@@ -86,7 +86,7 @@ export function ActiveStations({ onViewAll }) {
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 {stations.map((station) => (
-                    <div key={station.id} className="bg-card rounded-xl border border-border/50 shadow-sm p-4 relative group hover:border-primary/50 transition-colors">
+                    <div key={station.id} className="bg-card rounded-2xl border border-border shadow-[0_0_0_1px_rgba(0,0,0,0.4)] p-4 relative group hover:border-primary/30 transition-colors">
 
                         <div className="flex justify-between items-start mb-3">
                             <div className="flex items-center gap-2">
@@ -121,7 +121,7 @@ export function ActiveStations({ onViewAll }) {
                         </div>
 
                         {/* Hover Action Overlay */}
-                        <div className="absolute inset-0 bg-background/80 backdrop-blur-[1px] opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 rounded-xl">
+                        <div className="absolute inset-0 bg-background/80 backdrop-blur-[1px] opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 rounded-2xl">
                             <button className="p-2 bg-emerald-500 text-white rounded-full hover:scale-110 transition-transform shadow-lg">
                                 <Play size={20} fill="currentColor" />
                             </button>

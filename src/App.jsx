@@ -7,18 +7,27 @@ import { AlertsFeed } from "./components/dashboard/AlertsFeed";
 import { LearningPerformance } from "./components/dashboard/LearningPerformance";
 import { QuickActions } from "./components/dashboard/QuickActions";
 import { Cases } from "./components/dashboard/Cases";
-import { Sessions } from "./components/dashboard/Sessions";
+import Sessions from "./components/dashboard/Sessions";
 import { Students } from "./components/dashboard/Students";
 import { Hardware } from "./components/dashboard/Hardware";
 import { Settings } from "./components/dashboard/Settings";
 import { StationsMap } from "./components/dashboard/StationsMap";
+import { InstructorDashboard } from "./components/dashboard/InstructorDashboard";
+import { ProfileSettings } from "./components/dashboard/ProfileSettings";
 import LandingPage from "./components/landingPage/LandingPage";
 import AuthPage from "./components/auth/AuthPage";
+import RoleSelectPage from "./components/auth/RoleSelectPage";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { LoadingScreen } from "./components/ui/LoadingScreen";
 
 function AppContent() {
   const [activeTab, setActiveTab] = useState("landing");
   const { user, loading, role } = useAuth();
+
+  // Test loading screen: open app with ?loading=1 in the URL (e.g. http://localhost:5173/?loading=1)
+  if (new URLSearchParams(typeof window !== "undefined" ? window.location.search : "").get("loading") === "1") {
+    return <LoadingScreen />;
+  }
 
   // When auth has finished loading, restore route:
   // - if there's no user, send to landing
@@ -32,7 +41,7 @@ function AppContent() {
     }
 
     if (user && (activeTab === "landing" || activeTab === "auth")) {
-      if (role === "admin") {
+      if (role === "admin" || role === "faculty" || role === "instructor") {
         setActiveTab("dashboard");
       } else {
         setActiveTab("cases");
@@ -42,11 +51,7 @@ function AppContent() {
 
   // Don't show landing/dashboard until we know auth state (avoids flash of landing on refresh)
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <p className="text-muted-foreground">Loading...</p>
-      </div>
-    );
+    return <LoadingScreen />;
   }
 
   const renderContent = () => {
@@ -54,10 +59,19 @@ function AppContent() {
       case "landing":
         return <LandingPage setActiveTab={setActiveTab} />;
 
+      case "onboarding":
+        return <RoleSelectPage setActiveTab={setActiveTab} />;
+
       case "auth":
         return <AuthPage setActiveTab={setActiveTab} />;
 
+      case "profile":
+        return <ProfileSettings setActiveTab={setActiveTab} />;
+
       case "dashboard":
+        if (role === "faculty" || role === "instructor") {
+          return <InstructorDashboard setActiveTab={setActiveTab} />;
+        }
         if (role !== "admin") {
           return (
             <div className="flex items-center justify-center h-[500px]">
@@ -88,7 +102,13 @@ function AppContent() {
                   <AlertsFeed />
                 </div>
                 <div className="shrink-0">
-                  <QuickActions />
+                  <QuickActions
+                    onStartSession={() => setActiveTab("sessions")}
+                    onManageStudents={() => setActiveTab("students")}
+                    onViewAnalytics={() => setActiveTab("cases")}
+                    onRunDiagnostics={() => setActiveTab("hardware")}
+                    onOpenSettings={() => setActiveTab("settings")}
+                  />
                 </div>
               </div>
             </div>

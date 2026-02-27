@@ -36,8 +36,8 @@ export function AlertsFeed() {
     }, []);
 
     return (
-        <div className="bg-card rounded-xl border border-border/50 shadow-sm overflow-hidden flex flex-col h-full">
-            <div className="p-4 border-b border-border/50 flex justify-between items-center">
+        <div className="bg-card rounded-2xl border border-border shadow-[0_0_0_1px_rgba(0,0,0,0.4)] overflow-hidden flex flex-col h-full">
+            <div className="p-4 border-b border-border flex justify-between items-center">
                 <h3 className="font-semibold text-foreground flex items-center gap-2">
                     <AlertCircle className="text-amber-500" size={18} />
                     Live Alerts

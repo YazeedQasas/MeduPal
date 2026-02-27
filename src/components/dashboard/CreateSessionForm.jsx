@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { X, Save, AlertCircle } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 
-export function CreateSessionForm({ onClose, onCreated }) {
+export function CreateSessionForm({ onClose, onCreated, advisedStudentIds = null, defaultStudentId = null }) {
     const [loading, setLoading] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState(null);
@@ -24,20 +24,27 @@ export function CreateSessionForm({ onClose, onCreated }) {
             setLoading(true);
             try {
                 const { data: cases } = await supabase.from('cases').select('id, title');
-                const { data: students } = await supabase.from('students').select('id, full_name, student_identifier');
+                const { data: allStudents } = await supabase.from('profiles').select('id, full_name, email').eq('role', 'student');
+                let studentProfiles = allStudents || [];
+                if (advisedStudentIds && advisedStudentIds.length > 0) {
+                    studentProfiles = studentProfiles.filter((s) => advisedStudentIds.includes(s.id));
+                }
                 const { data: stations } = await supabase.from('stations').select('id, name, room_number');
 
                 setOptions({
                     cases: cases || [],
-                    students: students || [],
+                    students: studentProfiles,
                     stations: stations || []
                 });
 
-                // Pre-select first options if available
+                const defaultStudent = defaultStudentId && studentProfiles.some((s) => s.id === defaultStudentId)
+                    ? defaultStudentId
+                    : studentProfiles?.[0]?.id || '';
+
                 setFormData(prev => ({
                     ...prev,
                     case_id: cases?.[0]?.id || '',
-                    student_id: students?.[0]?.id || '',
+                    student_id: defaultStudent,
                     station_id: stations?.[0]?.id || ''
                 }));
             } catch (err) {
@@ -48,7 +55,7 @@ export function CreateSessionForm({ onClose, onCreated }) {
             }
         };
         fetchOptions();
-    }, []);
+    }, [advisedStudentIds, defaultStudentId]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -102,7 +109,9 @@ export function CreateSessionForm({ onClose, onCreated }) {
                 </button>
 
                 <h2 className="text-xl font-bold text-foreground mb-1">Schedule New Session</h2>
-                <p className="text-sm text-muted-foreground mb-6">Assign a student to a clinical case and station.</p>
+                <p className="text-sm text-muted-foreground mb-6">
+                    {advisedStudentIds ? 'Assign one of your advisees to a clinical case and station.' : 'Assign a student to a clinical case and station.'}
+                </p>
 
                 {error && (
                     <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-lg mb-4 flex items-center gap-2">
@@ -128,16 +137,20 @@ export function CreateSessionForm({ onClose, onCreated }) {
 
                     <div className="space-y-2">
                         <label className="text-sm font-medium text-foreground">Select Student</label>
-                        <select
-                            required
-                            className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/50 outline-none"
-                            value={formData.student_id}
-                            onChange={e => setFormData({ ...formData, student_id: e.target.value })}
-                        >
-                            {options.students.map(s => (
-                                <option key={s.id} value={s.id}>{s.full_name} ({s.student_identifier})</option>
-                            ))}
-                        </select>
+                        {options.students.length === 0 && advisedStudentIds?.length > 0 ? (
+                            <p className="text-sm text-muted-foreground py-2">You have no advisees yet. Advise students from the Students tab first.</p>
+                        ) : (
+                            <select
+                                required
+                                className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/50 outline-none"
+                                value={formData.student_id}
+                                onChange={e => setFormData({ ...formData, student_id: e.target.value })}
+                            >
+                                {options.students.map(s => (
+                                    <option key={s.id} value={s.id}>{s.full_name || 'Unnamed'} {s.email ? `(${s.email})` : ''}</option>
+                                ))}
+                            </select>
+                        )}
                     </div>
 
                     <div className="space-y-2">
@@ -187,7 +200,7 @@ export function CreateSessionForm({ onClose, onCreated }) {
                         </button>
                         <button
                             type="submit"
-                            disabled={submitting}
+                            disabled={submitting || (advisedStudentIds?.length > 0 && options.students.length === 0)}
                             className="bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors flex items-center gap-2 disabled:opacity-50"
                         >
                             {submitting ? 'Scheduling...' : (

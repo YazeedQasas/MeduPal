@@ -1,10 +1,14 @@
-import { Bell, Search, ShieldCheck } from 'lucide-react';
+import { Bell, Search } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 
 export function Header() {
+    const { user, profile } = useAuth();
+    const displayName = profile?.full_name || user?.email?.split('@')[0] || 'User';
+
     return (
         <header className="h-16 border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10 flex items-center justify-between px-6">
             <div className="flex items-center gap-4">
-                <h2 className="text-lg font-semibold text-foreground">Welcome back, AQU</h2>
+                <h2 className="text-lg font-semibold text-foreground">Welcome back, {displayName}</h2>
                 <div className="h-4 w-px bg-border" />
                 <div className="flex items-center gap-2 text-xs font-medium px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
                     <span className="relative flex h-2 w-2">

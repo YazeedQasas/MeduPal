@@ -26,7 +26,7 @@ export function StationsMap() {
                 station_id,
                 start_time,
                 case:cases(title),
-                student:students(full_name)
+                student:profiles!student_id(full_name)
             `)
             .eq('status', 'In Progress');
 

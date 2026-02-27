@@ -129,6 +129,21 @@ export function AuthProvider({ children }) {
     return { data, error: null };
   }, [fetchProfile]);
 
+  const updateRole = useCallback(async (newRole) => {
+    if (!user) return { error: new Error('Not authenticated') };
+    const { error } = await supabase
+      .from('profiles')
+      .update({ role: newRole })
+      .eq('id', user.id);
+    if (error) {
+      console.error('Error updating role', error);
+      return { error };
+    }
+    // Refresh local profile
+    await fetchProfile(user.id);
+    return { error: null };
+  }, [user, fetchProfile]);
+
   const signOut = useCallback(async () => {
     setAuthError(null);
     const { error } = await supabase.auth.signOut();
@@ -150,6 +165,7 @@ export function AuthProvider({ children }) {
     authError,
     signIn,
     signUpStudent,
+    updateRole,
     signOut,
   };
 

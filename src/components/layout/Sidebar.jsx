@@ -1,74 +1,175 @@
-import { LayoutDashboard, FileText, Users as UsersIcon, HardDrive, Settings, Activity, LogOut, GraduationCap, UserCog } from 'lucide-react';
-import { cn } from '../../lib/utils';
+import { useState } from 'react';
+import { LayoutDashboard, FileText, HardDrive, Settings, Activity, LogOut, GraduationCap, UserCog } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
+import {
+  Sidebar as SidebarUI,
+  SidebarBody,
+  SidebarLink,
+  useSidebar,
+} from '../ui/sidebar';
+import { cn } from '../../lib/utils';
 
 const navItems = [
-    { icon: LayoutDashboard, label: 'Dashboard', id: 'dashboard', adminOnly: true },
-    { icon: FileText, label: 'Cases', id: 'cases' },
-    { icon: Activity, label: 'Sessions', id: 'sessions' },
-    { icon: GraduationCap, label: 'Students', id: 'students' },
-    { icon: HardDrive, label: 'Hardware & Sensors', id: 'hardware' },
-    { icon: Settings, label: 'Settings', id: 'settings', adminOnly: true },
-    { icon: UserCog, label: 'Users', id: 'users', adminOnly: true },
+  { icon: LayoutDashboard, label: 'Dashboard', id: 'dashboard', adminOnly: true },
+  { icon: FileText, label: 'Cases', id: 'cases' },
+  { icon: Activity, label: 'Sessions', id: 'sessions' },
+  { icon: GraduationCap, label: 'Students', id: 'students' },
+  { icon: HardDrive, label: 'Hardware & Sensors', id: 'hardware' },
+  { icon: Settings, label: 'Settings', id: 'settings', adminOnly: true },
+  { icon: UserCog, label: 'Users', id: 'users', adminOnly: true },
 ];
 
+function Logo() {
+  return (
+    <a
+      href="#"
+      onClick={(e) => e.preventDefault()}
+      className="font-normal flex space-x-2 items-center text-sm text-foreground py-1 relative z-20"
+    >
+      <div className="h-5 w-6 bg-primary rounded-br-lg rounded-tr-sm rounded-tl-lg rounded-bl-sm flex-shrink-0 flex items-center justify-center">
+        <Activity className="h-3 w-3 text-primary-foreground" />
+      </div>
+      <motion.span
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="font-medium text-foreground whitespace-pre"
+      >
+        MeduPal
+      </motion.span>
+    </a>
+  );
+}
+
+function LogoIcon() {
+  return (
+    <a
+      href="#"
+      onClick={(e) => e.preventDefault()}
+      className="font-normal flex space-x-2 items-center text-sm text-foreground py-1 relative z-20"
+    >
+      <div className="h-5 w-6 bg-primary rounded-br-lg rounded-tr-sm rounded-tl-lg rounded-bl-sm flex-shrink-0 flex items-center justify-center">
+        <Activity className="h-3 w-3 text-primary-foreground" />
+      </div>
+    </a>
+  );
+}
+
+function SidebarLogo() {
+  const { open } = useSidebar();
+  // Logo icon is w-6 (24px). Inner collapsed width = 36px.
+  // To center: (36 - 24) / 2 = 6px extra paddingLeft.
+  // When open: 0px (logo has its own flex layout).
+  return (
+    <motion.div
+      animate={{ paddingLeft: open ? 0 : 6 }}
+      transition={{ duration: 0.3, ease: 'easeInOut' }}
+    >
+      {open ? <Logo /> : <LogoIcon />}
+    </motion.div>
+  );
+}
+
+// Match sidebar.jsx: same transition and same pattern as SidebarLink (paddingLeft + display/opacity only).
+const SIDEBAR_TRANSITION = { duration: 0.3, ease: 'easeInOut' };
+
+function SidebarUserBlock({ displayName, roleLabel, roleBadgeClass, onClick }) {
+  const { open, animate } = useSidebar();
+  // Collapsed width 60px, px-3 → inner 36px. Avatar w-8 = 32px → center padding 0. Open: 12px like nav items.
+  const pl = animate ? (open ? 12 : 0) : 12;
+  return (
+    <motion.button
+      type="button"
+      onClick={onClick}
+      animate={{ paddingLeft: pl }}
+      transition={SIDEBAR_TRANSITION}
+      className="flex items-center gap-1.5 py-2 rounded-md w-full text-left text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors cursor-pointer"
+    >
+      <span className="flex-shrink-0 flex items-center justify-center w-8 h-8">
+        <div className="h-8 w-8 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-medium">
+          {displayName.slice(0, 2).toUpperCase()}
+        </div>
+      </span>
+      <motion.div
+        animate={{
+          display: animate ? (open ? 'flex' : 'none') : 'flex',
+          opacity: animate ? (open ? 1 : 0) : 1,
+        }}
+        transition={SIDEBAR_TRANSITION}
+        className="flex flex-col gap-0.5 min-w-0 overflow-hidden"
+      >
+        <span className="text-xs font-medium text-foreground truncate">{displayName}</span>
+        <span
+          className={cn(
+            'inline-flex w-fit items-center rounded border px-1 py-px text-[8px] font-semibold uppercase tracking-wider',
+            roleBadgeClass
+          )}
+        >
+          {roleLabel}
+        </span>
+      </motion.div>
+    </motion.button>
+  );
+}
+
 export function Sidebar({ activeTab, setActiveTab }) {
-    const { user, profile, role, signOut } = useAuth();
-    const displayName = profile?.full_name || user?.email?.split('@')[0] || 'User';
-    const displayEmail = user?.email || profile?.email || '';
+  const [open, setOpen] = useState(false);
+  const { user, profile, role, signOut } = useAuth();
+  const displayName = profile?.full_name || user?.email?.split('@')[0] || 'User';
 
-    const handleSignOut = async () => {
-        await signOut();
-        setActiveTab('landing');
-    };
+  const handleSignOut = async () => {
+    await signOut();
+    setActiveTab('landing');
+  };
 
-    return (
-        <aside className="w-64 bg-card border-r border-border flex flex-col h-screen sticky top-0">
-            <div className="p-6 flex items-center gap-3 border-b border-border/50">
-                <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center text-primary">
-                    <Activity size={20} />
-                </div>
-                <span className="text-xl font-bold tracking-tight text-foreground">MeduPal</span>
-            </div>
+  const filteredNavItems = navItems.filter((item) => {
+    if (item.id === 'dashboard') return role === 'admin' || role === 'faculty' || role === 'instructor';
+    return !item.adminOnly || role === 'admin';
+  });
 
-            <nav className="flex-1 p-4 space-y-1">
-                {navItems
-                    .filter((item) => !item.adminOnly || role === 'admin')
-                    .map((item) => (
-                    <button
-                        key={item.id}
-                        onClick={() => setActiveTab(item.id)}
-                        className={cn(
-                            "w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200",
-                            activeTab === item.id
-                                ? "bg-primary/10 text-primary shadow-sm"
-                                : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                        )}
-                    >
-                        <item.icon size={18} />
-                        {item.label}
-                    </button>
-                ))}
-            </nav>
+  const roleLabel = role === 'admin' ? 'Admin' : role === 'faculty' ? 'Instructor' : role === 'technician' ? 'Technician' : role === 'student' ? 'Student' : role || 'User';
+  const roleBadgeClass = {
+    admin: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30',
+    faculty: 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30',
+    instructor: 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30',
+    technician: 'bg-slate-500/15 text-slate-600 dark:text-slate-400 border-slate-500/30',
+    student: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',
+  }[role] || 'bg-muted text-muted-foreground border-border';
 
-            <div className="p-4 border-t border-border/50 space-y-2">
-                <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/30">
-                    <div className="w-8 h-8 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-xs font-bold shrink-0">
-                        {displayName.slice(0, 2).toUpperCase()}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-foreground truncate">{displayName}</p>
-                        <p className="text-xs text-muted-foreground truncate">{displayEmail}</p>
-                    </div>
-                </div>
-                <button
-                    onClick={handleSignOut}
-                    className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground transition"
-                >
-                    <LogOut size={16} />
-                    Log out
-                </button>
-            </div>
-        </aside>
-    );
+  return (
+    <SidebarUI open={open} setOpen={setOpen}>
+      <SidebarBody className="gap-8">
+        <div className="flex flex-col flex-1 overflow-y-auto overflow-x-hidden">
+          <SidebarLogo />
+          <nav className="mt-8 flex flex-col gap-2">
+            {filteredNavItems.map((item) => (
+              <SidebarLink
+                key={item.id}
+                link={{
+                  label: item.label,
+                  icon: (
+                    <item.icon className="text-current h-5 w-5 flex-shrink-0" />
+                  ),
+                }}
+                isActive={activeTab === item.id}
+                onClick={() => setActiveTab(item.id)}
+              />
+            ))}
+          </nav>
+        </div>
+        <div className="flex flex-col gap-2 pt-4 mt-auto pb-2">
+          <SidebarUserBlock displayName={displayName} roleLabel={roleLabel} roleBadgeClass={roleBadgeClass} onClick={() => setActiveTab('profile')} />
+          <SidebarLink
+            link={{
+              label: 'Log out',
+              icon: (
+                <LogOut className="text-current h-5 w-5 flex-shrink-0" />
+              ),
+            }}
+            onClick={handleSignOut}
+          />
+        </div>
+      </SidebarBody>
+    </SidebarUI>
+  );
 }

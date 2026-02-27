@@ -31,7 +31,7 @@ export function StatCards() {
                     station:stations(name),
                     case:cases(title),
                     start_time,
-                    student:students(full_name)
+                    student:profiles!student_id(full_name)
                 `)
                 .eq('status', 'In Progress');
 
@@ -128,7 +128,7 @@ export function StatCards() {
     return (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
             {/* Topic Session Status Card */}
-            <div className="bg-card p-5 rounded-xl border border-border/50 shadow-sm relative overflow-hidden group">
+            <div className="bg-card p-5 rounded-2xl border border-border shadow-[0_0_0_1px_rgba(0,0,0,0.4)] relative overflow-hidden group">
                 <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
                     <Activity size={80} />
                 </div>
@@ -149,7 +149,7 @@ export function StatCards() {
                         </div>
                     ))}
                 </div>
-                <div className="mt-4 pt-3 border-t border-border/50 flex gap-2">
+                <div className="mt-4 pt-3 border-t border-border flex gap-2">
                     <span className="text-emerald-500 text-xs font-medium flex items-center bg-emerald-500/10 px-2 py-0.5 rounded-full">
                         {stats.roomStatus.activeRooms} Active Rooms
                     </span>
@@ -157,7 +157,7 @@ export function StatCards() {
             </div>
 
             {/* Today's Sessions Card */}
-            <div className="bg-card p-5 rounded-xl border border-border/50 shadow-sm relative overflow-hidden group">
+            <div className="bg-card p-5 rounded-2xl border border-border shadow-[0_0_0_1px_rgba(0,0,0,0.4)] relative overflow-hidden group">
                 <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
                     <Award size={80} />
                 </div>
@@ -186,7 +186,7 @@ export function StatCards() {
             </div>
 
             {/* Upcoming Blocks Card */}
-            <div className="bg-card p-5 rounded-xl border border-border/50 shadow-sm relative overflow-hidden group">
+            <div className="bg-card p-5 rounded-2xl border border-border shadow-[0_0_0_1px_rgba(0,0,0,0.4)] relative overflow-hidden group">
                 <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
                     <Calendar size={80} />
                 </div>

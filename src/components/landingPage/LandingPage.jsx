@@ -5,7 +5,10 @@ import student3 from '../../assets/Student_3.jpg';
 import student4 from '../../assets/Student_4.jpg';
 import dashboardImg from '../../assets/Dashboard.png';
 import DisplayCards from '../ui/DisplayCards';
-import ScrollingAnimation from '../ui/ScrollingAnimation';
+import { Footer } from '../ui/FooterSection';
+import { ContactFormSection } from '../ui/ContactFormSection';
+import { BentoGridBlock } from '../ui/BentoGridBlock';
+import { InteractiveGlobe } from '../ui/InteractiveGlobe';
 import aquLogo from '../../assets/AQU-WHITE.png';
 import oxfordLogo from '../../assets/Oxford-Black.png';
 import cambridgeLogo from '../../assets/Cambridge.png';
@@ -13,7 +16,7 @@ import uclLogo from '../../assets/UCL-White.png';
 import hopkinsLogo from '../../assets/Johns-Hopkins.png';
 import aaupLogo from '../../assets/AAUP-Normal.png';
 import {
-  Brain, Stethoscope, ClipboardList, ShieldCheck, ArrowRight,
+  Brain, Stethoscope, ClipboardList, ShieldCheck, ArrowRight, ArrowUpRight,
   Zap, Target, Award, ChevronDown, MessageSquare, Send, LogIn,
   CheckCircle2, Activity, User, Sparkles, Star
 } from 'lucide-react';
@@ -42,8 +45,9 @@ function FadeIn({ children, delay = 0, className = '' }) {
   return (
     <div ref={ref} className={className} style={{
       opacity: inView ? 1 : 0,
-      transform: inView ? 'translateY(0)' : 'translateY(28px)',
-      transition: `opacity 0.8s ease ${delay}s, transform 0.8s ease ${delay}s`,
+      filter: inView ? 'blur(0)' : 'blur(4px)',
+      transform: inView ? 'translateY(0)' : 'translateY(10px)',
+      transition: `opacity 0.6s ease-out ${delay}s, filter 0.6s ease-out ${delay}s, transform 0.6s ease-out ${delay}s`,
     }}>
       {children}
     </div>
@@ -279,9 +283,10 @@ export default function LandingPage({ setActiveTab }) {
   const [scrolled, setScrolled]       = useState(false);
   const [activeSection, setActiveSection] = useState('');
   const [mouse, setMouse]             = useState({ x: 0, y: 0 });
-  const [contactForm, setContactForm] = useState({ name: '', email: '', message: '' });
-  const [submitted, setSubmitted]     = useState(false);
+  const [aboutWordIdx, setAboutWordIdx] = useState(0);
   const heroRef = useRef(null);
+
+  const aboutRotatingWords = ['Globally', 'Equally', 'Properly'];
 
   /* phrase rotation */
   useEffect(() => {
@@ -289,6 +294,14 @@ export default function LandingPage({ setActiveTab }) {
     const t2 = setTimeout(() => { setPhraseIdx(i => (i + 1) % phrases.length); setVisible(true); }, 3500);
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [phraseIdx]);
+
+  /* About section rotating word */
+  useEffect(() => {
+    const id = setInterval(() => {
+      setAboutWordIdx((i) => (i + 1) % aboutRotatingWords.length);
+    }, 2200);
+    return () => clearInterval(id);
+  }, []);
 
   /* scroll → nav bg + active section */
   useEffect(() => {
@@ -314,8 +327,6 @@ export default function LandingPage({ setActiveTab }) {
       y: ((e.clientY - top)  / height - 0.5) * 2,
     });
   }, []);
-
-  const handleContact = (e) => { e.preventDefault(); setSubmitted(true); };
 
   const navLink = (id, label) => (
     <a
@@ -465,11 +476,11 @@ export default function LandingPage({ setActiveTab }) {
         {/* ── main content ── */}
         <div className="relative z-10 text-center mx-auto px-6 flex flex-col items-center" style={{ gap: 16 }}>
 
-          {/* eyebrow pill — like reference's "Unlock Your Assets Spark! →" */}
+          {/* eyebrow pill — blur-in like sign-in */}
           <div
             onClick={() => setActiveTab('auth')}
+            className="animate-element animate-delay-100"
             style={{
-              animation: 'fadeUp 0.6s ease both',
               display: 'inline-flex', alignItems: 'center', gap: 8,
               padding: '6px 14px', borderRadius: 999,
               border: '1px solid rgba(255,255,255,0.14)',
@@ -484,9 +495,8 @@ export default function LandingPage({ setActiveTab }) {
           </div>
 
           {/* headline — gradient text with shimmer */}
-          <h1 className="hero-title" style={{
+          <h1 className="hero-title animate-element animate-delay-200" style={{
             fontSize: 'clamp(40px,5.8vw,68px)',
-            animation: 'fadeUp 0.7s ease 0.06s both',
             fontWeight: 600,
             letterSpacing: '-0.025em',
             lineHeight: 1.06,
@@ -497,8 +507,7 @@ export default function LandingPage({ setActiveTab }) {
           </h1>
 
           {/* sub-copy */}
-          <p style={{
-            animation: 'fadeUp 0.7s ease 0.12s both',
+          <p className="animate-element animate-delay-300" style={{
             fontSize: 14,
             fontWeight: 400,
             color: 'rgba(255,255,255,0.42)',
@@ -510,7 +519,7 @@ export default function LandingPage({ setActiveTab }) {
           </p>
 
           {/* CTAs */}
-          <div style={{ animation: 'fadeUp 0.7s ease 0.2s both', display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+          <div className="animate-element animate-delay-400" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
             <button
               onClick={() => setActiveTab('cases')}
               style={{
@@ -553,8 +562,7 @@ export default function LandingPage({ setActiveTab }) {
 
         {/* ── scroll indicator bottom-left ── */}
         <div
-          style={{ animation: 'fadeUp 1s ease 1s both' }}
-          className="absolute bottom-8 left-8 flex items-center gap-2.5 z-10"
+          className="animate-element animate-delay-500 absolute bottom-8 left-8 flex items-center gap-2.5 z-10"
         >
           <div className="w-7 h-7 rounded-full border border-white/14 flex items-center justify-center">
             <ChevronDown size={12} className="text-white/30 animate-bounce" />
@@ -574,6 +582,7 @@ export default function LandingPage({ setActiveTab }) {
         <div className="absolute inset-y-0 right-0 w-24 pointer-events-none z-10"
           style={{ background: 'linear-gradient(to left, #000, transparent)' }} />
 
+        <FadeIn>
         <div className="max-w-5xl mx-auto flex items-center justify-between gap-8 md:gap-0">
           {/* "Used at" label */}
           <p className="text-[10px] tracking-[0.22em] uppercase text-white/18 whitespace-nowrap flex-shrink-0">Used at</p>
@@ -597,6 +606,7 @@ export default function LandingPage({ setActiveTab }) {
             </div>
           ))}
         </div>
+        </FadeIn>
       </div>
 
       {/* ══════════════════════════════════════════
@@ -741,237 +751,84 @@ export default function LandingPage({ setActiveTab }) {
       </section>
 
       {/* ══════════════════════════════════════════
-          SCROLLING ANIMATION — Empowering Every Student
+          BENTO GRID (Core features → About)
       ══════════════════════════════════════════ */}
-      <ScrollingAnimation
-        images={[student1, student2, student3, student4,
-          'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400&auto=format&fit=crop&q=60',
-          'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&auto=format&fit=crop&q=60',
-          'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400&auto=format&fit=crop&q=60',
-          'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400&auto=format&fit=crop&q=60',
-        ]}
-        title="Empowering"
-        titleLine2="Every Student"
-        subtitle="From first-years to final exams, MeduPal gives you the tools to master clinical skills."
-      />
+      <FadeIn>
+        <BentoGridBlock />
+      </FadeIn>
 
       {/* ══════════════════════════════════════════
-          FEATURES
+          ABOUT — CTA + globe
       ══════════════════════════════════════════ */}
-      <section id="features" className="py-32 px-6">
-        <div className="max-w-6xl mx-auto">
-
-          <FadeIn className="text-center mb-20">
-            <p className="text-xs tracking-[0.2em] uppercase text-blue-400 mb-4">Core Features</p>
-            <h2 className="text-4xl md:text-5xl font-bold tracking-tight">Everything you need to excel.</h2>
-          </FadeIn>
-
-          <div className="grid md:grid-cols-3 gap-5">
-            {[
-              { icon: <ClipboardList size={20} />, color: 'blue',    title: 'Scenario-Based Practice',  body: 'OSCE stations by specialty, difficulty, and objective — mirroring real exam conditions.' },
-              { icon: <Stethoscope  size={20} />, color: 'purple',  title: 'Flexible Training Modes',   body: 'Open practice, timed simulation, or guided structured learning — all in one place.',  delay: 0.1 },
-              { icon: <Brain        size={20} />, color: 'emerald', title: 'AI-Powered Feedback',        body: 'Instant scoring, rubric breakdowns, and personalised improvement insights every session.', delay: 0.2 },
-            ].map(({ icon, color, title, body, delay = 0 }) => (
-              <FadeIn key={title} delay={delay}>
-                <div className="group h-full rounded-3xl p-8 border border-white/7 bg-white/[0.025] hover:bg-white/[0.05] transition-all duration-300">
-                  <div className={`w-11 h-11 rounded-2xl flex items-center justify-center mb-6
-                    bg-${color}-500/10 border border-${color}-500/20 text-${color}-400`}>
-                    {icon}
-                  </div>
-                  <h3 className="text-base font-semibold mb-3">{title}</h3>
-                  <p className="text-sm text-white/40 leading-relaxed">{body}</p>
-                </div>
-              </FadeIn>
-            ))}
-          </div>
+      <section id="about" className="relative py-32 px-6 overflow-hidden">
+        <div className="absolute inset-0 pointer-events-none">
+          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(100%,800px)] h-[480px] rounded-full bg-[rgba(100,170,145,0.06)] blur-[120px]" />
         </div>
-      </section>
 
-      {/* ══════════════════════════════════════════
-          BENTO GRID
-      ══════════════════════════════════════════ */}
-      <section className="py-10 px-6">
-        <div className="max-w-6xl mx-auto grid md:grid-cols-2 gap-5">
-
-          <FadeIn className="md:row-span-2">
-            <div className="h-full min-h-[340px] rounded-3xl p-10 border border-white/7 bg-gradient-to-br from-blue-600/10 via-transparent to-transparent flex flex-col justify-between relative overflow-hidden">
-              <div className="absolute -top-16 -right-16 w-56 h-56 rounded-full bg-blue-500/10 blur-3xl pointer-events-none" />
-              <div>
-                <div className="w-10 h-10 rounded-2xl bg-blue-500/15 border border-blue-500/20 flex items-center justify-center text-blue-400 mb-7">
-                  <Zap size={18} />
-                </div>
-                <h3 className="text-2xl font-bold mb-4 leading-snug">Real-time performance analytics</h3>
-                <p className="text-white/40 text-sm leading-relaxed max-w-xs">
-                  Track progress across every OSCE domain with granular breakdowns after each attempt.
-                </p>
-              </div>
-              <div className="mt-10 grid grid-cols-3 gap-3">
-                {[['92', 'History'],['87', 'Comms'],['79', 'Diagnosis']].map(([val, lbl]) => (
-                  <div key={lbl} className="rounded-2xl bg-white/5 border border-white/7 p-3">
-                    <div className="text-xl font-bold text-blue-400">
-                      <CountUp to={Number(val)} />%
-                    </div>
-                    <div className="text-[10px] text-white/30 mt-1">{lbl}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </FadeIn>
-
-          <FadeIn delay={0.1}>
-            <div className="rounded-3xl p-8 border border-white/7 bg-gradient-to-br from-purple-600/10 via-transparent to-transparent relative overflow-hidden min-h-[155px]">
-              <div className="absolute -bottom-8 -right-8 w-36 h-36 rounded-full bg-purple-500/10 blur-2xl pointer-events-none" />
-              <div className="w-10 h-10 rounded-2xl bg-purple-500/15 border border-purple-500/20 flex items-center justify-center text-purple-400 mb-5">
-                <Target size={18} />
-              </div>
-              <h3 className="text-base font-semibold mb-2">Adaptive difficulty</h3>
-              <p className="text-sm text-white/40 leading-relaxed">Cases that adjust to your level — always challenging, never overwhelming.</p>
-            </div>
-          </FadeIn>
-
-          <FadeIn delay={0.2}>
-            <div className="rounded-3xl p-8 border border-white/7 bg-gradient-to-br from-emerald-600/10 via-transparent to-transparent relative overflow-hidden min-h-[155px]">
-              <div className="absolute -bottom-8 -right-8 w-36 h-36 rounded-full bg-emerald-500/10 blur-2xl pointer-events-none" />
-              <div className="w-10 h-10 rounded-2xl bg-emerald-500/15 border border-emerald-500/20 flex items-center justify-center text-emerald-400 mb-5">
-                <Award size={18} />
-              </div>
-              <h3 className="text-base font-semibold mb-2">Examiner-grade rubrics</h3>
-              <p className="text-sm text-white/40 leading-relaxed">Scoring aligned to real OSCE criteria so you know exactly where marks are lost.</p>
-            </div>
-          </FadeIn>
-
-        </div>
-      </section>
-
-      {/* ══════════════════════════════════════════
-          ABOUT
-      ══════════════════════════════════════════ */}
-      <section id="about" className="py-32 px-6">
-        <div className="max-w-6xl mx-auto grid md:grid-cols-2 gap-16 items-center">
-
+        <div className="relative max-w-6xl mx-auto grid md:grid-cols-2 gap-16 lg:gap-20 items-center">
           <FadeIn>
-            <p className="text-xs tracking-[0.2em] uppercase text-blue-400 mb-6">About MeduPal</p>
-            <h2 className="text-4xl md:text-5xl font-bold tracking-tight leading-tight mb-8">
-              Built for the
-              <br /><span className="text-white/25">next generation</span>
-              <br />of clinicians.
+            <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold tracking-tight leading-tight mb-8 text-white">
+              Leveling the playing field for medical students.{' '}
+              <span key={aboutWordIdx} className="animate-element inline-block text-[rgba(100,170,145,0.95)]">
+                {aboutRotatingWords[aboutWordIdx]}
+              </span>
             </h2>
-            <p className="text-white/45 leading-relaxed mb-5">
-              MeduPal was designed by medical educators and engineers who believe high-quality
-              OSCE preparation shouldn't depend on where you study.
+            <p className="text-white/50 leading-relaxed mb-8 max-w-lg">
+              Where you study shouldn&apos;t limit how well you prepare. MeduPal gives every student access to the same high-quality OSCE practice and AI feedback.
             </p>
-            <p className="text-white/45 leading-relaxed">
-              Our platform combines structured clinical scenarios, flexible training modes, and
-              AI-powered feedback to create the most comprehensive tool available — from first
-              year to finals.
-            </p>
+            <button
+              type="button"
+              onClick={() => setActiveTab('auth')}
+              className="inline-flex items-center gap-2 rounded-full px-6 py-3.5 text-sm font-semibold text-white transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+              style={{
+                background: 'linear-gradient(135deg, rgba(120,180,160,0.55) 0%, rgba(80,140,120,0.4) 50%, rgba(50,110,90,0.5) 100%)',
+                border: '1px solid rgba(100,170,145,0.25)',
+                boxShadow: '0 0 24px rgba(100,170,145,0.2), inset 0 1px 0 rgba(255,255,255,0.12)',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'linear-gradient(135deg, rgba(130,195,175,0.65) 0%, rgba(90,155,135,0.5) 50%, rgba(60,125,105,0.6) 100%)';
+                e.currentTarget.style.boxShadow = '0 0 32px rgba(100,170,145,0.28), inset 0 1px 0 rgba(255,255,255,0.15)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'linear-gradient(135deg, rgba(120,180,160,0.55) 0%, rgba(80,140,120,0.4) 50%, rgba(50,110,90,0.5) 100%)';
+                e.currentTarget.style.boxShadow = '0 0 24px rgba(100,170,145,0.2), inset 0 1px 0 rgba(255,255,255,0.12)';
+              }}
+            >
+              Start your journey
+              <ArrowUpRight size={18} strokeWidth={2.2} className="opacity-90" />
+            </button>
           </FadeIn>
 
           <FadeIn delay={0.15}>
-            <div className="grid grid-cols-2 gap-4">
-              {[
-                { value: 200, suffix: '+', label: 'Clinical Scenarios' },
-                { value: 15,  suffix: '+', label: 'Specialties Covered' },
-                { value: 500, suffix: '+', label: 'Active Students' },
-                { value: 24,  suffix: '/7', label: 'Always Available' },
-              ].map(({ value, suffix, label }) => (
-                <div key={label} className="rounded-3xl p-7 border border-white/7 bg-white/[0.025] flex flex-col justify-between min-h-[130px]">
-                  <div className="text-3xl font-bold tracking-tight">
-                    <CountUp to={value} />{suffix}
-                  </div>
-                  <div className="text-sm text-white/35 mt-3">{label}</div>
-                </div>
-              ))}
+            <div className="flex items-center justify-center min-h-[320px] md:min-h-[400px] w-full aspect-square max-w-[480px] mx-auto">
+              <InteractiveGlobe
+                size={420}
+                dotColor="rgba(100, 170, 145, ALPHA)"
+                arcColor="rgba(100, 170, 145, 0.45)"
+                markerColor="rgba(120, 200, 175, 1)"
+                glowColor="rgba(80, 140, 120, 0.08)"
+                strokeColor="rgba(100, 170, 145, 0.15)"
+                autoRotateSpeed={0.0018}
+                className="max-w-full max-h-full"
+              />
             </div>
           </FadeIn>
-
         </div>
       </section>
 
       {/* ══════════════════════════════════════════
           CONTACT
       ══════════════════════════════════════════ */}
-      <section id="contact" className="py-32 px-6">
-        <div className="max-w-2xl mx-auto">
-          <FadeIn className="text-center mb-14">
-            <p className="text-xs tracking-[0.2em] uppercase text-blue-400 mb-4">Get In Touch</p>
-            <h2 className="text-4xl md:text-5xl font-bold tracking-tight mb-6">We'd love to hear from you.</h2>
-            <p className="text-white/38 text-lg">Questions, feedback, or partnership enquiries — drop us a message.</p>
-          </FadeIn>
-
-          <FadeIn delay={0.1}>
-            {submitted ? (
-              <div className="rounded-3xl border border-emerald-500/20 bg-emerald-500/5 p-12 text-center">
-                <div className="w-14 h-14 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 mx-auto mb-6">
-                  <Send size={22} />
-                </div>
-                <h3 className="text-xl font-semibold mb-2">Message sent!</h3>
-                <p className="text-white/35 text-sm">We'll get back to you within 24 hours.</p>
-              </div>
-            ) : (
-              <form onSubmit={handleContact} className="rounded-3xl border border-white/8 bg-white/[0.025] p-8 md:p-10 space-y-5">
-                <div className="grid sm:grid-cols-2 gap-5">
-                  {[
-                    { key: 'name',  label: 'Name',  type: 'text',  placeholder: 'Your name' },
-                    { key: 'email', label: 'Email', type: 'email', placeholder: 'you@example.com' },
-                  ].map(({ key, label, type, placeholder }) => (
-                    <div key={key} className="space-y-2">
-                      <label className="text-[10px] text-white/35 uppercase tracking-widest">{label}</label>
-                      <input
-                        required type={type}
-                        value={contactForm[key]}
-                        onChange={e => setContactForm(f => ({ ...f, [key]: e.target.value }))}
-                        placeholder={placeholder}
-                        className="w-full rounded-xl bg-white/5 border border-white/8 px-4 py-3 text-sm text-white placeholder:text-white/18 outline-none focus:border-white/22 transition-colors"
-                      />
-                    </div>
-                  ))}
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] text-white/35 uppercase tracking-widest">Message</label>
-                  <textarea
-                    required rows={5}
-                    value={contactForm.message}
-                    onChange={e => setContactForm(f => ({ ...f, message: e.target.value }))}
-                    placeholder="Tell us what's on your mind…"
-                    className="w-full rounded-xl bg-white/5 border border-white/8 px-4 py-3 text-sm text-white placeholder:text-white/18 outline-none focus:border-white/22 transition-colors resize-none"
-                  />
-                </div>
-                <button type="submit" className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-white text-black text-sm font-semibold hover:bg-white/90 active:scale-[0.98] transition-all">
-                  <MessageSquare size={14} />
-                  Send Message
-                </button>
-              </form>
-            )}
-          </FadeIn>
-        </div>
-      </section>
+      <FadeIn>
+        <ContactFormSection />
+      </FadeIn>
 
       {/* ══════════════════════════════════════════
           FOOTER
       ══════════════════════════════════════════ */}
-      <footer className="border-t border-white/7 py-10 px-6">
-        <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="flex items-center gap-8">
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-md bg-blue-500/20 border border-blue-500/25 flex items-center justify-center">
-                <Activity size={12} className="text-blue-400" />
-              </div>
-              <span className="text-sm font-semibold">MeduPal</span>
-            </div>
-            <div className="hidden md:flex items-center gap-6 text-xs text-white/25">
-              {['features','about','contact'].map(id => (
-                <a key={id} href={`#${id}`} className="capitalize hover:text-white/55 transition-colors">{id}</a>
-              ))}
-            </div>
-          </div>
-          <div className="flex flex-col md:flex-row items-center gap-4 text-xs text-white/22">
-            <span>© 2026 MeduPal. All rights reserved.</span>
-            <span className="hidden md:inline text-white/12">·</span>
-            <span>Version 1.0 · Built with React & Tailwind</span>
-          </div>
-        </div>
-      </footer>
+      <FadeIn>
+        <Footer />
+      </FadeIn>
 
       <style>{`
         @keyframes fadeUp {
@@ -992,7 +849,10 @@ export default function LandingPage({ setActiveTab }) {
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
           background-clip: text;
-          animation: fadeUp 0.7s ease 0.06s both, heroShimmer 6s ease-in-out infinite 1.5s;
+          opacity: 0;
+          filter: blur(4px);
+          transform: translateY(10px);
+          animation: fadeSlideIn 0.6s ease-out 0.2s forwards, heroShimmer 6s ease-in-out infinite 1.5s;
         }
         .hero-title-fade {
           -webkit-text-fill-color: rgba(255,255,255,0.26);

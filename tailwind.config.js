@@ -6,6 +6,22 @@ export default {
     ],
     theme: {
         extend: {
+            keyframes: {
+                fadeSlideIn: {
+                    to: { opacity: '1', filter: 'blur(0px)', transform: 'translateY(0px)' },
+                },
+                slideRightIn: {
+                    to: { opacity: '1', filter: 'blur(0px)', transform: 'translateX(0px)' },
+                },
+                testimonialIn: {
+                    to: { opacity: '1', filter: 'blur(0px)', transform: 'translateY(0px) scale(1)' },
+                },
+            },
+            animation: {
+                element: 'fadeSlideIn 0.6s ease-out forwards',
+                'slide-right': 'slideRightIn 0.8s ease-out forwards',
+                testimonial: 'testimonialIn 0.6s ease-out forwards',
+            },
             colors: {
                 background: "hsl(var(--background))",
                 foreground: "hsl(var(--foreground))",

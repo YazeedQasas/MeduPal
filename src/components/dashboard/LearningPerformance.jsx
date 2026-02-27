@@ -28,7 +28,7 @@ export function LearningPerformance() {
     const avgFailRate = data.length > 0 ? (data.reduce((acc, curr) => acc + curr.failRate, 0) / data.length).toFixed(1) : 0;
 
     return (
-        <div className="bg-card rounded-xl border border-border/50 shadow-sm p-4 flex flex-col h-full">
+        <div className="bg-card rounded-2xl border border-border shadow-[0_0_0_1px_rgba(0,0,0,0.4)] p-4 flex flex-col h-full">
             <h3 className="font-semibold text-foreground mb-4">Performance Snapshot</h3>
             <div className="flex-1 w-full min-h-[200px]">
                 <ResponsiveContainer width="100%" height="100%">

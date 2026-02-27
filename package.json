@@ -10,6 +10,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "cobe": "^0.6.4",
+    "class-variance-authority": "^0.7.1",
+    "dotted-map": "^2.2.4",
     "@supabase/supabase-js": "^2.95.3",
     "clsx": "^2.1.1",
     "framer-motion": "^12.34.3",
