@@ -22,6 +22,7 @@ import { CreateSessionForm } from './CreateSessionForm';
 import SessionTypeSelect from './SessionTypeSelect';
 import AssignedExamStart from './AssignedExamStart';
 import SessionWorkspace from './SessionWorkspace';
+import StudentPracticeFlow from './StudentPracticeFlow';
 
 function Sessions() {
     const { user, role } = useAuth();
@@ -36,6 +37,7 @@ function Sessions() {
     const [selectedMode, setSelectedMode] = useState(null);
     const [showAssignedExam, setShowAssignedExam] = useState(false);
     const [activeSession, setActiveSession] = useState(null);
+    const [showPractice, setShowPractice] = useState(false);
 
     const fetchMyAdvisees = useCallback(async () => {
         if (!isInstructor || !user?.id) return;
@@ -112,7 +114,7 @@ function Sessions() {
         if (isInstructor) {
             setIsCreating(true);
         } else {
-            setShowTypeSelect(true);
+            setShowPractice(true);
         }
     };
 
@@ -164,6 +166,14 @@ function Sessions() {
         );
     }
 
+    if (showPractice) {
+        return (
+            <StudentPracticeFlow
+                onExit={() => setShowPractice(false)}
+            />
+        );
+    }
+
     return (
         <div className="space-y-6 relative">
             {showTypeSelect && (
@@ -199,8 +209,8 @@ function Sessions() {
                     onClick={handleStartSession}
                     className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg font-medium hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20"
                 >
-                    <Plus size={18} />
-                    Start New Session
+                    {isInstructor ? <Plus size={18} /> : <Play size={18} />}
+                    {isInstructor ? 'Start New Session' : 'Practice'}
                 </button>
             </div>
 
