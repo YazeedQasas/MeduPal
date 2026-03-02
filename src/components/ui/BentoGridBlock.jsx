@@ -8,9 +8,9 @@ const avatarProfiles = [
 ];
 
 const keyMetrics = [
-  { label: "Project satisfaction", value: "98%", caption: "Last quarter" },
-  { label: "Delivery cadence", value: "2.4x", caption: "Faster" },
-  { label: "Retention rate", value: "92%", caption: "After 6 months" },
+  { label: "Pass rate", value: "94%", caption: "Last cohort" },
+  { label: "Sessions completed", value: "12k+", caption: "This term" },
+  { label: "Student satisfaction", value: "96%", caption: "Post-exam survey" },
 ];
 
 const motionProcess = [
@@ -55,12 +55,10 @@ export function BentoGridBlock() {
           className="text-center mb-14"
         >
           <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-white tracking-tight mb-6">
-            Bento storytelling built for modern motion systems
+            <span className="font-normal">You focus on the exam.</span> We&apos;ll handle the rest.
           </h2>
-          <p className="text-[#C8C8C8] text-base md:text-lg max-w-2xl mx-auto leading-relaxed">
-            Pair narrative, metrics, and cinematic visuals inside a responsive
-            layout designed around Framer Motion micro-interactions and
-            accessible navigation.
+          <p className="text-[#C8C8C8] text-base md:text-lg max-w-2xl mx-auto leading-loose">
+            Practice with our cases and stations. We&apos;ll run the session, give you feedback, and keep your progress in one place.
           </p>
         </motion.header>
 
@@ -97,18 +95,16 @@ export function BentoGridBlock() {
                 <span className="inline-flex w-fit items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.2em] text-white/50">
                   Featured case study
                 </span>
-                <h3 className="text-2xl font-semibold leading-tight text-white md:text-3xl">
-                  Designing delightful product experiences
+                <h3 className="text-2xl font-semibold leading-snug text-white md:text-3xl">
+                  How one program improved OSCE pass rates.
                 </h3>
-                <p className="text-sm text-white/40 md:text-base leading-relaxed">
-                  We choreograph micro-interactions and depth cues that elevate
-                  usability across every product surface—without sacrificing
-                  performance or accessibility.
+                <p className="text-sm text-white/40 md:text-base leading-loose">
+                  They moved practice onto MeduPal: same cases and stations, with structured feedback and progress tracking. Students came in better prepared.
                 </p>
               </div>
               <div className="mt-8 flex items-center justify-between gap-4">
                 <div className="flex -space-x-3" role="list" aria-label="Project team avatars">
-                  {avatarProfiles.map((profile) => (
+                  {avatarProfiles.slice(0, 2).map((profile) => (
                     <div
                       key={profile.src}
                       role="listitem"
@@ -123,7 +119,7 @@ export function BentoGridBlock() {
                   className="group/cta inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/70 hover:bg-white/[0.08] hover:text-white transition-colors"
                   aria-label="View the featured case study"
                 >
-                  View story
+                  Read the story
                   <ArrowUpRight className="h-4 w-4 transition-transform group-hover/cta:translate-x-1" />
                 </button>
               </div>
@@ -183,7 +179,7 @@ export function BentoGridBlock() {
               <h3 className="text-xl font-semibold tracking-tight text-white md:text-2xl">
                 Immersive motion prototypes with cinematic lighting
               </h3>
-              <p className="max-w-sm text-sm text-white/40 md:text-base leading-relaxed">
+              <p className="max-w-sm text-sm text-white/40 md:text-base leading-loose">
                 Layered light, shadow, and depth cues help teams experience the
                 product as it will ship—well before the first line of production code.
               </p>
@@ -215,7 +211,7 @@ export function BentoGridBlock() {
               <h3 className="text-xl font-semibold tracking-tight text-white md:text-2xl">
                 From first sketch to polished prototype in seven days
               </h3>
-              <p className="text-sm text-white/40 md:text-base leading-relaxed">
+              <p className="text-sm text-white/40 md:text-base leading-loose">
                 We compress discovery, exploration, and refinement into a
                 focused week-long sprint so your team can feel the flow of the
                 final experience sooner.
@@ -282,7 +278,7 @@ export function BentoGridBlock() {
                   <h3 className="text-xl font-semibold tracking-tight text-white md:text-2xl">
                     Watch our latest animation breakdown
                   </h3>
-                  <p className="max-w-md text-sm text-white/40 md:text-base leading-relaxed">
+                  <p className="max-w-md text-sm text-white/40 md:text-base leading-loose">
                     A three-minute deep dive into timing curves, coordinated
                     transitions, and how we translate component choreography
                     into production-ready systems.
@@ -323,7 +319,7 @@ export function BentoGridBlock() {
               <h3 className="text-lg font-semibold tracking-tight text-white md:text-xl">
                 Capturing texture, light, and pace for new explorations
               </h3>
-              <p className="text-sm text-white/40 md:text-base leading-relaxed">
+              <p className="text-sm text-white/40 md:text-base leading-loose">
                 A snapshot of the references that steer our motion language and
                 narrative rhythm, curated for both product and marketing surfaces.
               </p>

@@ -19,10 +19,16 @@ import AuthPage from "./components/auth/AuthPage";
 import RoleSelectPage from "./components/auth/RoleSelectPage";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { LoadingScreen } from "./components/ui/LoadingScreen";
+import PracticeHistoryPage from "./components/dashboard/PracticeHistoryPage";
 
 function AppContent() {
   const [activeTab, setActiveTab] = useState("landing");
   const { user, loading, role } = useAuth();
+
+  // Dedicated URL: /practice-history — standalone History Taking (voice) page for AI work
+  if (typeof window !== "undefined" && window.location.pathname === "/practice-history") {
+    return <PracticeHistoryPage />;
+  }
 
   // Test loading screen: open app with ?loading=1 in the URL (e.g. http://localhost:5173/?loading=1)
   if (new URLSearchParams(typeof window !== "undefined" ? window.location.search : "").get("loading") === "1") {

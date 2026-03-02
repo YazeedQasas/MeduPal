@@ -29,6 +29,11 @@ import {
     ListChecks
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import {
+    isFasterWhisperSttEnabled,
+    recordAudioForStt,
+    sendAudioToSttApi
+} from '../../lib/sttFasterWhisper';
 
 const STEPS = [
     { id: 0, label: 'Case Selection', icon: Brain },
@@ -173,9 +178,9 @@ const PHYSICAL_RUBRIC_CRITERIA = [
     { key: 'communication', label: 'Communication' }
 ];
 
-function StudentPracticeFlow({ onExit }) {
-    const [currentStep, setCurrentStep] = useState(0);
-    const [selectedCase, setSelectedCase] = useState(null);
+function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
+    const [currentStep, setCurrentStep] = useState(standaloneHistoryOnly ? 1 : 0);
+    const [selectedCase, setSelectedCase] = useState(standaloneHistoryOnly ? (MEDUPAL_CASES.find(c => c.id === 'mitral-stenosis') || MEDUPAL_CASES[2]) : null);
     const [messages, setMessages] = useState([
         {
             role: 'system',
@@ -225,6 +230,7 @@ function StudentPracticeFlow({ onExit }) {
     const deteriorationTimeoutRef = useRef(null);
     const recognitionRef = useRef(null);
     const mockRecordingTimeoutRef = useRef(null);
+    const fwRecordingRef = useRef(null);
 
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -352,6 +358,24 @@ function StudentPracticeFlow({ onExit }) {
 
     const toggleRecording = useCallback(() => {
         if (isRecording) {
+            // Stopping: either Faster-Whisper recording or browser SpeechRecognition
+            if (fwRecordingRef.current) {
+                const controller = fwRecordingRef.current;
+                fwRecordingRef.current = null;
+                controller.stop()
+                    .then((blob) => sendAudioToSttApi(blob))
+                    .then(({ text }) => {
+                        setInputValue(text || getMockTranscript());
+                        setLastTranscript(text || getMockTranscript());
+                        setIsRecording(false);
+                    })
+                    .catch(() => {
+                        setInputValue(getMockTranscript());
+                        setLastTranscript(getMockTranscript());
+                        setIsRecording(false);
+                    });
+                return;
+            }
             setIsRecording(false);
             if (recognitionRef.current) {
                 try { recognitionRef.current.stop(); } catch {}
@@ -362,35 +386,52 @@ function StudentPracticeFlow({ onExit }) {
             return;
         }
 
+        // Starting: prefer Faster-Whisper STT when API URL is set
+        if (isFasterWhisperSttEnabled()) {
+            setIsRecording(true);
+            const controller = recordAudioForStt();
+            controller.start()
+                .then(() => {
+                    fwRecordingRef.current = controller;
+                })
+                .catch(() => {
+                    setIsRecording(false);
+                    const mockText = getMockTranscript();
+                    setInputValue(mockText);
+                    setLastTranscript(mockText);
+                });
+            return;
+        }
+
+        // Fallback: browser Web Speech API
         setIsRecording(true);
-        
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        
+
         if (SpeechRecognition) {
             try {
                 recognitionRef.current = new SpeechRecognition();
                 recognitionRef.current.continuous = false;
                 recognitionRef.current.interimResults = false;
                 recognitionRef.current.lang = 'en-US';
-                
+
                 recognitionRef.current.onresult = (event) => {
                     const transcript = event.results[0][0].transcript;
                     setInputValue(transcript);
                     setLastTranscript(transcript);
                     setIsRecording(false);
                 };
-                
+
                 recognitionRef.current.onerror = () => {
                     const mockText = getMockTranscript();
                     setInputValue(mockText);
                     setLastTranscript(mockText);
                     setIsRecording(false);
                 };
-                
+
                 recognitionRef.current.onend = () => {
                     setIsRecording(false);
                 };
-                
+
                 recognitionRef.current.start();
             } catch {
                 mockRecordingTimeoutRef.current = setTimeout(() => {
@@ -410,9 +451,13 @@ function StudentPracticeFlow({ onExit }) {
         }
     }, [isRecording, getMockTranscript]);
 
-    // Cleanup speech recognition and synthesis on unmount
+    // Cleanup speech recognition, Faster-Whisper recording, and synthesis on unmount
     useEffect(() => {
         return () => {
+            if (fwRecordingRef.current) {
+                fwRecordingRef.current.stop().catch(() => {});
+                fwRecordingRef.current = null;
+            }
             if (recognitionRef.current) {
                 try { recognitionRef.current.stop(); } catch {}
             }
@@ -608,8 +653,8 @@ function StudentPracticeFlow({ onExit }) {
 
             {/* Content */}
             <div className="flex-1 overflow-hidden">
-                {/* Step 0: AI Case Selection */}
-                {currentStep === 0 && (
+                {/* Step 0: AI Case Selection (hidden when standalone history page) */}
+                {!standaloneHistoryOnly && currentStep === 0 && (
                     <div className="h-full flex items-center justify-center p-6">
                         <div className="text-center max-w-md">
                             <div className={cn(
@@ -1044,13 +1089,23 @@ function StudentPracticeFlow({ onExit }) {
 
                         {/* Bottom Action Button */}
                         <div className="flex-shrink-0 p-4 pt-0 flex justify-end">
-                            <button
-                                onClick={goNext}
-                                className="flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 hover:scale-105 hover:shadow-lg hover:shadow-primary/20 transition-all duration-200"
-                            >
-                                Proceed to Evaluation
-                                <ChevronRight size={18} />
-                            </button>
+                            {standaloneHistoryOnly ? (
+                                <button
+                                    onClick={onExit}
+                                    className="flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold bg-muted text-foreground hover:bg-muted/80 border border-white/10 transition-all duration-200"
+                                >
+                                    Back to app
+                                    <ChevronRight size={18} />
+                                </button>
+                            ) : (
+                                <button
+                                    onClick={goNext}
+                                    className="flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 hover:scale-105 hover:shadow-lg hover:shadow-primary/20 transition-all duration-200"
+                                >
+                                    Proceed to Evaluation
+                                    <ChevronRight size={18} />
+                                </button>
+                            )}
                         </div>
                     </div>
                 )}

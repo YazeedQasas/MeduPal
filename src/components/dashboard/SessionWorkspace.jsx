@@ -1,61 +1,99 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { X, Send, MessageCircle, Stethoscope, CheckCircle2, ArrowLeft, LogOut } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { Mic, MicOff, MessageCircle, Stethoscope, CheckCircle2, ArrowLeft, LogOut } from 'lucide-react';
 import { cn } from '../../lib/utils';
+
+const SpeechRecognitionAPI = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
 
 function SessionWorkspace({ session, onExit }) {
     const [currentPhase, setCurrentPhase] = useState('history');
     const [messages, setMessages] = useState([
         {
             role: 'system',
-            content: 'You are now with the patient. Begin by introducing yourself and taking their history.'
+            content: 'You are now with the patient. Speak aloud to take their history—hold the mic button and ask your questions. The patient will respond by voice.'
         }
     ]);
-    const [inputValue, setInputValue] = useState('');
+    const [isListening, setIsListening] = useState(false);
     const [isTyping, setIsTyping] = useState(false);
     const chatEndRef = useRef(null);
+    const recognitionRef = useRef(null);
 
     const isTraining = session?.type === 'training';
     const caseName = session?.caseName || 'Clinical Case';
 
     const phases = [
-        { id: 'history', label: 'History Taking', icon: MessageCircle },
+        { id: 'history', label: 'History Taking (Voice)', icon: MessageCircle },
         { id: 'physical', label: 'Physical Examination', icon: Stethoscope }
     ];
+
+    const patientResponses = [
+        "I feel chest pain when I breathe.",
+        "The pain started about two days ago.",
+        "It gets worse when I lie down.",
+        "I haven't had any fever.",
+        "I've been feeling a bit short of breath too.",
+        "No, I haven't taken any medication for it.",
+        "The pain is sharp, like a stabbing sensation.",
+        "I'd say it's about a 6 out of 10."
+    ];
+
+    const speakPatientResponse = useCallback((text) => {
+        if (typeof window === 'undefined' || !window.speechSynthesis) return;
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(text);
+        u.rate = 0.95;
+        u.pitch = 1;
+        window.speechSynthesis.speak(u);
+    }, []);
 
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
-    const handleSendMessage = () => {
-        if (!inputValue.trim() || isTyping) return;
-
-        const studentMessage = { role: 'student', content: inputValue.trim() };
-        setMessages(prev => [...prev, studentMessage]);
-        setInputValue('');
-        setIsTyping(true);
-
-        setTimeout(() => {
-            const patientResponses = [
-                "I feel chest pain when I breathe.",
-                "The pain started about two days ago.",
-                "It gets worse when I lie down.",
-                "I haven't had any fever.",
-                "I've been feeling a bit short of breath too.",
-                "No, I haven't taken any medication for it.",
-                "The pain is sharp, like a stabbing sensation.",
-                "I'd say it's about a 6 out of 10."
-            ];
+    useEffect(() => {
+        if (!SpeechRecognitionAPI) return;
+        const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const rec = new Recognition();
+        rec.continuous = true;
+        rec.interimResults = false;
+        rec.lang = 'en-US';
+        rec.onresult = (e) => {
+            const parts = [];
+            for (let i = 0; i < e.results.length; i++) {
+                if (e.results[i].isFinal && e.results[i][0]?.transcript) {
+                    parts.push(e.results[i][0].transcript.trim());
+                }
+            }
+            const transcript = parts.join(' ').trim();
+            if (!transcript) return;
+            setMessages(prev => [...prev, { role: 'student', content: transcript }]);
+            setIsTyping(true);
             const randomResponse = patientResponses[Math.floor(Math.random() * patientResponses.length)];
-            
             setMessages(prev => [...prev, { role: 'patient', content: randomResponse }]);
+            speakPatientResponse(randomResponse);
             setIsTyping(false);
-        }, 500);
+        };
+        rec.onerror = () => setIsListening(false);
+        recognitionRef.current = rec;
+        return () => { rec.abort(); };
+    }, [speakPatientResponse]);
+
+    const handleMicPress = () => {
+        if (!SpeechRecognitionAPI || isTyping) return;
+        const rec = recognitionRef.current;
+        if (!rec) return;
+        if (isListening) {
+            rec.stop();
+            setIsListening(false);
+        } else {
+            rec.start();
+            setIsListening(true);
+        }
     };
 
-    const handleKeyDown = (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            handleSendMessage();
+    const handleMicRelease = () => {
+        if (isListening && recognitionRef.current) {
+            recognitionRef.current.stop();
+            setIsListening(false);
         }
     };
 
@@ -136,7 +174,8 @@ function SessionWorkspace({ session, onExit }) {
             <div className="flex-1 overflow-hidden">
                 {currentPhase === 'history' && (
                     <div className="h-full flex flex-col max-w-3xl mx-auto p-6">
-                        {/* Chat Messages */}
+                        {/* Conversation transcript (voice conversation) */}
+                        <p className="text-xs text-muted-foreground mb-2">Transcript of your voice conversation</p>
                         <div className="flex-1 overflow-y-auto space-y-4 mb-4">
                             {messages.map((msg, idx) => (
                                 <div
@@ -154,8 +193,11 @@ function SessionWorkspace({ session, onExit }) {
                                             msg.role === 'system' && "bg-amber-500/10 text-amber-500 border border-amber-500/20 text-center mx-auto rounded-xl"
                                         )}
                                     >
+                                        {msg.role === 'student' && (
+                                            <span className="text-xs opacity-80 font-medium block mb-1">You (spoken)</span>
+                                        )}
                                         {msg.role === 'patient' && (
-                                            <span className="text-xs text-muted-foreground font-medium block mb-1">Patient</span>
+                                            <span className="text-xs text-muted-foreground font-medium block mb-1">Patient (voice)</span>
                                         )}
                                         {msg.content}
                                     </div>
@@ -164,7 +206,7 @@ function SessionWorkspace({ session, onExit }) {
                             {isTyping && (
                                 <div className="flex justify-start">
                                     <div className="bg-muted/50 border border-white/5 px-4 py-3 rounded-2xl rounded-bl-md">
-                                        <span className="text-xs text-muted-foreground font-medium block mb-1">Patient</span>
+                                        <span className="text-xs text-muted-foreground font-medium block mb-1">Patient (speaking…)</span>
                                         <div className="flex gap-1">
                                             <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                                             <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
@@ -176,26 +218,39 @@ function SessionWorkspace({ session, onExit }) {
                             <div ref={chatEndRef} />
                         </div>
 
-                        {/* Input Area */}
+                        {/* Voice input area */}
                         <div className="space-y-3">
-                            <div className="flex gap-2">
-                                <input
-                                    type="text"
-                                    placeholder="Ask the patient a question..."
-                                    className="flex-1 bg-muted/50 border border-white/5 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
-                                    value={inputValue}
-                                    onChange={(e) => setInputValue(e.target.value)}
-                                    onKeyDown={handleKeyDown}
-                                    disabled={isTyping}
-                                />
-                                <button
-                                    onClick={handleSendMessage}
-                                    disabled={!inputValue.trim() || isTyping}
-                                    className="px-4 py-3 bg-primary text-primary-foreground rounded-xl hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    <Send size={18} />
-                                </button>
-                            </div>
+                            {SpeechRecognitionAPI ? (
+                                <>
+                                    <div className="flex flex-col items-center gap-3">
+                                        <button
+                                            type="button"
+                                            onMouseDown={handleMicPress}
+                                            onMouseUp={handleMicRelease}
+                                            onMouseLeave={handleMicRelease}
+                                            onTouchStart={(e) => { e.preventDefault(); handleMicPress(); }}
+                                            onTouchEnd={(e) => { e.preventDefault(); handleMicRelease(); }}
+                                            disabled={isTyping}
+                                            className={cn(
+                                                "w-20 h-20 rounded-full flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed",
+                                                isListening
+                                                    ? "bg-red-500/20 text-red-400 border-2 border-red-400/50 animate-pulse"
+                                                    : "bg-primary/20 text-primary border-2 border-primary/40 hover:bg-primary/30"
+                                            )}
+                                            aria-label={isListening ? 'Release to send' : 'Hold to speak'}
+                                        >
+                                            {isListening ? <MicOff size={32} /> : <Mic size={32} />}
+                                        </button>
+                                        <p className="text-xs text-muted-foreground text-center">
+                                            {isListening ? 'Speaking… release to send' : 'Hold to talk • Patient will respond by voice'}
+                                        </p>
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="py-4 px-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-sm text-center">
+                                    Voice input is not supported in this browser. Use Chrome, Edge, or Safari for voice history taking.
+                                </div>
+                            )}
                             <button
                                 onClick={handleFinishHistory}
                                 className="w-full py-3 rounded-xl text-sm font-medium bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 hover:bg-emerald-500/20 transition-colors"

@@ -63,7 +63,7 @@ export function ContactFormSection() {
           <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-white tracking-tight mb-6">
             Let&apos;s build something exceptional together
           </h2>
-          <p className="text-[#C8C8C8] text-base md:text-lg max-w-2xl mx-auto leading-relaxed">
+          <p className="text-[#C8C8C8] text-base md:text-lg max-w-2xl mx-auto leading-loose">
             Share your project details and our team will reach out within one business day. We&apos;re here to collaborate and craft meaningful experiences.
           </p>
         </motion.div>
@@ -99,7 +99,7 @@ export function ContactFormSection() {
                   <h3 className="text-base font-semibold text-white mb-2">
                     Tell us about your needs
                   </h3>
-                  <p className="text-sm text-white/40 leading-relaxed">
+                  <p className="text-sm text-white/40 leading-loose">
                     Whether you&apos;re a programme lead, educator, or student — we&apos;re here to help with OSCE design, station setup, and platform questions.
                   </p>
                 </div>

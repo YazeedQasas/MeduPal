@@ -499,7 +499,7 @@ export default function LandingPage({ setActiveTab }) {
             fontSize: 'clamp(40px,5.8vw,68px)',
             fontWeight: 600,
             letterSpacing: '-0.025em',
-            lineHeight: 1.06,
+            lineHeight: 1.22,
             margin: 0,
           }}>
             Master every OSCE{' '}
@@ -511,7 +511,7 @@ export default function LandingPage({ setActiveTab }) {
             fontSize: 14,
             fontWeight: 400,
             color: 'rgba(255,255,255,0.42)',
-            lineHeight: 1.65,
+            lineHeight: 1.85,
             maxWidth: 520,
             margin: 0,
           }}>
@@ -628,7 +628,7 @@ export default function LandingPage({ setActiveTab }) {
                 fontSize: 'clamp(28px, 3.2vw, 44px)',
                 color: 'rgba(255,255,255,0.88)',
                 letterSpacing: '-0.02em',
-                lineHeight: 1.1,
+                lineHeight: 1.35,
                 fontWeight: 500,
                 margin: '0 0 28px',
               }}>
@@ -767,13 +767,16 @@ export default function LandingPage({ setActiveTab }) {
 
         <div className="relative max-w-6xl mx-auto grid md:grid-cols-2 gap-16 lg:gap-20 items-center">
           <FadeIn>
-            <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold tracking-tight leading-tight mb-8 text-white">
+            <h2
+              className="text-3xl md:text-4xl lg:text-5xl font-bold leading-snug mb-8 text-white"
+              style={{ letterSpacing: '0.06em' }}
+            >
               Leveling the playing field for medical students.{' '}
               <span key={aboutWordIdx} className="animate-element inline-block text-[rgba(100,170,145,0.95)]">
                 {aboutRotatingWords[aboutWordIdx]}
               </span>
             </h2>
-            <p className="text-white/50 leading-relaxed mb-8 max-w-lg">
+            <p className="text-white/50 leading-loose mb-8 max-w-lg">
               Where you study shouldn&apos;t limit how well you prepare. MeduPal gives every student access to the same high-quality OSCE practice and AI feedback.
             </p>
             <button
