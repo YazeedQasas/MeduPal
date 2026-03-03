@@ -1,6 +1,7 @@
 import { ArrowLeft } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { cn } from '../../lib/utils';
+import { supabase } from '../../lib/supabase';
 
 const roleLabelMap = {
   admin: 'Admin',
@@ -19,11 +20,28 @@ const roleBadgeClass = {
 };
 
 export function ProfileSettings({ setActiveTab }) {
-  const { user, profile } = useAuth();
+  const { user, profile, role, has_hardware, refreshProfile } = useAuth();
   const displayName = profile?.full_name || user?.email?.split('@')[0] || 'User';
   const email = user?.email ?? '—';
   const roleLabel = roleLabelMap[profile?.role] || profile?.role || 'User';
   const badgeClass = roleBadgeClass[profile?.role] || 'bg-muted text-muted-foreground border-border';
+
+  const handleSetHardware = async (value) => {
+    if (!user?.id) return;
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ has_hardware: value })
+        .eq('id', user.id);
+      if (error) {
+        console.error('Error updating hardware flag', error);
+        return;
+      }
+      await refreshProfile?.();
+    } catch (err) {
+      console.error('Unexpected error updating hardware flag', err);
+    }
+  };
 
   return (
     <div className="max-w-[800px] mx-auto space-y-6">
@@ -69,6 +87,54 @@ export function ProfileSettings({ setActiveTab }) {
               </div>
             </div>
           </div>
+
+          {role === 'student' && (
+            <div className="mt-6 rounded-2xl border border-border bg-card/60 p-5 space-y-3">
+              <div className="space-y-1">
+                <h2 className="text-sm font-semibold text-foreground">Practice Access (Demo)</h2>
+                <p className="text-xs text-muted-foreground">
+                  Enable practice features by confirming you have a manikin.
+                </p>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-xs text-muted-foreground">
+                  <p>
+                    Status:{' '}
+                    <span className={cn(
+                      'font-medium',
+                      has_hardware ? 'text-emerald-400' : 'text-muted-foreground'
+                    )}>
+                      {has_hardware ? 'Practice enabled' : 'Practice disabled'}
+                    </span>
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSetHardware(true)}
+                    className={cn(
+                      'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border',
+                      has_hardware
+                        ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/40 cursor-default'
+                        : 'bg-primary text-primary-foreground border-primary/60 hover:bg-primary/90'
+                    )}
+                    disabled={has_hardware === true}
+                  >
+                    I have a Manikin (Enable Practice)
+                  </button>
+                  {has_hardware && (
+                    <button
+                      type="button"
+                      onClick={() => handleSetHardware(false)}
+                      className="px-2 py-1 rounded-lg text-[11px] font-medium text-muted-foreground border border-border hover:bg-muted/40 transition-colors"
+                    >
+                      Disable
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="pt-4 border-t border-border">
             <button

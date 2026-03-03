@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LayoutDashboard, FileText, HardDrive, Settings, Activity, LogOut, GraduationCap, UserCog } from 'lucide-react';
+import { LayoutDashboard, FileText, HardDrive, Settings, Activity, LogOut, GraduationCap, UserCog, Home } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -11,11 +11,12 @@ import {
 import { cn } from '../../lib/utils';
 
 const navItems = [
+  { icon: Home, label: 'Home', id: 'student-hub', studentOnly: true },
   { icon: LayoutDashboard, label: 'Dashboard', id: 'dashboard', adminOnly: true },
   { icon: FileText, label: 'Cases', id: 'cases' },
   { icon: Activity, label: 'Sessions', id: 'sessions' },
-  { icon: GraduationCap, label: 'Students', id: 'students' },
-  { icon: HardDrive, label: 'Hardware & Sensors', id: 'hardware' },
+  { icon: GraduationCap, label: 'Students', id: 'students', instructorOnly: true },
+  { icon: HardDrive, label: 'Hardware & Sensors', id: 'hardware', instructorOnly: true },
   { icon: Settings, label: 'Settings', id: 'settings', adminOnly: true },
   { icon: UserCog, label: 'Users', id: 'users', adminOnly: true },
 ];
@@ -123,7 +124,9 @@ export function Sidebar({ activeTab, setActiveTab }) {
   };
 
   const filteredNavItems = navItems.filter((item) => {
+    if (item.studentOnly) return role === 'student';
     if (item.id === 'dashboard') return role === 'admin' || role === 'faculty' || role === 'instructor';
+    if (item.instructorOnly && role === 'student') return false;
     return !item.adminOnly || role === 'admin';
   });
 

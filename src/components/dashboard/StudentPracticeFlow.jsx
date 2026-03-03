@@ -29,6 +29,7 @@ import {
     ListChecks
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { supabase } from '../../lib/supabase';
 import {
     isFasterWhisperSttEnabled,
     recordAudioForStt,
@@ -43,13 +44,15 @@ const STEPS = [
     { id: 4, label: 'Physical Evaluation', icon: ListChecks }
 ];
 
-const MEDUPAL_CASES = [
-    { id: 'pneumonia', title: 'Pneumonia', category: 'Respiratory' },
-    { id: 'aortic-stenosis', title: 'Aortic Stenosis', category: 'Cardiac' },
-    { id: 'mitral-stenosis', title: 'Mitral Stenosis', category: 'Cardiac' },
-    { id: 'asthma', title: 'Asthma', category: 'Respiratory' },
-    { id: 'copd', title: 'COPD', category: 'Respiratory' }
-];
+const TITLE_TO_MOCK_KEY = {
+    'Pneumonia': 'pneumonia',
+    'Aortic Stenosis': 'aortic-stenosis',
+    'Mitral Stenosis': 'mitral-stenosis',
+    'Asthma': 'asthma',
+    'COPD': 'copd',
+    'Acute Myocardial Infarction': 'aortic-stenosis',
+    'Pediatric Asthma Attack': 'asthma'
+};
 
 const INITIAL_VITALS = {
     age: '45 years',
@@ -58,6 +61,22 @@ const INITIAL_VITALS = {
     heartRate: '88 bpm',
     spO2: 97,
     respiratoryRate: 18
+};
+
+const SEVERITY_BY_MOCK_KEY = {
+    'pneumonia': 'Moderate',
+    'asthma': 'Mild',
+    'copd': 'Moderate',
+    'aortic-stenosis': 'Severe',
+    'mitral-stenosis': 'Moderate'
+};
+
+const CHIEF_COMPLAINTS = {
+    'pneumonia': "I have had fever and productive cough for the past 3 days.",
+    'asthma': "I feel chest tightness and wheezing, especially at night.",
+    'copd': "I have chronic cough and increasing shortness of breath.",
+    'aortic-stenosis': "I feel dizzy and short of breath when I exert myself.",
+    'mitral-stenosis': "I get tired easily and feel breathless when lying down."
 };
 
 const CASE_SYMPTOMS = {
@@ -180,7 +199,10 @@ const PHYSICAL_RUBRIC_CRITERIA = [
 
 function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
     const [currentStep, setCurrentStep] = useState(standaloneHistoryOnly ? 1 : 0);
-    const [selectedCase, setSelectedCase] = useState(standaloneHistoryOnly ? (MEDUPAL_CASES.find(c => c.id === 'mitral-stenosis') || MEDUPAL_CASES[2]) : null);
+    const [selectedCase, setSelectedCase] = useState(null);
+    const [casesFromDb, setCasesFromDb] = useState([]);
+    const [casesLoading, setCasesLoading] = useState(true);
+    const [casesError, setCasesError] = useState(null);
     const [messages, setMessages] = useState([
         {
             role: 'system',
@@ -190,6 +212,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
     const [inputValue, setInputValue] = useState('');
     const [isTyping, setIsTyping] = useState(false);
     const [isSelecting, setIsSelecting] = useState(false);
+    const [selectionCountdown, setSelectionCountdown] = useState(10);
     const [patientStatus, setPatientStatus] = useState(INITIAL_VITALS);
     const [isDeteriorating, setIsDeteriorating] = useState(false);
     const [hasDeteriorated, setHasDeteriorated] = useState(false);
@@ -226,11 +249,66 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
 
     const chatEndRef = useRef(null);
     const countdownRef = useRef(null);
+    const selectionCountdownRef = useRef(null);
     const timerRef = useRef(null);
     const deteriorationTimeoutRef = useRef(null);
     const recognitionRef = useRef(null);
     const mockRecordingTimeoutRef = useRef(null);
     const fwRecordingRef = useRef(null);
+
+    const fetchCases = useCallback(async () => {
+        setCasesLoading(true);
+        setCasesError(null);
+        try {
+            const { data, error } = await supabase
+                .from('cases')
+                .select('id, title, category');
+            if (error) throw error;
+            setCasesFromDb(data || []);
+        } catch (err) {
+            console.error('Failed to fetch cases:', err);
+            setCasesError(err.message || 'Failed to load cases');
+            setCasesFromDb([]);
+        } finally {
+            setCasesLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchCases();
+    }, [fetchCases]);
+
+    useEffect(() => {
+        if (standaloneHistoryOnly && casesFromDb.length > 0 && !selectedCase) {
+            setSelectedCase(casesFromDb[0]);
+        }
+    }, [standaloneHistoryOnly, casesFromDb, selectedCase]);
+
+    useEffect(() => {
+        if (!isSelecting) return;
+        
+        selectionCountdownRef.current = setInterval(() => {
+            setSelectionCountdown(prev => {
+                if (prev <= 1) {
+                    if (selectionCountdownRef.current) {
+                        clearInterval(selectionCountdownRef.current);
+                        selectionCountdownRef.current = null;
+                    }
+                    setIsSelecting(false);
+                    setCurrentStep(1);
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+        
+        return () => {
+            if (selectionCountdownRef.current) {
+                clearInterval(selectionCountdownRef.current);
+                selectionCountdownRef.current = null;
+            }
+        };
+    }, [isSelecting]);
 
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -271,22 +349,25 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     };
 
+    const getCaseMockKey = useCallback((caseObj) => {
+        if (!caseObj?.title) return 'pneumonia';
+        return TITLE_TO_MOCK_KEY[caseObj.title] || 'pneumonia';
+    }, []);
+
     const handleAICaseSelect = () => {
-        if (isSelecting) return;
-        setIsSelecting(true);
+        if (isSelecting || casesFromDb.length === 0) return;
         
-        setTimeout(() => {
-            const randomCase = MEDUPAL_CASES[Math.floor(Math.random() * MEDUPAL_CASES.length)];
-            setSelectedCase(randomCase);
-            setTimeout(() => setCurrentStep(1), 600);
-        }, 400);
+        const randomCase = casesFromDb[Math.floor(Math.random() * casesFromDb.length)];
+        setSelectedCase(randomCase);
+        setIsSelecting(true);
+        setSelectionCountdown(10);
     };
 
     const getPatientReply = useCallback(() => {
-        const caseId = selectedCase?.id || 'pneumonia';
-        const replies = CASE_PATIENT_REPLIES[caseId] || CASE_PATIENT_REPLIES['pneumonia'];
+        const caseKey = getCaseMockKey(selectedCase);
+        const replies = CASE_PATIENT_REPLIES[caseKey] || CASE_PATIENT_REPLIES['pneumonia'];
         return replies[Math.floor(Math.random() * replies.length)];
-    }, [selectedCase]);
+    }, [selectedCase, getCaseMockKey]);
 
     const speakText = useCallback((text) => {
         if (!voiceEnabled || typeof window === 'undefined') return;
@@ -344,7 +425,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
     };
 
     const getMockTranscript = useCallback(() => {
-        const caseId = selectedCase?.id || 'pneumonia';
+        const caseKey = getCaseMockKey(selectedCase);
         const mockTranscripts = {
             'pneumonia': ["Can you describe your chest pain?", "When did your cough start?", "Do you have any fever?"],
             'aortic-stenosis': ["Do you feel dizzy when standing?", "Does your chest hurt during exercise?", "Have you fainted recently?"],
@@ -352,9 +433,9 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
             'asthma': ["What triggers your breathing problems?", "Do you wheeze at night?", "Does your chest feel tight?"],
             'copd': ["How long have you been coughing?", "Do you smoke or have you smoked?", "Do you produce sputum when coughing?"]
         };
-        const transcripts = mockTranscripts[caseId] || mockTranscripts['pneumonia'];
+        const transcripts = mockTranscripts[caseKey] || mockTranscripts['pneumonia'];
         return transcripts[Math.floor(Math.random() * transcripts.length)];
-    }, [selectedCase]);
+    }, [selectedCase, getCaseMockKey]);
 
     const toggleRecording = useCallback(() => {
         if (isRecording) {
@@ -518,8 +599,8 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
     const handleZoneClick = useCallback((zone) => {
         setSelectedZone(zone);
         
-        const caseId = selectedCase?.id || 'pneumonia';
-        const findings = ZONE_FINDINGS[caseId] || ZONE_FINDINGS['pneumonia'];
+        const caseKey = getCaseMockKey(selectedCase);
+        const findings = ZONE_FINDINGS[caseKey] || ZONE_FINDINGS['pneumonia'];
         const finding = findings[zone.type] || 'Normal findings';
         setSelectedFinding(finding);
         
@@ -533,7 +614,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         
         // Auto-check auscultation when clicking zones
         setExamChecklist(prev => ({ ...prev, auscultation: true }));
-    }, [selectedCase]);
+    }, [selectedCase, getCaseMockKey]);
 
     const handlePlaySound = useCallback(() => {
         setPlayingSoundDemo(true);
@@ -668,7 +749,23 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                                 Let our AI choose an appropriate clinical case for your practice session based on your learning progress.
                             </p>
                             
-                            {!selectedCase ? (
+                            {casesLoading ? (
+                                <div className="px-8 py-4 rounded-xl text-lg font-medium bg-muted/50 text-muted-foreground border border-white/5">
+                                    Loading cases...
+                                </div>
+                            ) : casesError ? (
+                                <div className="space-y-3">
+                                    <p className="text-sm text-red-400">{casesError}</p>
+                                    <button
+                                        onClick={fetchCases}
+                                        className="px-6 py-3 rounded-xl text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                                    >
+                                        Retry
+                                    </button>
+                                </div>
+                            ) : casesFromDb.length === 0 ? (
+                                <p className="text-sm text-muted-foreground">No cases found in database</p>
+                            ) : !selectedCase ? (
                                 <button
                                     onClick={handleAICaseSelect}
                                     disabled={isSelecting}
@@ -679,7 +776,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                                             : "hover:bg-primary/90 hover:scale-105"
                                     )}
                                 >
-                                    {isSelecting ? 'AI is thinking...' : 'Let AI Choose Case'}
+                                    Let AI Choose Case
                                 </button>
                             ) : (
                                 <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
@@ -688,14 +785,23 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                                         <h3 className="text-xl font-bold text-foreground">{selectedCase.title}</h3>
                                         <span className={cn(
                                             "inline-block mt-2 text-xs px-2 py-1 rounded-full font-medium",
-                                            selectedCase.category === 'Cardiac' 
+                                            selectedCase.category === 'Cardiac' || selectedCase.category === 'Cardiology'
                                                 ? "bg-red-500/10 text-red-400" 
                                                 : "bg-blue-500/10 text-blue-400"
                                         )}>
                                             {selectedCase.category}
                                         </span>
                                     </div>
-                                    <p className="text-muted-foreground text-sm">Starting session...</p>
+                                    {isSelecting ? (
+                                        <div className="space-y-1">
+                                            <p className="text-muted-foreground text-sm">AI is selecting the best case for you...</p>
+                                            <p className="text-xs text-muted-foreground">
+                                                Starting in {selectionCountdown}s...
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <p className="text-muted-foreground text-sm">Starting session...</p>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -715,8 +821,50 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                             </div>
                         )}
 
+                        {/* Chief Complaint — Speech bubble from patient avatar */}
+                        {selectedCase && (
+                            <div className="flex-shrink-0 px-4 pt-3">
+                                <div className="flex items-start gap-3">
+                                    {/* Patient avatar */}
+                                    <div
+                                        className="flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center border border-white/10"
+                                        style={{
+                                            background: 'linear-gradient(145deg, rgba(90, 125, 138, 0.4) 0%, rgba(61, 90, 106, 0.5) 100%)',
+                                            boxShadow: '0 2px 8px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.08)'
+                                        }}
+                                    >
+                                        <User size={22} className="text-slate-400" />
+                                    </div>
+                                    {/* Speech bubble */}
+                                    <div className="max-w-md relative">
+                                        <div
+                                            className="relative rounded-2xl rounded-tl-md border border-white/10 px-4 py-3"
+                                            style={{
+                                                background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.6) 100%)',
+                                                boxShadow: '0 2px 12px rgba(0,0,0,0.15), 0 0 20px rgba(59, 130, 246, 0.08)'
+                                            }}
+                                        >
+                                            {/* Bubble tail (points toward avatar) */}
+                                            <div
+                                                className="absolute -left-1.5 top-3 w-0 h-0"
+                                                style={{
+                                                    borderTop: '6px solid transparent',
+                                                    borderBottom: '6px solid transparent',
+                                                    borderRight: '8px solid rgba(30, 41, 59, 0.85)'
+                                                }}
+                                            />
+                                            <p className="text-sm font-medium text-foreground italic relative z-10">
+                                                &quot;{selectedCase.chief_complaint || CHIEF_COMPLAINTS[getCaseMockKey(selectedCase)] || CHIEF_COMPLAINTS['pneumonia']}&quot;
+                                            </p>
+                                        </div>
+                                        <p className="text-[10px] text-muted-foreground mt-1.5 ml-1 font-medium uppercase tracking-wider">Chief Complaint</p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         {/* Main Two-Column Layout */}
-                        <div className="flex-1 flex overflow-hidden p-4 gap-4">
+                        <div className="flex-1 flex overflow-hidden p-4 gap-4 min-h-0">
                             {/* LEFT COLUMN: Patient Avatar + Conversation (60-65%) */}
                             <div className="flex-[3] flex flex-col bg-card border border-white/5 rounded-xl overflow-hidden min-w-0">
                                 {/* Header */}
@@ -948,17 +1096,17 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                             </div>
 
                             {/* RIGHT COLUMN: Patient Status + Timer + Hint (35-40%) */}
-                            <div className="hidden lg:flex flex-[2] flex-col gap-4 min-w-0">
-                                {/* TOP: Patient Status Card (Largest) */}
-                                <div className="flex-1 bg-card border border-white/5 rounded-xl p-4 overflow-y-auto">
-                                    <h3 className="font-semibold text-foreground mb-3 flex items-center gap-2">
+                            <div className="hidden lg:flex flex-[3] flex-col justify-start gap-4 min-w-[260px] min-h-0 overflow-y-auto">
+                                {/* Patient Status Card - anchored at top */}
+                                <div className="flex-shrink-0 bg-card border border-white/5 rounded-xl p-4">
+                                    <h3 className="font-semibold text-foreground mb-2 flex items-center gap-2">
                                         <Activity size={16} className="text-primary" />
                                         Patient Status
                                     </h3>
                                     
                                     {/* Vitals Grid */}
-                                    <div className="grid grid-cols-3 gap-2 mb-4">
-                                        <div className="p-2 bg-muted/30 rounded-lg text-center">
+                                    <div className="grid grid-cols-3 gap-1.5 mb-3">
+                                        <div className="p-2 bg-muted/30 rounded-lg text-center min-w-0">
                                             <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
                                                 <Thermometer size={10} />
                                                 <span className="text-[10px]">Temp</span>
@@ -1022,9 +1170,9 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
 
                                     {/* Symptoms */}
                                     <div>
-                                        <h4 className="text-xs font-medium text-muted-foreground mb-2">Reported Symptoms</h4>
+                                        <h4 className="text-xs font-medium text-muted-foreground mb-1.5">Reported Symptoms</h4>
                                         <div className="flex flex-wrap gap-1.5">
-                                            {(selectedCase ? CASE_SYMPTOMS[selectedCase.id] || [] : []).map((symptom, idx) => (
+                                            {(selectedCase ? (CASE_SYMPTOMS[getCaseMockKey(selectedCase)] || []) : []).map((symptom, idx) => (
                                                 <span
                                                     key={idx}
                                                     className="px-2 py-0.5 bg-amber-500/10 text-amber-500 text-[10px] rounded-full font-medium"
@@ -1036,19 +1184,19 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                                     </div>
                                 </div>
 
-                                {/* MIDDLE ROW: Timer + Hint */}
-                                <div className="flex gap-4 flex-shrink-0">
+                                {/* Timer + Hint */}
+                                <div className="flex gap-3 flex-shrink-0">
                                     {/* Timer Card */}
-                                    <div className="flex-1 bg-card border border-white/5 rounded-xl p-4 text-center">
-                                        <div className="flex items-center justify-center gap-2 text-muted-foreground mb-1">
-                                            <Clock size={14} />
-                                            <span className="text-xs font-medium">Timer</span>
+                                    <div className="flex-1 bg-card border border-white/5 rounded-xl p-2.5 text-center min-w-0">
+                                        <div className="flex items-center justify-center gap-1.5 text-muted-foreground mb-0.5">
+                                            <Clock size={12} />
+                                            <span className="text-[10px] font-medium">Timer</span>
                                         </div>
-                                        <span className="text-2xl font-bold text-foreground font-mono">{formatTime(elapsedTime)}</span>
+                                        <span className="text-xl font-bold text-foreground font-mono">{formatTime(elapsedTime)}</span>
                                     </div>
 
                                     {/* Hint Toggle */}
-                                    <div className="flex-1 bg-card border border-white/5 rounded-xl p-3 flex flex-col">
+                                    <div className="flex-1 bg-card border border-white/5 rounded-xl p-2.5 flex flex-col min-w-0">
                                         {showHint ? (
                                             <>
                                                 <button
@@ -1074,7 +1222,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                                     </div>
                                 </div>
 
-                                {/* Demo Trigger (small) */}
+                                {/* Demo Trigger */}
                                 {!hasDeteriorated && (
                                     <button
                                         onClick={triggerDeterioration}
@@ -1088,7 +1236,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                         </div>
 
                         {/* Bottom Action Button */}
-                        <div className="flex-shrink-0 p-4 pt-0 flex justify-end">
+                        <div className="flex-shrink-0 px-4 pb-4 pt-2 flex justify-end">
                             {standaloneHistoryOnly ? (
                                 <button
                                     onClick={onExit}
@@ -1190,7 +1338,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                     };
                     
                     const getKeyFindings = () => {
-                        const caseId = selectedCase?.id || 'pneumonia';
+                        const caseKey = getCaseMockKey(selectedCase);
                         const findings = {
                             'pneumonia': ['Fever present', 'Productive cough with yellow sputum', 'Pleuritic chest pain', 'Shortness of breath on exertion'],
                             'aortic-stenosis': ['Exertional chest pain', 'Syncope/near-syncope episodes', 'Exertional dyspnea', 'Reduced exercise tolerance'],
@@ -1198,7 +1346,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                             'asthma': ['Nocturnal symptoms', 'Wheeze on triggers (cold, dust)', 'Chest tightness', 'Known allergies (cats, pollen)'],
                             'copd': ['30-year smoking history', 'Chronic productive cough', 'Progressive dyspnea', 'Reduced exercise capacity']
                         };
-                        const base = findings[caseId] || findings['pneumonia'];
+                        const base = findings[caseKey] || findings['pneumonia'];
                         if (hasDeteriorated) {
                             return [...base, 'SpO₂ deterioration observed (dropped to 88%)'];
                         }
@@ -1231,7 +1379,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
 
                     const copyEvaluationSummary = async () => {
                         const keyFindings = getKeyFindings();
-                        const diagnosisName = MEDUPAL_CASES.find(c => c.id === selectedDiagnosis)?.title || 'Not selected';
+                        const diagnosisName = casesFromDb.find(c => c.id === selectedDiagnosis)?.title || 'Not selected';
                         const summary = `
 OSCE EVALUATION SUMMARY
 ========================
@@ -1415,7 +1563,7 @@ FEEDBACK: ${getFeedback()}
                                                     className="w-full bg-muted/50 border border-white/5 rounded-lg px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
                                                 >
                                                     <option value="">-- Select a diagnosis --</option>
-                                                    {MEDUPAL_CASES.map(c => (
+                                                    {casesFromDb.map(c => (
                                                         <option key={c.id} value={c.id}>{c.title}</option>
                                                     ))}
                                                 </select>
@@ -1518,7 +1666,7 @@ FEEDBACK: ${getFeedback()}
                                                     Suggested questions for {selectedCase?.title}:
                                                 </p>
                                                 <ul className="space-y-2">
-                                                    {(missedQuestions[selectedCase?.id] || missedQuestions['pneumonia']).map((q, idx) => (
+                                                    {(missedQuestions[getCaseMockKey(selectedCase)] || missedQuestions['pneumonia']).map((q, idx) => (
                                                         <li key={idx} className="flex items-start gap-2 text-sm">
                                                             <span className="text-primary font-medium">{idx + 1}.</span>
                                                             <span className="text-muted-foreground">{q}</span>
@@ -1976,8 +2124,8 @@ FEEDBACK: ${getFeedback()}
 
                 {/* STEP 4: Physical Evaluation */}
                 {currentStep === 4 && (() => {
-                    const caseId = selectedCase?.id || 'pneumonia';
-                    const requirements = REQUIRED_ZONES_BY_CASE[caseId] || REQUIRED_ZONES_BY_CASE['pneumonia'];
+                    const caseKey = getCaseMockKey(selectedCase);
+                    const requirements = REQUIRED_ZONES_BY_CASE[caseKey] || REQUIRED_ZONES_BY_CASE['pneumonia'];
                     const examinedZoneIds = examLog.map(entry => {
                         const zone = BODY_ZONES.find(z => z.label === entry.zone);
                         return zone?.id;
@@ -2037,11 +2185,11 @@ FEEDBACK: ${getFeedback()}
                         const hasCardiacZones = examinedZoneIds.some(id => id && id.includes('heart'));
                         
                         if (hasLungZones) {
-                            const lungFindings = ZONE_FINDINGS[caseId]?.lung || 'Normal breath sounds';
+                            const lungFindings = ZONE_FINDINGS[caseKey]?.lung || 'Normal breath sounds';
                             findings.push({ zone: 'Lung fields', finding: lungFindings });
                         }
                         if (hasCardiacZones) {
-                            const cardiacFindings = ZONE_FINDINGS[caseId]?.cardiac || 'Normal heart sounds';
+                            const cardiacFindings = ZONE_FINDINGS[caseKey]?.cardiac || 'Normal heart sounds';
                             findings.push({ zone: 'Cardiac', finding: cardiacFindings });
                         }
                         return findings;

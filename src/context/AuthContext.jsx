@@ -7,13 +7,16 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(false);
   const [authError, setAuthError] = useState(null);
 
   const fetchProfile = useCallback(async (userId) => {
     if (!userId) {
       setProfile(null);
+      setProfileLoading(false);
       return;
     }
+    setProfileLoading(true);
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
@@ -23,10 +26,12 @@ export function AuthProvider({ children }) {
     if (error) {
       console.error('Error fetching profile', error);
       setAuthError(error.message);
+      setProfileLoading(false);
       return null;
     }
 
     setProfile(data);
+    setProfileLoading(false);
     return data;
   }, []);
 
@@ -49,6 +54,7 @@ export function AuthProvider({ children }) {
       } else {
         setUser(null);
         setProfile(null);
+        setProfileLoading(false);
       }
     });
 
@@ -65,6 +71,7 @@ export function AuthProvider({ children }) {
       } else {
         setUser(null);
         setProfile(null);
+        setProfileLoading(false);
       }
       setLoading(false);
     });
@@ -154,19 +161,32 @@ export function AuthProvider({ children }) {
     }
     setUser(null);
     setProfile(null);
+    setProfileLoading(false);
     return { error: null };
   }, []);
+
+  const refreshProfile = useCallback(() => {
+    if (user?.id) {
+      return fetchProfile(user.id);
+    }
+    return Promise.resolve(null);
+  }, [user, fetchProfile]);
 
   const value = {
     user,
     profile,
     role: profile?.role ?? null,
+    full_name: profile?.full_name ?? null,
+    has_hardware: profile?.has_hardware ?? false,
+    can_exam: profile?.can_exam ?? false,
     loading,
+    profileLoading,
     authError,
     signIn,
     signUpStudent,
     updateRole,
     signOut,
+    refreshProfile,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

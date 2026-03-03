@@ -20,6 +20,7 @@ import RoleSelectPage from "./components/auth/RoleSelectPage";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { LoadingScreen } from "./components/ui/LoadingScreen";
 import PracticeHistoryPage from "./components/dashboard/PracticeHistoryPage";
+import { StudentHub } from "./components/dashboard/StudentHub";
 
 function AppContent() {
   const [activeTab, setActiveTab] = useState("landing");
@@ -37,7 +38,7 @@ function AppContent() {
 
   // When auth has finished loading, restore route:
   // - if there's no user, send to landing
-  // - if there is a user, send admins to admin dashboard, others to cases (for now)
+  // - if there is a user, send admins to dashboard, students to student-hub, others to cases
   useEffect(() => {
     if (loading) return;
 
@@ -49,11 +50,25 @@ function AppContent() {
     if (user && (activeTab === "landing" || activeTab === "auth")) {
       if (role === "admin" || role === "faculty" || role === "instructor") {
         setActiveTab("dashboard");
+      } else if (role === "student") {
+        setActiveTab("student-hub");
       } else {
         setActiveTab("cases");
       }
     }
   }, [loading, user, role, activeTab]);
+
+  // URL-based redirect: student default "/" → "/student-hub"
+  useEffect(() => {
+    if (loading || !user || role !== "student") return;
+    const path = window.location.pathname;
+    if (path === "/" || path === "/student-hub") {
+      setActiveTab("student-hub");
+      if (path === "/") {
+        window.history.replaceState(null, "", "/student-hub");
+      }
+    }
+  }, [loading, user, role]);
 
   // Don't show landing/dashboard until we know auth state (avoids flash of landing on refresh)
   if (loading) {
@@ -73,6 +88,19 @@ function AppContent() {
 
       case "profile":
         return <ProfileSettings setActiveTab={setActiveTab} />;
+
+      case "student-hub":
+        if (role !== "student") {
+          return (
+            <div className="flex items-center justify-center h-[500px]">
+              <div className="text-center">
+                <h2 className="text-2xl font-bold text-muted-foreground">Student Hub</h2>
+                <p className="text-muted-foreground mt-2">This page is for students only.</p>
+              </div>
+            </div>
+          );
+        }
+        return <StudentHub setActiveTab={setActiveTab} />;
 
       case "dashboard":
         if (role === "faculty" || role === "instructor") {
