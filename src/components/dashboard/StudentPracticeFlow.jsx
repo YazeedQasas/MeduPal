@@ -30,6 +30,8 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import {
+    getPatientReplyApiUrl,
+    getSttApiUrl,
     isFasterWhisperSttEnabled,
     recordAudioForStt,
     sendAudioToSttApi
@@ -231,6 +233,22 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
     const recognitionRef = useRef(null);
     const mockRecordingTimeoutRef = useRef(null);
     const fwRecordingRef = useRef(null);
+    const preferredVoiceRef = useRef(null);
+
+    useEffect(() => {
+        const pickVoice = () => {
+            const voices = window.speechSynthesis.getVoices();
+            if (voices.length === 0) return;
+            const en = voices.filter((v) => v.lang.startsWith('en'));
+            const preferred = en.find((v) =>
+                /natural|neural|aria|zira|sabina|daniel|mark|samantha|karen|moira/i.test(v.name)
+            ) || en.find((v) => v.lang === 'en-US') || en[0] || voices[0];
+            if (preferred) preferredVoiceRef.current = preferred;
+        };
+        pickVoice();
+        window.speechSynthesis.onvoiceschanged = pickVoice;
+        return () => { window.speechSynthesis.onvoiceschanged = null; };
+    }, []);
 
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -288,35 +306,77 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         return replies[Math.floor(Math.random() * replies.length)];
     }, [selectedCase]);
 
-    const speakText = useCallback((text) => {
+    const fallbackSpeak = useCallback((text) => {
+        if (typeof window === 'undefined' || !window.speechSynthesis) {
+            setIsSpeaking(false);
+            return;
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 0.85;
+        utterance.pitch = 1;
+        utterance.volume = 1;
+        if (preferredVoiceRef.current) utterance.voice = preferredVoiceRef.current;
+        else {
+            const voices = window.speechSynthesis.getVoices();
+            if (voices.length > 0) {
+                const en = voices.filter((v) => v.lang.startsWith('en'));
+                const preferred = en.find((v) =>
+                    /natural|neural|aria|zira|sabina|daniel|mark|samantha|karen|moira/i.test(v.name)
+                ) || en.find((v) => v.lang === 'en-US') || en[0] || voices[0];
+                if (preferred) utterance.voice = preferred;
+            }
+        }
+        utterance.onend = () => setIsSpeaking(false);
+        utterance.onerror = () => setIsSpeaking(false);
+        window.speechSynthesis.speak(utterance);
+    }, []);
+
+    const speakText = useCallback(async (text) => {
         if (!voiceEnabled || typeof window === 'undefined') return;
-        
+        if (!text || !text.trim()) return;
+
         window.speechSynthesis.cancel();
         setIsSpeaking(true);
-        
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.rate = 0.9;
-        utterance.pitch = 1;
-        
-        utterance.onend = () => {
-            setIsSpeaking(false);
-        };
-        
-        utterance.onerror = () => {
-            setIsSpeaking(false);
-        };
-        
-        window.speechSynthesis.speak(utterance);
-    }, [voiceEnabled]);
 
-    const handleSendMessage = useCallback(() => {
+        const apiBase = getPatientReplyApiUrl();
+        if (apiBase) {
+            try {
+                const res = await fetch(`${apiBase}/tts`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text.trim() })
+                });
+                if (res.ok && res.headers.get('content-type')?.includes('audio')) {
+                    const blob = await res.blob();
+                    const url = URL.createObjectURL(blob);
+                    const audio = new Audio(url);
+                    audio.onended = () => {
+                        URL.revokeObjectURL(url);
+                        setIsSpeaking(false);
+                    };
+                    audio.onerror = () => {
+                        URL.revokeObjectURL(url);
+                        fallbackSpeak(text);
+                    };
+                    await audio.play();
+                    return;
+                }
+            } catch {
+                // fall through to browser TTS
+            }
+        }
+
+        fallbackSpeak(text);
+    }, [voiceEnabled, fallbackSpeak]);
+
+    const handleSendMessage = useCallback(async () => {
         if (!inputValue.trim() || isTyping) return;
 
         const transcript = inputValue.trim();
         setLastTranscript(transcript);
-        
-        const studentMessage = { 
-            role: 'student', 
+
+        const studentMessage = {
+            role: 'student',
             content: transcript,
             ts: Date.now()
         };
@@ -324,17 +384,39 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         setInputValue('');
         setIsTyping(true);
 
-        setTimeout(() => {
-            const patientResponse = getPatientReply();
-            setMessages(prev => [...prev, { 
-                role: 'patient', 
-                content: patientResponse,
-                ts: Date.now()
-            }]);
-            setIsTyping(false);
-            speakText(patientResponse);
-        }, 500);
-    }, [inputValue, isTyping, getPatientReply, speakText]);
+        let patientResponse;
+        const apiBase = getPatientReplyApiUrl();
+        if (apiBase) {
+            try {
+                const res = await fetch(`${apiBase}/patient-reply`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        case_id: selectedCase?.id || 'pneumonia',
+                        case_title: selectedCase?.title || '',
+                        case_category: selectedCase?.category || '',
+                        symptoms: CASE_SYMPTOMS[selectedCase?.id] || [],
+                        student_question: transcript,
+                        conversation_history: messages.slice(-6)
+                    })
+                });
+                const data = await res.json();
+                patientResponse = (res.ok && data?.text) ? data.text : getPatientReply();
+            } catch {
+                patientResponse = getPatientReply();
+            }
+        } else {
+            patientResponse = getPatientReply();
+        }
+
+        setMessages(prev => [...prev, {
+            role: 'patient',
+            content: patientResponse,
+            ts: Date.now()
+        }]);
+        setIsTyping(false);
+        speakText(patientResponse);
+    }, [inputValue, isTyping, getPatientReply, speakText, selectedCase, messages]);
 
     const handleKeyDown = (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {

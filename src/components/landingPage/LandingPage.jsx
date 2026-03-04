@@ -344,8 +344,7 @@ export default function LandingPage({ setActiveTab }) {
   );
 
   return (
-    <div className="min-h-screen bg-[#000] text-white overflow-x-hidden">
-
+    <>
       {/* ── NAV ── */}
       <nav className="relative z-20 w-full" style={{ padding: '10px 16px' }}>
         <div className="flex items-center justify-between">
@@ -920,6 +919,6 @@ export default function LandingPage({ setActiveTab }) {
           transform: translateY(-1px);
         }
       `}</style>
-    </div>
+    </>
   );
 }

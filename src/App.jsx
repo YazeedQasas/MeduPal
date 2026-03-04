@@ -13,6 +13,7 @@ import { Hardware } from "./components/dashboard/Hardware";
 import { Settings } from "./components/dashboard/Settings";
 import { StationsMap } from "./components/dashboard/StationsMap";
 import { InstructorDashboard } from "./components/dashboard/InstructorDashboard";
+import { StudentDashboard } from "./components/dashboard/StudentDashboard";
 import { ProfileSettings } from "./components/dashboard/ProfileSettings";
 import LandingPage from "./components/landingPage/LandingPage";
 import AuthPage from "./components/auth/AuthPage";
@@ -50,7 +51,7 @@ function AppContent() {
       if (role === "admin" || role === "faculty" || role === "instructor") {
         setActiveTab("dashboard");
       } else {
-        setActiveTab("cases");
+        setActiveTab("student-dashboard");
       }
     }
   }, [loading, user, role, activeTab]);
@@ -120,6 +121,9 @@ function AppContent() {
             </div>
           </div>
         );
+      case "student-dashboard":
+        return <StudentDashboard setActiveTab={setActiveTab} />;
+
       case "cases":
         return <Cases />;
       case "sessions":

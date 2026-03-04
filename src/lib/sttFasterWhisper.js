@@ -4,6 +4,7 @@
  */
 
 const STT_API_URL = typeof import.meta !== 'undefined' ? (import.meta.env?.VITE_STT_API_URL || '') : '';
+const PATIENT_REPLY_API_URL = typeof import.meta !== 'undefined' ? (import.meta.env?.VITE_PATIENT_REPLY_URL || '') : '';
 
 /**
  * Check if Faster-Whisper STT is configured (env has STT API URL).
@@ -19,6 +20,16 @@ export function isFasterWhisperSttEnabled() {
  */
 export function getSttApiUrl() {
   return (STT_API_URL || '').replace(/\/+$/, '');
+}
+
+/**
+ * Get the base URL for the patient-reply (Ollama/Llama) API.
+ * Uses VITE_PATIENT_REPLY_URL if set, otherwise VITE_STT_API_URL (same server).
+ * @returns {string}
+ */
+export function getPatientReplyApiUrl() {
+  const url = (PATIENT_REPLY_API_URL || STT_API_URL || '').trim().replace(/\/+$/, '');
+  return url;
 }
 
 /**

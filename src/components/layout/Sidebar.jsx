@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LayoutDashboard, FileText, HardDrive, Settings, Activity, LogOut, GraduationCap, UserCog } from 'lucide-react';
+import { LayoutDashboard, FileText, HardDrive, Settings, Activity, LogOut, GraduationCap, UserCog, BarChart2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -11,13 +11,14 @@ import {
 import { cn } from '../../lib/utils';
 
 const navItems = [
-  { icon: LayoutDashboard, label: 'Dashboard', id: 'dashboard', adminOnly: true },
-  { icon: FileText, label: 'Cases', id: 'cases' },
-  { icon: Activity, label: 'Sessions', id: 'sessions' },
-  { icon: GraduationCap, label: 'Students', id: 'students' },
-  { icon: HardDrive, label: 'Hardware & Sensors', id: 'hardware' },
-  { icon: Settings, label: 'Settings', id: 'settings', adminOnly: true },
-  { icon: UserCog, label: 'Users', id: 'users', adminOnly: true },
+  { icon: LayoutDashboard, label: 'Dashboard',         id: 'dashboard',          roles: ['admin', 'faculty', 'instructor'] },
+  { icon: BarChart2,       label: 'My Dashboard',      id: 'student-dashboard',  roles: ['student'] },
+  { icon: FileText,        label: 'Cases',              id: 'cases' },
+  { icon: Activity,        label: 'Sessions',           id: 'sessions' },
+  { icon: GraduationCap,   label: 'Students',           id: 'students',           roles: ['admin', 'faculty', 'instructor'] },
+  { icon: HardDrive,       label: 'Hardware & Sensors', id: 'hardware',           roles: ['admin'] },
+  { icon: Settings,        label: 'Settings',           id: 'settings',           roles: ['admin'] },
+  { icon: UserCog,         label: 'Users',              id: 'users',              roles: ['admin'] },
 ];
 
 function Logo() {
@@ -123,8 +124,8 @@ export function Sidebar({ activeTab, setActiveTab }) {
   };
 
   const filteredNavItems = navItems.filter((item) => {
-    if (item.id === 'dashboard') return role === 'admin' || role === 'faculty' || role === 'instructor';
-    return !item.adminOnly || role === 'admin';
+    if (item.roles) return item.roles.includes(role);
+    return true; // no role restriction → show to everyone
   });
 
   const roleLabel = role === 'admin' ? 'Admin' : role === 'faculty' ? 'Instructor' : role === 'technician' ? 'Technician' : role === 'student' ? 'Student' : role || 'User';

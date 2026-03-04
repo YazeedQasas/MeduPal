@@ -32,17 +32,33 @@ python -m uvicorn main:app --reload --port 8000
 (On Windows, use `python -m uvicorn` so the venv’s Python is used.)
 
 - **POST /stt** — `multipart/form-data` with `file` (audio blob, e.g. webm from the browser). Returns `{ "text": "..." }`.
+- **POST /patient-reply** — JSON body: `case_id`, `case_title`, `case_category`, `symptoms[]`, `student_question`, optional `conversation_history`. Uses Ollama (Llama 3) to generate a patient reply; falls back to a canned reply if Ollama is unavailable. Returns `{ "text": "..." }`.
+- **POST /tts** — JSON body: `{ "text": "..." }`. Converts text to speech using OpenAI TTS (natural voice). Returns `audio/mpeg`. Used when `OPENAI_API_KEY` is set; otherwise the app uses browser TTS.
+
+### Ollama (patient replies)
+
+For AI-generated patient answers, run [Ollama](https://ollama.com) locally and pull a model:
+
+```bash
+ollama pull llama3.2
+```
+
+Keep Ollama running (default: `http://localhost:11434`). The app will use it when `VITE_STT_API_URL` is set. Optional env: `OLLAMA_BASE_URL`, `OLLAMA_MODEL` (default `llama3.2`), `OLLAMA_TIMEOUT` (seconds).
 
 ## Frontend
 
-Set the API base URL so the app uses this STT:
+Set the API base URL so the app talks to this server:
 
-- In the project root, add to `.env`: `VITE_STT_API_URL=http://localhost:8000`
-- Restart the Vite dev server.
+- In the **project root**, create or edit `.env` or `.env.local` and add:
+  - **Patient replies (Ollama):** `VITE_PATIENT_REPLY_URL=http://localhost:8000`
+  - **STT (Whisper):** `VITE_STT_API_URL=http://localhost:8000`
+  - You can set just one, or both to the same URL (`http://localhost:8000`).
+- **Restart the Vite dev server** after changing env (e.g. stop `npm run dev` and start it again), or the app won’t see the new values.
 
-Then open the practice History Taking page (e.g. `/practice-history`). When you click the mic, the app records in the browser and sends the audio to this server for transcription.
+Then open the practice History Taking page (e.g. `/practice-history`). The app will use this server for AI patient replies when `VITE_PATIENT_REPLY_URL` (or `VITE_STT_API_URL`) is set, and for voice transcription when `VITE_STT_API_URL` is set.
 
 ## Optional env (server)
 
 - `WHISPER_MODEL` — default `base` (options: `tiny`, `base`, `small`, `medium`, `large`; smaller = faster, larger = more accurate).
 - `WHISPER_DEVICE` — `cpu` (default) or `cuda` (if you have a GPU and PyTorch with CUDA).
+- **Natural TTS (OpenAI):** set `OPENAI_API_KEY` so the manikin uses OpenAI’s natural voice instead of the browser’s. Optional: `TTS_VOICE` (default `nova`; options: `alloy`, `echo`, `fable`, `onyx`, `nova`, `shimmer`), `TTS_MODEL` (default `tts-1-hd`). If the key is not set, the app falls back to browser speech.
