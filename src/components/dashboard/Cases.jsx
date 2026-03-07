@@ -1,24 +1,33 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Search, Filter, Plus, FileText, Clock, Users, ChevronRight, Star, Tag, Activity, Trash2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../context/AuthContext';
 import { CreateCaseForm } from './CreateCaseForm';
 
 export function Cases() {
+    const { role } = useAuth();
+    const canManageCases = role === 'admin' || role === 'faculty' || role === 'instructor' || role === 'technician';
     const [searchTerm, setSearchTerm] = useState('');
     const [categoryFilter, setCategoryFilter] = useState('All Categories');
     const [difficultyFilter, setDifficultyFilter] = useState('Any Difficulty');
     const [cases, setCases] = useState([]);
     const [isCreating, setIsCreating] = useState(false);
 
-    const fetchCases = async () => {
-        const { data, error } = await supabase
+    const fetchCases = useCallback(async () => {
+        let query = supabase
             .from('cases')
             .select(`
                 *,
                 author:profiles(full_name)
             `)
             .order('created_at', { ascending: false });
+
+        if (!canManageCases) {
+            query = query.eq('status', 'Published');
+        }
+
+        const { data, error } = await query;
 
         if (data) {
             const formatted = data.map(c => ({
@@ -34,11 +43,11 @@ export function Cases() {
             }));
             setCases(formatted);
         }
-    };
+    }, [canManageCases]);
 
     useEffect(() => {
         fetchCases();
-    }, []);
+    }, [fetchCases]);
 
     const handleDelete = async (id, e) => {
         e.stopPropagation(); // Prevent card click
@@ -74,15 +83,19 @@ export function Cases() {
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-foreground">Cases Library</h1>
-                    <p className="text-muted-foreground mt-1">Manage and create clinical simulation scenarios.</p>
+                    <p className="text-muted-foreground mt-1">
+                        {canManageCases ? 'Manage and create clinical simulation scenarios.' : 'Browse published clinical simulation scenarios.'}
+                    </p>
                 </div>
-                <button
-                    onClick={() => setIsCreating(true)}
-                    className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg font-medium hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20"
-                >
-                    <Plus size={18} />
-                    Create New Case
-                </button>
+                {canManageCases && (
+                    <button
+                        onClick={() => setIsCreating(true)}
+                        className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg font-medium hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20"
+                    >
+                        <Plus size={18} />
+                        Create New Case
+                    </button>
+                )}
             </div>
 
             {/* Filters and Search */}
@@ -178,13 +191,15 @@ export function Cases() {
                                     Last edit: {caseItem.lastModified}
                                 </span>
                                 <div className="flex items-center gap-2">
-                                    <button
-                                        onClick={(e) => handleDelete(caseItem.id, e)}
-                                        className="text-muted-foreground hover:text-destructive p-1 rounded transition-colors"
-                                        title="Delete Case"
-                                    >
-                                        <Trash2 size={16} />
-                                    </button>
+                                    {canManageCases && (
+                                        <button
+                                            onClick={(e) => handleDelete(caseItem.id, e)}
+                                            className="text-muted-foreground hover:text-destructive p-1 rounded transition-colors"
+                                            title="Delete Case"
+                                        >
+                                            <Trash2 size={16} />
+                                        </button>
+                                    )}
                                     <button className="text-primary hover:text-primary/80 flex items-center gap-1 text-sm font-semibold transition-all group-hover:translate-x-1">
                                         Details
                                         <ChevronRight size={16} />

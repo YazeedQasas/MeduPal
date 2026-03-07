@@ -13,6 +13,145 @@ from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+# Case key resolution: display titles (and aliases) -> stable keys for persona/fallback lookup.
+# Align with TITLE_TO_MOCK_KEY in StudentPracticeFlow.jsx.
+TITLE_TO_CASE_KEY = {
+    "pneumonia": "pneumonia",
+    "aortic-stenosis": "aortic-stenosis",
+    "mitral-stenosis": "mitral-stenosis",
+    "asthma": "asthma",
+    "copd": "copd",
+    "Pneumonia": "pneumonia",
+    "Aortic Stenosis": "aortic-stenosis",
+    "Mitral Stenosis": "mitral-stenosis",
+    "Asthma": "asthma",
+    "COPD": "copd",
+    "Acute Myocardial Infarction": "aortic-stenosis",
+    "Pediatric Asthma Attack": "asthma",
+}
+VALID_CASE_KEYS = {"pneumonia", "aortic-stenosis", "mitral-stenosis", "asthma", "copd"}
+
+
+def resolve_case_key(case_id: str, case_title: str) -> str:
+    """Return a stable case key from case_id or case_title. Default to pneumonia if unresolved."""
+    raw_id = (case_id or "").strip()
+    if raw_id and raw_id in VALID_CASE_KEYS:
+        return raw_id
+    title = (case_title or "").strip()
+    if not title:
+        return raw_id if raw_id in VALID_CASE_KEYS else "pneumonia"
+    # Normalize: lowercase, collapse spaces
+    normalized = " ".join(title.split()).strip()
+    key = TITLE_TO_CASE_KEY.get(normalized)
+    if key:
+        return key
+    # Try lowercase match for display titles
+    key = TITLE_TO_CASE_KEY.get(normalized.lower())
+    if key:
+        return key
+    # Try hyphenated form (e.g. "Aortic Stenosis" -> "aortic-stenosis")
+    hyphenated = normalized.lower().replace(" ", "-")
+    return hyphenated if hyphenated in VALID_CASE_KEYS else "pneumonia"
+
+
+# Per-case patient personas for OSCE-style standardized patients. Keys = case keys above.
+# chief_complaint aligned with CHIEF_COMPLAINTS in StudentPracticeFlow.jsx.
+PATIENT_PERSONAS = {
+    "pneumonia": {
+        "name_age": "Maria, 52-year-old school teacher",
+        "onset_story": "Started with a cold about a week ago; three days ago developed fever and a cough that got worse. No recent travel or sick contacts she can recall.",
+        "emotional_state": "Worried and tired; a bit short-tempered because she can't sleep well.",
+        "social_brief": "Lives with her husband; two adult children. Non-smoker, occasional wine.",
+        "chief_complaint": "I have had fever and productive cough for the past 3 days.",
+        "symptoms_known": "Fever, cough with yellow-green sputum, pain when breathing deeply, shortness of breath, tiredness.",
+        "reveal_only_if_asked": "She might mention a tiny bit of blood in sputum only if asked about sputum appearance or blood.",
+        "do_not_know": "She does not know her diagnosis; avoid medical jargon. She has not had a chest X-ray yet.",
+    },
+    "aortic-stenosis": {
+        "name_age": "James, 68-year-old retiree",
+        "onset_story": "Gradual worsening over months; more short of breath and dizzy with activity.",
+        "emotional_state": "Anxious about falling; frustrated he can't do his usual walks.",
+        "social_brief": "Lives alone; used to be very active.",
+        "chief_complaint": "I feel dizzy and short of breath when I exert myself.",
+        "symptoms_known": "Shortness of breath with exertion, chest squeezing with activity, dizziness, nearly passed out once recently, can barely climb one flight of stairs.",
+        "reveal_only_if_asked": "Syncope and severity of dyspnea—only describe if student asks directly.",
+        "do_not_know": "Does not know diagnosis; no medical jargon.",
+    },
+    "mitral-stenosis": {
+        "name_age": "Patient with mitral stenosis",
+        "onset_story": "Progressive fatigue and breathlessness.",
+        "emotional_state": "Tired and concerned.",
+        "social_brief": "Lives at home.",
+        "chief_complaint": "I get tired easily and feel breathless when lying down.",
+        "symptoms_known": "Tiredness, breathlessness when lying flat, palpitations, pink-tinged sputum when asked.",
+        "reveal_only_if_asked": None,
+        "do_not_know": "No diagnosis; no jargon.",
+    },
+    "asthma": {
+        "name_age": "Patient with asthma",
+        "onset_story": "Recurrent wheezing and chest tightness; worse at night and with triggers.",
+        "emotional_state": "Worried when symptoms flare.",
+        "social_brief": "Lives at home.",
+        "chief_complaint": "I feel chest tightness and wheezing, especially at night.",
+        "symptoms_known": "Wheezing, chest tightness, cough, waking at night; worse with cold air, dust, cats, pollen.",
+        "reveal_only_if_asked": None,
+        "do_not_know": "May know they have asthma; avoid jargon.",
+    },
+    "copd": {
+        "name_age": "Patient with COPD",
+        "onset_story": "Long-standing cough; worsening shortness of breath over years.",
+        "emotional_state": "Frustrated by limitation.",
+        "social_brief": "Smoked for many years; quit several years ago.",
+        "chief_complaint": "I have chronic cough and increasing shortness of breath.",
+        "symptoms_known": "Chronic cough, thick morning sputum, shortness of breath, limited walking distance.",
+        "reveal_only_if_asked": None,
+        "do_not_know": "May know COPD; avoid jargon.",
+    },
+}
+
+
+def _build_system_prompt(
+    case_key: str,
+    persona: dict | None,
+    title: str,
+    category: str,
+    symptoms: list[str],
+) -> str:
+    """Build system prompt for the AI patient: persona block + OSCE rules. Fallback to generic if no persona."""
+    symptoms_str = ", ".join(symptoms) if symptoms else "Not specified"
+    header = "You are a standardized patient in a clinical exam (OSCE)."
+
+    if persona:
+        block = [
+            f"Character: {persona.get('name_age', 'Patient')}.",
+            f"Chief complaint (in your words): {persona.get('chief_complaint', '')}",
+            f"Onset / story: {persona.get('onset_story', '')}",
+            f"Emotional state: {persona.get('emotional_state', '')}",
+            f"Brief social context: {persona.get('social_brief', '')}",
+            f"What you know about your symptoms (lay terms): {persona.get('symptoms_known', '')}",
+        ]
+        reveal = persona.get("reveal_only_if_asked")
+        if reveal:
+            block.append(f"Reveal only if the student asks directly: {reveal}")
+        dont = persona.get("do_not_know")
+        if dont:
+            block.append(f"Constraints: {dont}")
+        header = header + "\n\n" + "\n".join(block)
+    else:
+        header = (
+            f"{header} Condition: {title} ({category}). "
+            f"Reported symptoms: {symptoms_str}. "
+            "You are being interviewed by a medical student."
+        )
+
+    rules = (
+        "\n\nOSCE rules: Answer only what is asked. Use first person only. "
+        "Keep answers to 2–4 sentences. No medical jargon. Stay in character. "
+        "Reveal sensitive or red-flag information only when the student asks you directly about it."
+    )
+    return header + rules
+
+
 # Fallback canned replies when Ollama is unavailable (match frontend CASE_PATIENT_REPLIES)
 CASE_PATIENT_REPLIES = {
     "pneumonia": [
@@ -105,16 +244,42 @@ def _fallback_reply(case_id: str) -> str:
     return random.choice(replies)
 
 
-async def _ollama_chat(system: str, user: str) -> str | None:
-    """Call Ollama /api/chat; return assistant message content or None on failure."""
+def _build_ollama_messages(
+    system: str,
+    conversation_history: list[dict] | None,
+    current_question: str,
+) -> list[dict]:
+    """Convert frontend conversation_history (student/patient) into Ollama user/assistant turns."""
+    messages = [{"role": "system", "content": system}]
+
+    if conversation_history:
+        for turn in conversation_history:
+            role = (turn.get("role") or "").lower()
+            content = turn.get("content") or ""
+            if not content.strip():
+                continue
+            if role == "student":
+                messages.append({"role": "user", "content": content.strip()})
+            elif role == "patient":
+                messages.append({"role": "assistant", "content": content.strip()})
+            # skip "system", "alert", and any other roles
+
+    messages.append({"role": "user", "content": current_question.strip()})
+    return messages
+
+
+async def _ollama_chat(
+    system: str,
+    current_question: str,
+    conversation_history: list[dict] | None = None,
+) -> str | None:
+    """Call Ollama /api/chat with optional conversation history; return assistant message or None."""
     url = f"{OLLAMA_BASE.rstrip('/')}/api/chat"
+    messages = _build_ollama_messages(system, conversation_history, current_question)
     payload = {
         "model": OLLAMA_MODEL,
         "stream": False,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
+        "messages": messages,
     }
     try:
         async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT) as client:
@@ -160,22 +325,22 @@ async def tts(body: TTSRequest):
 @app.post("/patient-reply")
 async def patient_reply(body: PatientReplyRequest):
     """Generate a patient reply using Ollama (Llama 3). Falls back to canned reply on failure."""
-    symptoms_str = ", ".join(body.symptoms) if body.symptoms else "Not specified"
+    case_key = resolve_case_key(body.case_id, body.case_title)
+    persona = PATIENT_PERSONAS.get(case_key)
     title = body.case_title or body.case_id.replace("-", " ").title()
     category = body.case_category or ""
-
-    system = (
-        f"You are a standardized patient with this condition: {title} ({category}). "
-        f"Your reported symptoms include: {symptoms_str}. "
-        "You are being interviewed by a medical student. "
-        "Answer only as this patient would: first person, 2–4 sentences, no medical jargon. "
-        "Stay in character and be concise."
+    system = _build_system_prompt(
+        case_key, persona, title, category, body.symptoms or []
     )
-    user = body.student_question.strip()
+    current_question = body.student_question.strip()
 
-    text = await _ollama_chat(system, user)
+    text = await _ollama_chat(
+        system,
+        current_question,
+        conversation_history=body.conversation_history,
+    )
     if not text:
-        text = _fallback_reply(body.case_id)
+        text = _fallback_reply(case_key)
 
     return {"text": text}
 

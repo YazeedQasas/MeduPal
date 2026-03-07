@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LayoutDashboard, FileText, HardDrive, Settings, Activity, LogOut, GraduationCap, UserCog, BarChart2 } from 'lucide-react';
+import { LayoutDashboard, FileText, HardDrive, Settings, Activity, LogOut, GraduationCap, UserCog, Home, BarChart2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -124,8 +124,12 @@ export function Sidebar({ activeTab, setActiveTab }) {
   };
 
   const filteredNavItems = navItems.filter((item) => {
+    // Merge conflict resolved: unified filter logic
     if (item.roles) return item.roles.includes(role);
-    return true; // no role restriction → show to everyone
+    if (item.studentOnly) return role === 'student';
+    if (item.id === 'dashboard') return role === 'admin' || role === 'faculty' || role === 'instructor';
+    if (item.instructorOnly && role === 'student') return false;
+    return !item.adminOnly || role === 'admin';
   });
 
   const roleLabel = role === 'admin' ? 'Admin' : role === 'faculty' ? 'Instructor' : role === 'technician' ? 'Technician' : role === 'student' ? 'Student' : role || 'User';
