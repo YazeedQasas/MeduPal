@@ -4,6 +4,7 @@ Patient replies via Ollama (Llama 3). Run: python -m uvicorn main:app --reload -
 """
 import os
 import random
+import shutil
 import tempfile
 from contextlib import asynccontextmanager
 
@@ -200,6 +201,48 @@ class TTSRequest(BaseModel):
     text: str
 
 
+def _find_ffmpeg_bin():
+    """Locate ffmpeg.exe, including common winget install locations on Windows."""
+    ff = shutil.which("ffmpeg")
+    if ff:
+        return None  # Already on PATH
+
+    if os.name != "nt":
+        return None
+
+    # Check winget user install: %LOCALAPPDATA%\Microsoft\WinGet\Packages\
+    local = os.environ.get("LOCALAPPDATA", "")
+    if local:
+        winget = os.path.join(local, "Microsoft", "WinGet", "Packages")
+        if os.path.isdir(winget):
+            for name in os.listdir(winget):
+                if "ffmpeg" in name.lower() or "FFmpeg" in name:
+                    pkg = os.path.join(winget, name)
+                    for root, _, files in os.walk(pkg):
+                        if "ffmpeg.exe" in files:
+                            bin_dir = os.path.dirname(os.path.join(root, "ffmpeg.exe"))
+                            return bin_dir
+    return None
+
+
+def _check_ffmpeg():
+    """Ensure FFmpeg is available. On Windows, add winget install path to PATH if needed."""
+    if shutil.which("ffmpeg"):
+        return
+
+    bin_dir = _find_ffmpeg_bin()
+    if bin_dir:
+        os.environ["PATH"] = bin_dir + os.pathsep + os.environ.get("PATH", "")
+        if shutil.which("ffmpeg"):
+            return
+
+    raise RuntimeError(
+        "FFmpeg not found. Whisper requires it to decode audio. "
+        "Install with: winget install ffmpeg   (or choco install ffmpeg). "
+        "Then restart your terminal and run the server again."
+    )
+
+
 # Lazy-load model on first request
 _model = None
 
@@ -215,12 +258,21 @@ def get_model():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _check_ffmpeg()
     yield
     global _model
     _model = None
 
 
 app = FastAPI(title="Medupal STT", lifespan=lifespan)
+
+@app.get("/health")
+def health():
+    """Health check; verifies FFmpeg is available."""
+    return {"ok": True, "ffmpeg": bool(shutil.which("ffmpeg"))}
+
+
+
 
 app.add_middleware(
     CORSMiddleware,

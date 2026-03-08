@@ -62,3 +62,13 @@ Then open the practice History Taking page (e.g. `/practice-history`). The app w
 - `WHISPER_MODEL` — default `base` (options: `tiny`, `base`, `small`, `medium`, `large`; smaller = faster, larger = more accurate).
 - `WHISPER_DEVICE` — `cpu` (default) or `cuda` (if you have a GPU and PyTorch with CUDA).
 - **Natural TTS (OpenAI):** set `OPENAI_API_KEY` so the manikin uses OpenAI’s natural voice instead of the browser’s. Optional: `TTS_VOICE` (default `nova`; options: `alloy`, `echo`, `fable`, `onyx`, `nova`, `shimmer`), `TTS_MODEL` (default `tts-1-hd`). If the key is not set, the app falls back to browser speech.
+
+## Troubleshooting
+
+| Issue | Fix |
+|-------|-----|
+| `FFmpeg not found on PATH` | Install FFmpeg: `winget install ffmpeg` or `choco install ffmpeg`. Restart your terminal after installing. |
+| `VITE_STT_API_URL is not set` | Add `VITE_STT_API_URL=http://localhost:8000` to `.env` or `.env.local` in the project root. Restart the Vite dev server. |
+| `ModuleNotFoundError: No module named 'whisper'` | Run `pip install -r requirements.txt` from the `server` folder. |
+| `Form data requires "python-multipart"` | Run `pip install python-multipart`. |
+| Port 8000 in use | Use a different port: `uvicorn main:app --port 8001` and set `VITE_STT_API_URL=http://localhost:8001` in `.env`. |
