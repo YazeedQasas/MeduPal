@@ -22,6 +22,8 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 import { LoadingScreen } from "./components/ui/LoadingScreen";
 import PracticeHistoryPage from "./components/dashboard/PracticeHistoryPage";
 import { StudentHub } from "./components/dashboard/StudentHub";
+import StudentPracticeFlow from "./components/dashboard/StudentPracticeFlow";
+import { StudentUsageSetup } from "./components/dashboard/StudentUsageSetup";
 
 function AppContent() {
   const [activeTab, setActiveTab] = useState("landing");
@@ -59,7 +61,7 @@ function AppContent() {
     }
   }, [loading, user, role, activeTab]);
 
-  // URL-based redirect: student default "/" → "/student-hub"
+  // URL-based redirect: student default "/" → "/student-hub"; /practice → student-practice
   useEffect(() => {
     if (loading || !user || role !== "student") return;
     const path = window.location.pathname;
@@ -68,6 +70,9 @@ function AppContent() {
       if (path === "/") {
         window.history.replaceState(null, "", "/student-hub");
       }
+    } else if (path === "/practice") {
+      setActiveTab("student-practice");
+      window.history.replaceState(null, "", "/practice");
     }
   }, [loading, user, role]);
 
@@ -83,6 +88,19 @@ function AppContent() {
 
       case "onboarding":
         return <RoleSelectPage setActiveTab={setActiveTab} />;
+
+      case "student-usage-setup":
+        if (role !== "student") {
+          return (
+            <div className="flex items-center justify-center h-[500px]">
+              <div className="text-center">
+                <h2 className="text-2xl font-bold text-muted-foreground">Setup</h2>
+                <p className="text-muted-foreground mt-2">This page is for students only.</p>
+              </div>
+            </div>
+          );
+        }
+        return <StudentUsageSetup setActiveTab={setActiveTab} />;
 
       case "auth":
         return <AuthPage setActiveTab={setActiveTab} />;
@@ -151,6 +169,16 @@ function AppContent() {
         );
       case "student-dashboard":
         return <StudentDashboard setActiveTab={setActiveTab} />;
+
+      case "student-practice":
+        return (
+          <StudentPracticeFlow
+            onExit={() => {
+              setActiveTab("student-hub");
+              window.history.replaceState(null, "", "/student-hub");
+            }}
+          />
+        );
 
       case "cases":
         return <Cases />;

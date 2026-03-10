@@ -65,7 +65,7 @@ export default function RoleSelectPage({ setActiveTab }) {
                 setError(err.message || 'Failed to save your role. Please try again.');
                 return;
             }
-            setActiveTab(selected === 'instructor' ? 'dashboard' : 'cases');
+            setActiveTab(selected === 'instructor' ? 'dashboard' : 'student-usage-setup');
         } finally {
             setSaving(false);
         }

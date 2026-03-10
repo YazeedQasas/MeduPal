@@ -19,7 +19,7 @@ const roleBadgeClass = {
   student: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',
 };
 
-export function ProfileSettings({ setActiveTab }) {
+export function ProfileSettings({ setActiveTab, backTab, backLabel }) {
   const { user, profile, role, has_hardware, refreshProfile } = useAuth();
   const displayName = profile?.full_name || user?.email?.split('@')[0] || 'User';
   const email = user?.email ?? '—';
@@ -47,11 +47,11 @@ export function ProfileSettings({ setActiveTab }) {
     <div className="max-w-[800px] mx-auto space-y-6">
       <button
         type="button"
-        onClick={() => setActiveTab('dashboard')}
+        onClick={() => setActiveTab(backTab || (role === 'student' ? 'student-hub' : 'dashboard'))}
         className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
       >
         <ArrowLeft size={18} />
-        Back to dashboard
+        {backLabel || (role === 'student' ? 'Back to Home' : 'Back to dashboard')}
       </button>
 
       <div className="bg-card rounded-2xl border border-border shadow-[0_0_0_1px_rgba(0,0,0,0.4)] overflow-hidden">
@@ -136,15 +136,17 @@ export function ProfileSettings({ setActiveTab }) {
             </div>
           )}
 
-          <div className="pt-4 border-t border-border">
-            <button
-              type="button"
-              onClick={() => setActiveTab('settings')}
-              className="text-sm text-primary hover:underline font-medium"
-            >
-              Open full Settings →
-            </button>
-          </div>
+          {role !== 'student' && (
+            <div className="pt-4 border-t border-border">
+              <button
+                type="button"
+                onClick={() => setActiveTab('settings')}
+                className="text-sm text-primary hover:underline font-medium"
+              >
+                Open full Settings →
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

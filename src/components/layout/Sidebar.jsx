@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LayoutDashboard, FileText, HardDrive, Settings, Activity, LogOut, GraduationCap, UserCog, Home, BarChart2 } from 'lucide-react';
+import { LayoutDashboard, FileText, HardDrive, Settings, Activity, LogOut, GraduationCap, UserCog, Home, Play, TrendingUp, History, Cpu, FileCheck } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -10,16 +10,32 @@ import {
 } from '../ui/sidebar';
 import { cn } from '../../lib/utils';
 
-const navItems = [
-  { icon: LayoutDashboard, label: 'Dashboard',         id: 'dashboard',          roles: ['admin', 'faculty', 'instructor'] },
-  { icon: BarChart2,       label: 'My Dashboard',      id: 'student-dashboard',  roles: ['student'] },
-  { icon: FileText,        label: 'Cases',              id: 'cases' },
-  { icon: Activity,        label: 'Sessions',           id: 'sessions' },
-  { icon: GraduationCap,   label: 'Students',           id: 'students',           roles: ['admin', 'faculty', 'instructor'] },
-  { icon: HardDrive,       label: 'Hardware & Sensors', id: 'hardware',           roles: ['admin'] },
-  { icon: Settings,        label: 'Settings',           id: 'settings',           roles: ['admin'] },
-  { icon: UserCog,         label: 'Users',              id: 'users',              roles: ['admin'] },
+const ADMIN_NAV_ITEMS = [
+  { icon: LayoutDashboard, label: 'Dashboard', id: 'dashboard', roles: ['admin', 'faculty', 'instructor'] },
+  { icon: FileText, label: 'Cases', id: 'cases', roles: ['admin', 'faculty', 'instructor'] },
+  { icon: Activity, label: 'Sessions', id: 'sessions', roles: ['admin', 'faculty', 'instructor'] },
+  { icon: GraduationCap, label: 'Students', id: 'students', roles: ['admin', 'faculty', 'instructor'] },
+  { icon: HardDrive, label: 'Hardware & Sensors', id: 'hardware', roles: ['admin'] },
+  { icon: Settings, label: 'Settings', id: 'settings', roles: ['admin'] },
+  { icon: UserCog, label: 'Users', id: 'users', roles: ['admin'] },
 ];
+
+function buildStudentNavItems(has_hardware, can_exam) {
+  const items = [{ icon: Home, label: 'Home', id: 'student-hub' }];
+  if (has_hardware) {
+    items.push({ icon: Play, label: 'Practice', id: 'student-practice' });
+  }
+  if (can_exam) {
+    items.push({ icon: FileCheck, label: 'Exam', id: 'student-exam' });
+  }
+  items.push({ icon: TrendingUp, label: 'Progress', id: 'student-progress' });
+  items.push({ icon: History, label: 'History', id: 'student-history' });
+  if (has_hardware) {
+    items.push({ icon: Cpu, label: 'Hardware', id: 'student-hardware' });
+  }
+  items.push({ icon: Settings, label: 'Settings', id: 'student-settings' });
+  return items;
+}
 
 function Logo() {
   return (
@@ -115,7 +131,7 @@ function SidebarUserBlock({ displayName, roleLabel, roleBadgeClass, onClick }) {
 
 export function Sidebar({ activeTab, setActiveTab }) {
   const [open, setOpen] = useState(false);
-  const { user, profile, role, signOut } = useAuth();
+  const { user, profile, role, signOut, has_hardware, can_exam } = useAuth();
   const displayName = profile?.full_name || user?.email?.split('@')[0] || 'User';
 
   const handleSignOut = async () => {
@@ -123,14 +139,9 @@ export function Sidebar({ activeTab, setActiveTab }) {
     setActiveTab('landing');
   };
 
-  const filteredNavItems = navItems.filter((item) => {
-    // Merge conflict resolved: unified filter logic
-    if (item.roles) return item.roles.includes(role);
-    if (item.studentOnly) return role === 'student';
-    if (item.id === 'dashboard') return role === 'admin' || role === 'faculty' || role === 'instructor';
-    if (item.instructorOnly && role === 'student') return false;
-    return !item.adminOnly || role === 'admin';
-  });
+  const filteredNavItems = role === 'student'
+    ? buildStudentNavItems(has_hardware ?? false, can_exam ?? false)
+    : ADMIN_NAV_ITEMS.filter((item) => item.roles.includes(role));
 
   const roleLabel = role === 'admin' ? 'Admin' : role === 'faculty' ? 'Instructor' : role === 'technician' ? 'Technician' : role === 'student' ? 'Student' : role || 'User';
   const roleBadgeClass = {
@@ -157,13 +168,18 @@ export function Sidebar({ activeTab, setActiveTab }) {
                   ),
                 }}
                 isActive={activeTab === item.id}
-                onClick={() => setActiveTab(item.id)}
+                onClick={() => {
+                  setActiveTab(item.id);
+                  if (item.id === 'student-practice') {
+                    window.history.pushState(null, '', '/practice');
+                  }
+                }}
               />
             ))}
           </nav>
         </div>
         <div className="flex flex-col gap-2 pt-4 mt-auto pb-2">
-          <SidebarUserBlock displayName={displayName} roleLabel={roleLabel} roleBadgeClass={roleBadgeClass} onClick={() => setActiveTab('profile')} />
+          <SidebarUserBlock displayName={displayName} roleLabel={roleLabel} roleBadgeClass={roleBadgeClass} onClick={() => setActiveTab(role === 'student' ? 'student-settings' : 'profile')} />
           <SidebarLink
             link={{
               label: 'Log out',
