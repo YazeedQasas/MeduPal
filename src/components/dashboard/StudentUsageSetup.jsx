@@ -62,8 +62,8 @@ export function StudentUsageSetup({ setActiveTab }) {
       }
 
       await refreshProfile?.();
-      setActiveTab?.('student-hub');
-      window.history.replaceState(null, '', '/student-hub');
+      setActiveTab?.('student-dashboard');
+      window.history.replaceState(null, '', '/student-dashboard');
     } catch (err) {
       setError(err?.message || 'Something went wrong.');
     } finally {

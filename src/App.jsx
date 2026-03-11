@@ -41,7 +41,7 @@ function AppContent() {
 
   // When auth has finished loading, restore route:
   // - if there's no user, send to landing
-  // - if there is a user, send admins to dashboard, students to student-hub, others to cases
+  // - if there is a user, send admins to dashboard, students to student-dashboard, others to student-portal
   useEffect(() => {
     if (loading) return;
 
@@ -54,21 +54,21 @@ function AppContent() {
       if (role === "admin" || role === "faculty" || role === "instructor") {
         setActiveTab("dashboard");
       } else if (role === "student") {
-        setActiveTab("student-hub");
-      } else {
         setActiveTab("student-dashboard");
+      } else {
+        setActiveTab("student-portal");
       }
     }
   }, [loading, user, role, activeTab]);
 
-  // URL-based redirect: student default "/" → "/student-hub"; /practice → student-practice
+  // URL-based redirect: student default "/" | "/home" → "/student-dashboard"; /practice → student-practice
   useEffect(() => {
     if (loading || !user || role !== "student") return;
     const path = window.location.pathname;
-    if (path === "/" || path === "/student-hub") {
-      setActiveTab("student-hub");
-      if (path === "/") {
-        window.history.replaceState(null, "", "/student-hub");
+    if (path === "/" || path === "/home" || path === "/student-dashboard" || path === "/student-hub") {
+      setActiveTab("student-dashboard");
+      if (path === "/" || path === "/home" || path === "/student-hub") {
+        window.history.replaceState(null, "", "/student-dashboard");
       }
     } else if (path === "/practice") {
       setActiveTab("student-practice");
@@ -108,12 +108,12 @@ function AppContent() {
       case "profile":
         return <ProfileSettings setActiveTab={setActiveTab} />;
 
-      case "student-hub":
+      case "student-dashboard":
         if (role !== "student") {
           return (
             <div className="flex items-center justify-center h-[500px]">
               <div className="text-center">
-                <h2 className="text-2xl font-bold text-muted-foreground">Student Hub</h2>
+                <h2 className="text-2xl font-bold text-muted-foreground">Student Dashboard</h2>
                 <p className="text-muted-foreground mt-2">This page is for students only.</p>
               </div>
             </div>
@@ -167,15 +167,15 @@ function AppContent() {
             </div>
           </div>
         );
-      case "student-dashboard":
+      case "student-portal":
         return <StudentDashboard setActiveTab={setActiveTab} />;
 
       case "student-practice":
         return (
           <StudentPracticeFlow
             onExit={() => {
-              setActiveTab("student-hub");
-              window.history.replaceState(null, "", "/student-hub");
+              setActiveTab("student-dashboard");
+              window.history.replaceState(null, "", "/student-dashboard");
             }}
           />
         );

@@ -21,7 +21,7 @@ const ADMIN_NAV_ITEMS = [
 ];
 
 function buildStudentNavItems(has_hardware, can_exam) {
-  const items = [{ icon: Home, label: 'Home', id: 'student-hub' }];
+  const items = [{ icon: Home, label: 'Home', id: 'student-dashboard' }];
   if (has_hardware) {
     items.push({ icon: Play, label: 'Practice', id: 'student-practice' });
   }
@@ -172,6 +172,8 @@ export function Sidebar({ activeTab, setActiveTab }) {
                   setActiveTab(item.id);
                   if (item.id === 'student-practice') {
                     window.history.pushState(null, '', '/practice');
+                  } else if (item.id === 'student-dashboard') {
+                    window.history.pushState(null, '', '/student-dashboard');
                   }
                 }}
               />

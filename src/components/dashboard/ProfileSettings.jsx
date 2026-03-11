@@ -47,7 +47,7 @@ export function ProfileSettings({ setActiveTab, backTab, backLabel }) {
     <div className="max-w-[800px] mx-auto space-y-6">
       <button
         type="button"
-        onClick={() => setActiveTab(backTab || (role === 'student' ? 'student-hub' : 'dashboard'))}
+        onClick={() => setActiveTab(backTab || (role === 'student' ? 'student-dashboard' : 'dashboard'))}
         className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
       >
         <ArrowLeft size={18} />

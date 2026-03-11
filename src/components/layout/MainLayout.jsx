@@ -21,7 +21,7 @@ export function MainLayout({ children, activeTab, setActiveTab }) {
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
         <Header />
 
-        <main className="flex-1 overflow-y-auto overflow-x-hidden min-w-0 relative p-6">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden min-w-0 relative p-6 flex flex-col items-stretch">
           <div
             className="absolute inset-0 pointer-events-none overflow-hidden"
             aria-hidden
@@ -34,7 +34,7 @@ export function MainLayout({ children, activeTab, setActiveTab }) {
               }}
             />
           </div>
-          <div className="relative z-10">{children}</div>
+          <div className="relative z-10 flex flex-col items-stretch">{children}</div>
         </main>
       </div>
     </div>
