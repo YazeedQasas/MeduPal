@@ -104,6 +104,7 @@ export function StudentHub({ setActiveTab }) {
   const [stats, setStats] = useState({ total: 0, avgScore: null, streak: 0, upcoming: 0 });
   const [recentSessions, setRecent] = useState([]);
   const [upcomingSessions, setUpcoming] = useState([]);
+  const [upcomingExams, setUpcomingExams] = useState([]);
   const [domains, setDomains] = useState(DEFAULT_DOMAINS);
   const [loading, setLoading] = useState(true);
 
@@ -133,6 +134,14 @@ export function StudentHub({ setActiveTab }) {
         .order('start_time', { ascending: true })
         .limit(4);
 
+      // Fetch assigned exams (instructor-assigned via Assign Exam page)
+      const { data: examsData } = await supabase
+        .from('exams')
+        .select(`id, exam_date, case_name, status, station:stations(name, room_number), instructor:profiles!instructor_id(full_name)`)
+        .eq('student_id', user.id)
+        .eq('status', 'scheduled')
+        .order('exam_date', { ascending: true });
+
       const scored = allCompleted.filter(s => s.score != null);
       const avgScore = scored.length
         ? (scored.reduce((a, b) => a + b.score, 0) / scored.length).toFixed(1)
@@ -151,9 +160,15 @@ export function StudentHub({ setActiveTab }) {
         score: scored.length ? Math.min(10, parseFloat(avgScore) * [1, 0.95, 0.9, 0.93, 0.85][i]) : 0,
       }));
 
-      setStats({ total: allCompleted.length, avgScore, streak, upcoming: (upcoming || []).length });
+      setStats({
+        total: allCompleted.length,
+        avgScore,
+        streak,
+        upcoming: (examsData?.length || 0) + (upcoming || []).length,
+      });
       setRecent(recent || []);
       setUpcoming(upcoming || []);
+      setUpcomingExams(examsData || []);
       setDomains(domainScores);
       setLoading(false);
     })();
@@ -180,7 +195,19 @@ export function StudentHub({ setActiveTab }) {
   const showExamOnlyDashboard = isStudent && !has_hardware && can_exam;
   const showNoCapabilities = isStudent && !has_hardware && !can_exam;
 
-  const nextExam = (upcomingSessions && upcomingSessions[0]) || null;
+  // Prefer exams table (instructor-assigned) over sessions
+  const examFromExams = upcomingExams?.[0];
+  const examFromSessions = upcomingSessions?.[0];
+  const nextExam = examFromExams
+    ? {
+        id: examFromExams.id,
+        case: { title: examFromExams.case_name },
+        start_time: examFromExams.exam_date,
+        status: examFromExams.status === 'scheduled' ? 'Scheduled' : examFromExams.status,
+        station: examFromExams.station,
+        examiner: examFromExams.instructor,
+      }
+    : examFromSessions || null;
   const examinerName = nextExam?.examiner?.full_name || 'Instructor';
 
   const hour = new Date().getHours();
@@ -222,10 +249,13 @@ export function StudentHub({ setActiveTab }) {
       {nextExam && (
         <button
           type="button"
-          onClick={() => setShowExam(true)}
+          onClick={() => {
+            setActiveTab?.('student-exam');
+            window.history.pushState(null, '', '/exam');
+          }}
           className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shrink-0"
         >
-          Start Exam
+          View Exam
           <ChevronRight size={18} />
         </button>
       )}

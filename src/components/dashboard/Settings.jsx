@@ -3,22 +3,18 @@ import {
     User,
     Bell,
     Shield,
-    Globe,
     Database,
     Cpu,
-    Moon,
-    Sun,
     Save,
     RotateCcw,
-    Mail,
-    Lock,
-    Eye,
     Monitor,
-    Cloud
+    Cloud,
+    Settings as SettingsIcon
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { ProfileSettings } from './ProfileSettings';
 
-export function Settings() {
+export function Settings({ setActiveTab }) {
     const [activeSection, setActiveSection] = useState('profile');
 
     const sections = [
@@ -75,64 +71,12 @@ export function Settings() {
                 <div className="lg:col-span-3">
                     <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
                         {activeSection === 'profile' && (
-                            <div className="p-6 md:p-8 space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
-                                <div>
-                                    <h3 className="text-xl font-bold text-foreground">Profile Information</h3>
-                                    <p className="text-sm text-muted-foreground mt-1">This information will be displayed to other faculty members.</p>
-                                </div>
-
-                                <div className="space-y-6">
-                                    <div className="flex flex-col md:flex-row gap-6 items-center">
-                                        <div className="relative group">
-                                            <div className="w-24 h-24 rounded-2xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-2xl font-bold border-2 border-indigo-500/20">
-                                                AD
-                                            </div>
-                                            <button className="absolute -bottom-2 -right-2 bg-primary text-primary-foreground p-2 rounded-lg shadow-lg hover:scale-110 transition-transform">
-                                                <RotateCcw size={14} />
-                                            </button>
-                                        </div>
-                                        <div className="flex-1 space-y-4 w-full">
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                <div className="space-y-2">
-                                                    <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Full Name</label>
-                                                    <div className="relative">
-                                                        <User className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={16} />
-                                                        <input className="w-full bg-muted/30 border border-border rounded-xl pl-10 pr-4 py-2 text-sm focus:ring-2 focus:ring-primary/50 outline-none transition-all" defaultValue="Admin User" />
-                                                    </div>
-                                                </div>
-                                                <div className="space-y-2">
-                                                    <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Email Address</label>
-                                                    <div className="relative">
-                                                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={16} />
-                                                        <input className="w-full bg-muted/30 border border-border rounded-xl pl-10 pr-4 py-2 text-sm focus:ring-2 focus:ring-primary/50 outline-none transition-all" defaultValue="admin@medupal.com" />
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div className="space-y-2">
-                                        <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Bio & Specialization</label>
-                                        <textarea
-                                            className="w-full bg-muted/30 border border-border rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary/50 outline-none transition-all h-32 resize-none"
-                                            placeholder="Tell us about yourself..."
-                                            defaultValue="Head of Medical Simulation at University Health Science Center. Specialized in Emergency Medicine and OSCE orchestration."
-                                        />
-                                    </div>
-                                </div>
-
-                                <div className="pt-6 border-t border-border flex flex-col md:flex-row items-center justify-between gap-4">
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-10 h-10 rounded-lg bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
-                                            <Globe size={20} />
-                                        </div>
-                                        <div>
-                                            <p className="text-sm font-bold text-foreground">Language & Region</p>
-                                            <p className="text-xs text-muted-foreground">English (United States) — UTC-05:00</p>
-                                        </div>
-                                    </div>
-                                    <button className="text-primary text-sm font-semibold hover:underline">Change Preferences</button>
-                                </div>
+                            <div className="p-6 md:p-8 animate-in fade-in slide-in-from-right-4 duration-300">
+                                <ProfileSettings
+                                    setActiveTab={setActiveTab}
+                                    backTab="settings"
+                                    backLabel="Back to Settings"
+                                />
                             </div>
                         )}
 
@@ -140,7 +84,7 @@ export function Settings() {
                         {activeSection !== 'profile' && (
                             <div className="p-12 flex flex-col items-center justify-center text-center space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
                                 <div className="w-16 h-16 rounded-2xl bg-primary/5 text-primary flex items-center justify-center mb-2">
-                                    {React.createElement(sections.find(s => s.id === activeSection)?.icon || Settings2, { size: 32 })}
+                                    {React.createElement(sections.find(s => s.id === activeSection)?.icon || SettingsIcon, { size: 32 })}
                                 </div>
                                 <div>
                                     <h3 className="text-lg font-bold text-foreground capitalize">{activeSection} Settings</h3>

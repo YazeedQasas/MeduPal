@@ -15,6 +15,7 @@ const ADMIN_NAV_ITEMS = [
   { icon: FileText, label: 'Cases', id: 'cases', roles: ['admin', 'faculty', 'instructor'] },
   { icon: Activity, label: 'Sessions', id: 'sessions', roles: ['admin', 'faculty', 'instructor'] },
   { icon: GraduationCap, label: 'Students', id: 'students', roles: ['admin', 'faculty', 'instructor'] },
+  { icon: FileCheck, label: 'Assign Exam', id: 'assign-exam', roles: ['admin', 'faculty', 'instructor'] },
   { icon: HardDrive, label: 'Hardware & Sensors', id: 'hardware', roles: ['admin'] },
   { icon: Settings, label: 'Settings', id: 'settings', roles: ['admin'] },
   { icon: UserCog, label: 'Users', id: 'users', roles: ['admin'] },
@@ -174,6 +175,10 @@ export function Sidebar({ activeTab, setActiveTab }) {
                     window.history.pushState(null, '', '/practice');
                   } else if (item.id === 'student-dashboard') {
                     window.history.pushState(null, '', '/student-dashboard');
+                  } else if (item.id === 'student-exam') {
+                    window.history.pushState(null, '', '/exam');
+                  } else if (item.id === 'assign-exam') {
+                    window.history.pushState(null, '', '/assign-exam');
                   }
                 }}
               />

@@ -24,6 +24,10 @@ import PracticeHistoryPage from "./components/dashboard/PracticeHistoryPage";
 import { StudentHub } from "./components/dashboard/StudentHub";
 import StudentPracticeFlow from "./components/dashboard/StudentPracticeFlow";
 import { StudentUsageSetup } from "./components/dashboard/StudentUsageSetup";
+import { ExamPage } from "./components/dashboard/ExamPage";
+import { AssignExamPage } from "./components/dashboard/AssignExamPage";
+import { StudentHistory } from "./components/dashboard/StudentHistory";
+import { StudentProgress } from "./components/dashboard/StudentProgress";
 
 function AppContent() {
   const [activeTab, setActiveTab] = useState("landing");
@@ -61,7 +65,7 @@ function AppContent() {
     }
   }, [loading, user, role, activeTab]);
 
-  // URL-based redirect: student default "/" | "/home" → "/student-dashboard"; /practice → student-practice
+  // URL-based redirect: student default "/" | "/home" → "/student-dashboard"; /practice → student-practice; /exam → student-exam
   useEffect(() => {
     if (loading || !user || role !== "student") return;
     const path = window.location.pathname;
@@ -73,6 +77,21 @@ function AppContent() {
     } else if (path === "/practice") {
       setActiveTab("student-practice");
       window.history.replaceState(null, "", "/practice");
+    } else if (path === "/exam") {
+      setActiveTab("student-exam");
+      window.history.replaceState(null, "", "/exam");
+    }
+  }, [loading, user, role]);
+
+  // URL-based redirect: instructor /assign-exam
+  useEffect(() => {
+    if (loading || !user) return;
+    const isInstructor = role === "instructor" || role === "faculty" || role === "admin";
+    if (!isInstructor) return;
+    const path = window.location.pathname;
+    if (path === "/assign-exam") {
+      setActiveTab("assign-exam");
+      window.history.replaceState(null, "", "/assign-exam");
     }
   }, [loading, user, role]);
 
@@ -180,6 +199,32 @@ function AppContent() {
           />
         );
 
+      case "student-exam":
+        if (role !== "student") {
+          return (
+            <div className="flex items-center justify-center h-[500px]">
+              <div className="text-center">
+                <h2 className="text-2xl font-bold text-muted-foreground">Exam</h2>
+                <p className="text-muted-foreground mt-2">This page is for students only.</p>
+              </div>
+            </div>
+          );
+        }
+        return <ExamPage setActiveTab={setActiveTab} />;
+
+      case "assign-exam":
+        if (role !== "instructor" && role !== "faculty" && role !== "admin") {
+          return (
+            <div className="flex items-center justify-center h-[500px]">
+              <div className="text-center">
+                <h2 className="text-2xl font-bold text-muted-foreground">Assign Exam</h2>
+                <p className="text-muted-foreground mt-2">This page is for instructors only.</p>
+              </div>
+            </div>
+          );
+        }
+        return <AssignExamPage />;
+
       case "cases":
         return <Cases />;
       case "sessions":
@@ -188,10 +233,64 @@ function AppContent() {
         return <Students />;
       case "hardware":
         return <Hardware />;
+      case "student-hardware":
+        if (role !== "student") {
+          return (
+            <div className="flex items-center justify-center h-[500px]">
+              <div className="text-center">
+                <h2 className="text-2xl font-bold text-muted-foreground">Hardware</h2>
+                <p className="text-muted-foreground mt-2">This page is for students only.</p>
+              </div>
+            </div>
+          );
+        }
+        return <Hardware />;
       case "stations":
         return <StationsMap />;
       case "settings":
-        return <Settings />;
+        return <Settings setActiveTab={setActiveTab} />;
+      case "student-progress":
+        if (role !== "student") {
+          return (
+            <div className="flex items-center justify-center h-[500px]">
+              <div className="text-center">
+                <h2 className="text-2xl font-bold text-muted-foreground">Progress</h2>
+                <p className="text-muted-foreground mt-2">This page is for students only.</p>
+              </div>
+            </div>
+          );
+        }
+        return <StudentProgress />;
+      case "student-history":
+        if (role !== "student") {
+          return (
+            <div className="flex items-center justify-center h-[500px]">
+              <div className="text-center">
+                <h2 className="text-2xl font-bold text-muted-foreground">History</h2>
+                <p className="text-muted-foreground mt-2">This page is for students only.</p>
+              </div>
+            </div>
+          );
+        }
+        return <StudentHistory />;
+      case "student-settings":
+        if (role !== "student") {
+          return (
+            <div className="flex items-center justify-center h-[500px]">
+              <div className="text-center">
+                <h2 className="text-2xl font-bold text-muted-foreground">Settings</h2>
+                <p className="text-muted-foreground mt-2">This page is for students only.</p>
+              </div>
+            </div>
+          );
+        }
+        return (
+          <ProfileSettings
+            setActiveTab={setActiveTab}
+            backTab="student-dashboard"
+            backLabel="Back to Home"
+          />
+        );
       case "users":
         if (role !== "admin") {
           return (
