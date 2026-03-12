@@ -25,10 +25,10 @@ create policy "Authenticated can read advisor_assignments"
 create policy "Instructor can delete own assignment"
   on advisor_assignments for delete using (auth.uid() = instructor_id);
 
--- Only faculty/instructor can insert; student must not already have an advisor (enforced by unique)
+-- Only instructor/admin can insert; student must not already have an advisor (enforced by unique)
 create policy "Faculty can insert advisor_assignments"
   on advisor_assignments for insert
   with check (
     auth.uid() = instructor_id
-    and exists (select 1 from profiles where id = auth.uid() and role in ('admin', 'faculty'))
+    and exists (select 1 from profiles where id = auth.uid() and role in ('admin', 'instructor'))
   );

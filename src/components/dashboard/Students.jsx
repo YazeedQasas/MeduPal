@@ -23,7 +23,7 @@ import { StudentProfile } from './StudentProfile';
 
 export function Students() {
     const { user, profile, role } = useAuth();
-    const isInstructor = role === 'faculty' || role === 'instructor' || role === 'admin';
+    const isInstructor = role === 'instructor' || role === 'admin';
 
     const [searchTerm, setSearchTerm] = useState('');
     const [manikins, setManikins] = useState([]);
@@ -69,7 +69,7 @@ export function Students() {
         const { data: profsData } = await supabase
             .from('profiles')
             .select('*')
-            .eq('role', 'faculty');
+            .eq('role', 'instructor');
 
         const { data: manikinsData } = await supabase.from('manikins').select('*');
 
@@ -299,7 +299,7 @@ export function Students() {
                     <div className="space-y-1">
                         <p className="text-lg font-bold text-foreground">{students.length} Students</p>
                         <p className="text-xs text-muted-foreground">
-                            {isInstructor && myAdviseeIds.length > 0 ? `${myAdviseeIds.length} your advisees` : 'Tracking faculty groups'}
+                            {isInstructor && myAdviseeIds.length > 0 ? `${myAdviseeIds.length} your advisees` : 'Tracking instructor groups'}
                         </p>
                     </div>
                 </div>

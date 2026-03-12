@@ -49,13 +49,19 @@ function AppContent() {
   useEffect(() => {
     if (loading) return;
 
-    if (!user && activeTab !== "landing" && activeTab !== "auth") {
+    if (!user && activeTab !== "landing" && activeTab !== "auth" && activeTab !== "auth-signup") {
       setActiveTab("landing");
       return;
     }
 
-    if (user && (activeTab === "landing" || activeTab === "auth")) {
-      if (role === "admin" || role === "faculty" || role === "instructor") {
+    // Only auto-redirect from landing (e.g. page refresh while logged in).
+    // If user signed up but didn't complete onboarding (role select + usage setup), send them back to onboarding.
+    if (user && activeTab === "landing") {
+      if (typeof window !== 'undefined' && window.localStorage.getItem('medupal_onboarding_pending') === 'true') {
+        setActiveTab("onboarding");
+        return;
+      }
+      if (role === "admin" || role === "instructor") {
         setActiveTab("dashboard");
       } else if (role === "student") {
         setActiveTab("student-dashboard");
@@ -66,8 +72,11 @@ function AppContent() {
   }, [loading, user, role, activeTab]);
 
   // URL-based redirect: student default "/" | "/home" → "/student-dashboard"; /practice → student-practice; /exam → student-exam
+  // Skip when in auth/onboarding flow to avoid flash of dashboard before RoleSelect
   useEffect(() => {
     if (loading || !user || role !== "student") return;
+    if (activeTab === "auth" || activeTab === "auth-signup" || activeTab === "onboarding" || activeTab === "student-usage-setup") return;
+    if (typeof window !== "undefined" && window.localStorage.getItem("medupal_onboarding_pending") === "true") return;
     const path = window.location.pathname;
     if (path === "/" || path === "/home" || path === "/student-dashboard" || path === "/student-hub") {
       setActiveTab("student-dashboard");
@@ -81,12 +90,12 @@ function AppContent() {
       setActiveTab("student-exam");
       window.history.replaceState(null, "", "/exam");
     }
-  }, [loading, user, role]);
+  }, [loading, user, role, activeTab]);
 
   // URL-based redirect: instructor /assign-exam
   useEffect(() => {
     if (loading || !user) return;
-    const isInstructor = role === "instructor" || role === "faculty" || role === "admin";
+    const isInstructor = role === "instructor" || role === "admin";
     if (!isInstructor) return;
     const path = window.location.pathname;
     if (path === "/assign-exam") {
@@ -122,7 +131,9 @@ function AppContent() {
         return <StudentUsageSetup setActiveTab={setActiveTab} />;
 
       case "auth":
-        return <AuthPage setActiveTab={setActiveTab} />;
+        return <AuthPage setActiveTab={setActiveTab} initialMode="signin" />;
+      case "auth-signup":
+        return <AuthPage setActiveTab={setActiveTab} initialMode="signup" />;
 
       case "profile":
         return <ProfileSettings setActiveTab={setActiveTab} />;
@@ -141,7 +152,7 @@ function AppContent() {
         return <StudentHub setActiveTab={setActiveTab} />;
 
       case "dashboard":
-        if (role === "faculty" || role === "instructor") {
+        if (role === "instructor") {
           return <InstructorDashboard setActiveTab={setActiveTab} />;
         }
         if (role !== "admin") {
@@ -213,7 +224,7 @@ function AppContent() {
         return <ExamPage setActiveTab={setActiveTab} />;
 
       case "assign-exam":
-        if (role !== "instructor" && role !== "faculty" && role !== "admin") {
+        if (role !== "instructor" && role !== "admin") {
           return (
             <div className="flex items-center justify-center h-[500px]">
               <div className="text-center">

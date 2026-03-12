@@ -13,7 +13,9 @@ const WIZARD_OPTIONS = [
     has_hardware: true,
     can_exam: false,
     iconColor: 'text-emerald-400',
+    iconColorSelected: 'text-emerald-300',
     iconBg: 'bg-emerald-500/15',
+    iconBgSelected: 'bg-emerald-500/25',
     iconGlow: 'shadow-[0_0_20px_rgba(52,211,153,0.25)]',
     cardHoverGlow: 'hover:shadow-[0_0_28px_rgba(52,211,153,0.15)]',
   },
@@ -25,7 +27,9 @@ const WIZARD_OPTIONS = [
     has_hardware: false,
     can_exam: true,
     iconColor: 'text-amber-400',
+    iconColorSelected: 'text-amber-300',
     iconBg: 'bg-amber-500/15',
+    iconBgSelected: 'bg-amber-500/25',
     iconGlow: 'shadow-[0_0_20px_rgba(251,191,36,0.25)]',
     cardHoverGlow: 'hover:shadow-[0_0_28px_rgba(251,191,36,0.15)]',
   },
@@ -37,7 +41,9 @@ const WIZARD_OPTIONS = [
     has_hardware: true,
     can_exam: true,
     iconColor: 'text-blue-400',
+    iconColorSelected: 'text-blue-300',
     iconBg: 'bg-blue-500/15',
+    iconBgSelected: 'bg-blue-500/25',
     iconGlow: 'shadow-[0_0_20px_rgba(96,165,250,0.25)]',
     cardHoverGlow: 'hover:shadow-[0_0_28px_rgba(96,165,250,0.15)]',
   },
@@ -66,7 +72,6 @@ export function StudentOnboardingSetup({ setActiveTab }) {
         .update({
           has_hardware: option.has_hardware,
           can_exam: option.can_exam,
-          onboarding_done: true,
         })
         .eq('id', user.id);
 
@@ -124,7 +129,7 @@ export function StudentOnboardingSetup({ setActiveTab }) {
               onClick={() => setSelected(opt.id)}
               disabled={submitting}
               className={cn(
-                'w-full flex items-center gap-4 p-5 rounded-2xl text-left border transition-all duration-200',
+                'group w-full flex items-center gap-4 p-5 rounded-2xl text-left border transition-all duration-200',
                 selected === opt.id
                   ? 'border-[rgba(100,170,145,0.6)] bg-[rgba(100,170,145,0.1)]'
                   : 'border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.06]'
@@ -132,11 +137,12 @@ export function StudentOnboardingSetup({ setActiveTab }) {
             >
               <div
                 className={cn(
-                  'w-11 h-11 rounded-xl flex items-center justify-center shrink-0',
-                  selected === opt.id ? 'bg-[rgba(100,170,145,0.2)]' : 'bg-white/5'
+                  'w-11 h-11 rounded-xl flex items-center justify-center shrink-0 transition-colors duration-200',
+                  selected === opt.id ? opt.iconBgSelected : opt.iconBg,
+                  selected !== opt.id && 'group-hover:opacity-80'
                 )}
               >
-                <opt.icon size={22} className={selected === opt.id ? 'text-[rgba(180,220,200,0.9)]' : 'text-white/50'} />
+                <opt.icon size={22} className={cn('transition-colors duration-200', selected === opt.id ? opt.iconColorSelected : opt.iconColor)} />
               </div>
               <div className="flex-1 min-w-0">
                 <p className="font-semibold text-white/90">{opt.title}</p>

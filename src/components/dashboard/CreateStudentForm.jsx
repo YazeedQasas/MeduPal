@@ -18,7 +18,7 @@ export function CreateStudentForm({ onClose }) {
                     account and select &quot;Student&quot; when prompted.
                 </p>
                 <p className="text-sm text-muted-foreground">
-                    Instructors and admins are identified by their profile role (e.g. faculty, admin). There are no
+                    Instructors and admins are identified by their profile role (e.g. instructor, admin). There are no
                     separate student or instructor tables — everything is driven by the profile role.
                 </p>
 

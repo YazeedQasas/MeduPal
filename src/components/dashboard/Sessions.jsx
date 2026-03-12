@@ -26,7 +26,7 @@ import StudentPracticeFlow from './StudentPracticeFlow';
 
 function Sessions() {
     const { user, role } = useAuth();
-    const isInstructor = role === 'faculty' || role === 'instructor' || role === 'admin';
+    const isInstructor = role === 'instructor' || role === 'admin';
     const [advisedStudentIds, setAdvisedStudentIds] = useState([]);
 
     const [searchTerm, setSearchTerm] = useState('');

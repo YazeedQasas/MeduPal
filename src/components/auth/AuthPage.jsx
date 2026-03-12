@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { SignInPage, SignUpPage } from '../ui/sign-in';
 
-export default function AuthPage({ setActiveTab }) {
-  const [mode, setMode] = useState('signin');
+export default function AuthPage({ setActiveTab, initialMode = 'signin' }) {
+  const [mode, setMode] = useState(initialMode);
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState(null);
 
@@ -17,12 +17,20 @@ export default function AuthPage({ setActiveTab }) {
     const email = formData.get('email');
     const password = formData.get('password');
     try {
-      const { error } = await signIn({ email, password });
+      const { profile, error } = await signIn({ email, password });
       if (error) {
         setLocalError(error.message || 'Unable to sign in.');
         return;
       }
-      setActiveTab('dashboard');
+      const r = profile?.role;
+      if (r === 'admin' || r === 'instructor') {
+        setActiveTab('dashboard');
+      } else if (r === 'student') {
+        setActiveTab('student-dashboard');
+        if (typeof window !== 'undefined') window.history.replaceState(null, '', '/student-dashboard');
+      } else {
+        setActiveTab('student-portal');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -41,6 +49,9 @@ export default function AuthPage({ setActiveTab }) {
       if (error) {
         setLocalError(error.message || 'Unable to create account.');
         return;
+      }
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('medupal_onboarding_pending', 'true');
       }
       setActiveTab('onboarding');
     } finally {

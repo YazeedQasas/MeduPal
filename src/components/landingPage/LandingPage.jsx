@@ -397,7 +397,7 @@ export default function LandingPage({ setActiveTab }) {
               <span className="text-[12px] text-white/40">Sign In</span>
             </button>
             <button
-              onClick={() => setActiveTab('auth')}
+              onClick={() => setActiveTab('auth-signup')}
               className="text-[12px] font-medium px-4 py-[6px] rounded-full transition-all whitespace-nowrap active:scale-[0.97] cursor-pointer"
               style={{
                 background: 'linear-gradient(135deg, rgba(100,170,145,0.30), rgba(60,130,110,0.15))',

@@ -43,9 +43,10 @@ export function AuthProvider({ children }) {
     } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return;
 
-      // End loading as soon as we get initial session (don't wait for fetchProfile)
+      // Don't set loading=false on INITIAL_SESSION — let getSession() handle initial load
+      // so we reliably read the persisted session from storage before rendering
       if (event === 'INITIAL_SESSION') {
-        setLoading(false);
+        return;
       }
 
       if (session?.user) {
@@ -58,7 +59,7 @@ export function AuthProvider({ children }) {
       }
     });
 
-    // Fallback: if INITIAL_SESSION never fires (e.g. some envs), unstuck after getSession()
+    // Primary initializer: read persisted session from storage before showing UI
     supabase.auth.getSession().then(({ data: { session }, error }) => {
       if (!mounted) return;
       if (error) {
@@ -104,10 +105,25 @@ export function AuthProvider({ children }) {
       const newUser = data?.user;
 
       if (newUser) {
-        // Profile is created by DB trigger (handle_new_user) on auth.users insert.
-        // No client-side insert, so we avoid RLS issues right after signUp.
         setUser(newUser);
-        await fetchProfile(newUser.id);
+        let profileData = await fetchProfile(newUser.id);
+        // Ensure profile exists; create if trigger didn't run
+        if (!profileData) {
+          const { error: insertErr } = await supabase
+            .from('profiles')
+            .upsert(
+              {
+                id: newUser.id,
+                email: newUser.email,
+                full_name: newUser.user_metadata?.full_name || '',
+                role: 'student',
+              },
+              { onConflict: 'id' }
+            );
+          if (!insertErr) {
+            profileData = await fetchProfile(newUser.id);
+          }
+        }
       }
 
       return { data, error: null };
@@ -124,29 +140,43 @@ export function AuthProvider({ children }) {
 
     if (error) {
       setAuthError(error.message);
-      return { data: null, error };
+      return { data: null, profile: null, error };
     }
 
     const signedInUser = data?.user;
+    let profileData = null;
     if (signedInUser) {
       setUser(signedInUser);
-      await fetchProfile(signedInUser.id);
+      profileData = await fetchProfile(signedInUser.id);
     }
 
-    return { data, error: null };
+    return { data, profile: profileData, error: null };
   }, [fetchProfile]);
 
   const updateRole = useCallback(async (newRole) => {
     if (!user) return { error: new Error('Not authenticated') };
-    const { error } = await supabase
+    const dbRole = newRole;
+    const { data: updated, error } = await supabase
       .from('profiles')
-      .update({ role: newRole })
-      .eq('id', user.id);
+      .update({ role: dbRole })
+      .eq('id', user.id)
+      .select('id')
+      .maybeSingle();
     if (error) {
-      console.error('Error updating role', error);
+      console.error('[Onboarding] Error updating role:', error);
       return { error };
     }
-    // Refresh local profile
+    if (!updated) {
+      const { error: upsertErr } = await supabase.from('profiles').upsert(
+        { id: user.id, email: user.email, full_name: user.user_metadata?.full_name || '', role: dbRole },
+        { onConflict: 'id' }
+      );
+      if (upsertErr) {
+        console.error('[Onboarding] Error creating profile:', upsertErr);
+        return { error: upsertErr };
+      }
+    }
+    console.log('[Onboarding] Role saved to database:', { role: dbRole, userId: user.id });
     await fetchProfile(user.id);
     return { error: null };
   }, [user, fetchProfile]);

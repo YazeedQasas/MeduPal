@@ -33,11 +33,11 @@ BEGIN
     faculty_id, 
     (SELECT email FROM auth.users WHERE id = faculty_id), 
     'Dr. Sarah Smith', 
-    'faculty', 
+    'instructor', 
     'https://api.dicebear.com/7.x/avataaars/svg?seed=Sarah'
   )
   ON CONFLICT (id) DO UPDATE 
-  SET full_name = 'Dr. Sarah Smith', role = 'faculty';
+  SET full_name = 'Dr. Sarah Smith', role = 'instructor';
 
   -- Insert Manikins
   INSERT INTO manikins (name, type, serial_number, status, ip_address)

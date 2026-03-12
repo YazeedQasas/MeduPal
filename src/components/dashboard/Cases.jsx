@@ -7,7 +7,7 @@ import { CreateCaseForm } from './CreateCaseForm';
 
 export function Cases() {
     const { role } = useAuth();
-    const canManageCases = role === 'admin' || role === 'faculty' || role === 'instructor' || role === 'technician';
+    const canManageCases = role === 'admin' || role === 'instructor' || role === 'technician';
     const [searchTerm, setSearchTerm] = useState('');
     const [categoryFilter, setCategoryFilter] = useState('All Categories');
     const [difficultyFilter, setDifficultyFilter] = useState('Any Difficulty');

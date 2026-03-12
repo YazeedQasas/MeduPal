@@ -7,10 +7,12 @@ if (!supabaseUrl || !supabaseAnonKey) {
     console.error('Supabase URL or Anon Key is missing. Please check your .env.local file.')
 }
 
-// Persist session in localStorage so user stays logged in after closing/reopening the app
+// Persist session in localStorage so user stays logged in after refresh/close
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
         persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
         storage: typeof window !== 'undefined' ? window.localStorage : undefined,
     },
 })

@@ -31,7 +31,7 @@ export function AssignExamPage() {
   const [examTime, setExamTime] = useState('');
   const [notes, setNotes] = useState('');
 
-  const isInstructor = role === 'instructor' || role === 'faculty' || role === 'admin';
+  const isInstructor = role === 'instructor' || role === 'admin';
 
   useEffect(() => {
     if (!isInstructor) {

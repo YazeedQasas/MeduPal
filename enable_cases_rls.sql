@@ -6,7 +6,7 @@ drop policy if exists "Enable delete for authenticated users only" on cases;
 drop policy if exists "Enable update for authenticated users only" on cases;
 
 -- 2. Create INSERT policy
--- Allows any authenticated user (faculty/admin) to create a case
+-- Allows any authenticated user (instructor/admin) to create a case
 create policy "Enable insert for authenticated users only" 
 on cases for insert 
 to authenticated 

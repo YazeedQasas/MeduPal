@@ -11,11 +11,11 @@ import {
 import { cn } from '../../lib/utils';
 
 const ADMIN_NAV_ITEMS = [
-  { icon: LayoutDashboard, label: 'Dashboard', id: 'dashboard', roles: ['admin', 'faculty', 'instructor'] },
-  { icon: FileText, label: 'Cases', id: 'cases', roles: ['admin', 'faculty', 'instructor'] },
-  { icon: Activity, label: 'Sessions', id: 'sessions', roles: ['admin', 'faculty', 'instructor'] },
-  { icon: GraduationCap, label: 'Students', id: 'students', roles: ['admin', 'faculty', 'instructor'] },
-  { icon: FileCheck, label: 'Assign Exam', id: 'assign-exam', roles: ['admin', 'faculty', 'instructor'] },
+  { icon: LayoutDashboard, label: 'Dashboard', id: 'dashboard', roles: ['admin', 'instructor'] },
+  { icon: FileText, label: 'Cases', id: 'cases', roles: ['admin', 'instructor'] },
+  { icon: Activity, label: 'Sessions', id: 'sessions', roles: ['admin', 'instructor'] },
+  { icon: GraduationCap, label: 'Students', id: 'students', roles: ['admin', 'instructor'] },
+  { icon: FileCheck, label: 'Assign Exam', id: 'assign-exam', roles: ['admin', 'instructor'] },
   { icon: HardDrive, label: 'Hardware & Sensors', id: 'hardware', roles: ['admin'] },
   { icon: Settings, label: 'Settings', id: 'settings', roles: ['admin'] },
   { icon: UserCog, label: 'Users', id: 'users', roles: ['admin'] },
@@ -144,10 +144,9 @@ export function Sidebar({ activeTab, setActiveTab }) {
     ? buildStudentNavItems(has_hardware ?? false, can_exam ?? false)
     : ADMIN_NAV_ITEMS.filter((item) => item.roles.includes(role));
 
-  const roleLabel = role === 'admin' ? 'Admin' : role === 'faculty' ? 'Instructor' : role === 'technician' ? 'Technician' : role === 'student' ? 'Student' : role || 'User';
+  const roleLabel = role === 'admin' ? 'Admin' : role === 'instructor' ? 'Instructor' : role === 'technician' ? 'Technician' : role === 'student' ? 'Student' : role || 'User';
   const roleBadgeClass = {
     admin: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30',
-    faculty: 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30',
     instructor: 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30',
     technician: 'bg-slate-500/15 text-slate-600 dark:text-slate-400 border-slate-500/30',
     student: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',

@@ -5,7 +5,6 @@ import { supabase } from '../../lib/supabase';
 
 const roleLabelMap = {
   admin: 'Admin',
-  faculty: 'Instructor',
   instructor: 'Instructor',
   technician: 'Technician',
   student: 'Student',
@@ -13,7 +12,6 @@ const roleLabelMap = {
 
 const roleBadgeClass = {
   admin: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30',
-  faculty: 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30',
   instructor: 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30',
   technician: 'bg-slate-500/15 text-slate-600 dark:text-slate-400 border-slate-500/30',
   student: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',

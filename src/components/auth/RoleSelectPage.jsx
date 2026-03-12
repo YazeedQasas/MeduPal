@@ -40,17 +40,25 @@ const roles = [
         label: 'Student',
         description: 'Practice clinical skills and track my OSCE performance.',
         Icon: GraduationCap,
+        iconColor: 'text-emerald-400',
+        iconColorSelected: 'text-emerald-300',
+        iconBg: 'bg-emerald-500/15',
+        iconBgSelected: 'bg-emerald-500/25',
     },
     {
         id: 'instructor',
         label: 'Instructor',
         description: 'Manage OSCE sessions, review performance, and oversee stations.',
         Icon: BookOpen,
+        iconColor: 'text-blue-400',
+        iconColorSelected: 'text-blue-300',
+        iconBg: 'bg-blue-500/15',
+        iconBgSelected: 'bg-blue-500/25',
     },
 ];
 
 export default function RoleSelectPage({ setActiveTab }) {
-    const { updateRole } = useAuth();
+    const { user, updateRole } = useAuth();
     const [selected, setSelected] = useState(null);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState(null);
@@ -65,7 +73,13 @@ export default function RoleSelectPage({ setActiveTab }) {
                 setError(err.message || 'Failed to save your role. Please try again.');
                 return;
             }
-            setActiveTab(selected === 'instructor' ? 'dashboard' : 'student-usage-setup');
+            console.log('[Onboarding] Role selected and saved:', { role: selected, userId: user?.id });
+            if (selected === 'instructor') {
+                if (typeof window !== 'undefined') window.localStorage.removeItem('medupal_onboarding_pending');
+                setActiveTab('dashboard');
+            } else {
+                setActiveTab('student-usage-setup');
+            }
         } finally {
             setSaving(false);
         }
@@ -101,6 +115,25 @@ export default function RoleSelectPage({ setActiveTab }) {
                     <div className="w-full max-w-md min-w-0">
                         <div className="flex flex-col gap-6 min-w-0">
 
+                            {/* Back to sign up */}
+                            <button
+                                type="button"
+                                onClick={() => setActiveTab('auth-signup')}
+                                className="animate-element animate-delay-50 mb-2 flex items-center gap-2 text-sm text-white/50 hover:text-white transition-colors"
+                            >
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    strokeWidth="1.5"
+                                    stroke="currentColor"
+                                    className="w-5 h-5"
+                                >
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                                </svg>
+                                <span>Back to sign up</span>
+                            </button>
+
                             {/* Heading — same class as sign-in h1 */}
                             <h1 className="animate-element animate-delay-100 text-4xl md:text-5xl font-semibold leading-tight text-white/95">
                                 Help us set up<br />your account
@@ -111,7 +144,7 @@ export default function RoleSelectPage({ setActiveTab }) {
 
                             {/* Role options — two clean rows, no blocks */}
                             <div className="animate-element animate-delay-300 flex flex-col gap-3">
-                                {roles.map(({ id, label, description, Icon }) => {
+                                {roles.map(({ id, label, description, Icon, iconColor, iconColorSelected, iconBg, iconBgSelected }) => {
                                     const isSelected = selected === id;
                                     return (
                                         <button
@@ -129,13 +162,15 @@ export default function RoleSelectPage({ setActiveTab }) {
                                             <div
                                                 className={[
                                                     'flex-shrink-0 flex items-center justify-center w-10 h-10 rounded-xl transition-colors duration-200',
-                                                    isSelected ? 'bg-[rgba(100,170,145,0.2)]' : 'bg-white/5 group-hover:bg-white/10',
+                                                    isSelected ? iconBgSelected : iconBg,
+                                                    !isSelected && 'group-hover:opacity-80',
                                                 ].join(' ')}
                                             >
                                                 <Icon
                                                     className={[
                                                         'w-5 h-5 transition-colors duration-200',
-                                                        isSelected ? 'text-[rgba(180,220,200,0.9)]' : 'text-white/40 group-hover:text-white/60',
+                                                        isSelected ? iconColorSelected : iconColor,
+                                                        !isSelected && 'group-hover:opacity-90',
                                                     ].join(' ')}
                                                 />
                                             </div>

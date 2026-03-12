@@ -18,9 +18,9 @@ CREATE POLICY "Allow read for authenticated users" ON exams FOR SELECT USING (au
 CREATE POLICY "Allow insert for instructors" ON exams FOR INSERT
   WITH CHECK (
     auth.uid() = instructor_id AND
-    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'faculty', 'instructor'))
+    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'instructor'))
   );
 CREATE POLICY "Allow update for instructors" ON exams FOR UPDATE
-  USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'faculty', 'instructor')));
+  USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'instructor')));
 CREATE POLICY "Allow delete for instructors" ON exams FOR DELETE
-  USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'faculty', 'instructor')));
+  USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'instructor')));
