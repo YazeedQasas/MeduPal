@@ -9,6 +9,7 @@ import { Footer } from '../ui/FooterSection';
 import { ContactFormSection } from '../ui/ContactFormSection';
 import { BentoGridBlock } from '../ui/BentoGridBlock';
 import { InteractiveGlobe } from '../ui/InteractiveGlobe';
+import GradualBlur from '../ui/GradualBlur';
 import aquLogo from '../../assets/AQU-WHITE.png';
 import oxfordLogo from '../../assets/Oxford-Black.png';
 import cambridgeLogo from '../../assets/Cambridge.png';
@@ -475,7 +476,7 @@ export default function LandingPage({ setActiveTab }) {
         {/* ── main content ── */}
         <div className="relative z-10 text-center mx-auto px-6 flex flex-col items-center" style={{ gap: 16 }}>
 
-          {/* eyebrow pill — blur-in like sign-in */}
+          {/* eyebrow pill */}
           <div
             onClick={() => setActiveTab('auth')}
             className="animate-element animate-delay-100"
@@ -561,13 +562,14 @@ export default function LandingPage({ setActiveTab }) {
 
         {/* ── scroll indicator bottom-left ── */}
         <div
-          className="animate-element animate-delay-500 absolute bottom-8 left-8 flex items-center gap-2.5 z-10"
+          className="animate-element animate-delay-500 absolute bottom-8 left-8 flex items-center gap-2.5 z-[1001]"
         >
           <div className="w-7 h-7 rounded-full border border-white/14 flex items-center justify-center">
             <ChevronDown size={12} className="text-white/30 animate-bounce" />
           </div>
           <span className="text-[10px] tracking-[0.22em] uppercase text-white/22">01 · Scroll down</span>
         </div>
+
       </section>
       </div>{/* end hero card */}
 
@@ -831,6 +833,17 @@ export default function LandingPage({ setActiveTab }) {
       <FadeIn>
         <Footer />
       </FadeIn>
+
+      <GradualBlur
+        target="page"
+        position="bottom"
+        height="8rem"
+        strength={3}
+        divCount={6}
+        curve="bezier"
+        exponential
+        opacity={1}
+      />
 
       <style>{`
         @keyframes fadeUp {

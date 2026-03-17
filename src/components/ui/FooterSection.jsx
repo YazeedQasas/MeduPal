@@ -64,7 +64,7 @@ function AnimatedContainer({ className, delay = 0.1, children }) {
 export function Footer() {
   return (
     <footer
-      className="relative w-full max-w-6xl mx-auto flex flex-col items-center justify-center rounded-t-3xl border-t px-6 py-12 lg:py-16"
+      className="relative w-full max-w-6xl mx-auto flex flex-col items-center justify-center rounded-t-3xl border-t px-6 pt-12 pb-32 lg:pt-16 lg:pb-36"
       style={{
         background: 'radial-gradient(35% 128px at 50% 0%, rgba(255,255,255,0.06), transparent), #000',
         borderColor: 'rgba(255,255,255,0.08)',
