@@ -37,9 +37,11 @@ export function getPatientReplyApiUrl() {
  * stop() and resolve with the blob via the returned promise.
  * @returns {{ start: () => void, stop: () => Promise<Blob>, stream: MediaStream }}
  */
-function createRecorder() {
+function createRecorder(onAutoStop) {
   let mediaRecorder = null;
   let stream = null;
+  let audioContext = null;
+  let silenceIntervalId = null;
   const chunks = [];
   let resolveBlob = null;
   const blobPromise = new Promise((resolve) => {
@@ -60,10 +62,91 @@ function createRecorder() {
     };
     mediaRecorder.onstop = () => {
       stream.getTracks().forEach((t) => t.stop());
+      if (silenceIntervalId) { clearInterval(silenceIntervalId); silenceIntervalId = null; }
+      if (audioContext) { audioContext.close(); audioContext = null; }
       const blob = new Blob(chunks, { type: mimeType });
       resolveBlob(blob);
     };
     mediaRecorder.start(100);
+
+    // Silence detection: auto-stop after 1.5s of silence once speech has started.
+    // Uses voice-band energy (300–3000 Hz) to ignore broadband static/noise,
+    // and calibrates thresholds from the first 600ms of ambient sound.
+    if (onAutoStop) {
+      try {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        audioContext.resume().catch(() => {});
+        const source = audioContext.createMediaStreamSource(stream);
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 1024;
+        source.connect(analyser);
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+        // Voice frequency band: 300–3000 Hz
+        const binHz = audioContext.sampleRate / analyser.fftSize;
+        const voiceLow = Math.floor(300 / binHz);
+        const voiceHigh = Math.ceil(3000 / binHz);
+
+        const getVoiceRms = () => {
+          analyser.getByteFrequencyData(dataArray);
+          let sum = 0;
+          for (let i = voiceLow; i < voiceHigh; i++) sum += dataArray[i] * dataArray[i];
+          return Math.sqrt(sum / (voiceHigh - voiceLow));
+        };
+
+        const SILENCE_MS = 1500;
+        const CALIBRATION_MS = 600;
+        const calibrationStart = Date.now();
+        let calibCount = 0, calibSum = 0, calibPeak = 0;
+        let speechThreshold = null;
+        let silenceThreshold = null;
+        let speechDetected = false;
+        let silenceStart = null;
+        let fired = false;
+
+        silenceIntervalId = setInterval(() => {
+          if (!mediaRecorder || mediaRecorder.state === 'inactive' || fired) {
+            clearInterval(silenceIntervalId);
+            silenceIntervalId = null;
+            return;
+          }
+
+          const rms = getVoiceRms();
+
+          // Calibration phase: track running sum/peak instead of accumulating an array
+          if (speechThreshold === null) {
+            calibCount++;
+            calibSum += rms;
+            if (rms > calibPeak) calibPeak = rms;
+            if (Date.now() - calibrationStart >= CALIBRATION_MS) {
+              const avg = calibSum / calibCount;
+              const noiseFloor = Math.max(avg * 1.2, calibPeak);
+              speechThreshold = noiseFloor * 3;
+              silenceThreshold = noiseFloor * 1.5;
+            }
+            return;
+          }
+
+          if (!speechDetected) {
+            if (rms > speechThreshold) speechDetected = true;
+          } else {
+            if (rms < silenceThreshold) {
+              if (!silenceStart) silenceStart = Date.now();
+              else if (Date.now() - silenceStart >= SILENCE_MS) {
+                fired = true;
+                clearInterval(silenceIntervalId);
+                silenceIntervalId = null;
+                onAutoStop();
+              }
+            } else {
+              silenceStart = null;
+            }
+          }
+        }, 100);
+      } catch (e) {
+        console.warn('[STT] Silence detection unavailable:', e);
+      }
+    }
   };
 
   const stop = () => {
@@ -80,8 +163,8 @@ function createRecorder() {
  * Record audio from the microphone and return the recorded Blob when stopped.
  * @returns {{ start: () => Promise<void>, stop: () => Promise<Blob> }}
  */
-export function recordAudioForStt() {
-  const rec = createRecorder();
+export function recordAudioForStt(onAutoStop) {
+  const rec = createRecorder(onAutoStop);
   return {
     start: rec.start,
     stop: rec.stop,
