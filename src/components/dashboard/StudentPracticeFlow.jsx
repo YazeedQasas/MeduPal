@@ -528,13 +528,15 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                 controller.stop()
                     .then((blob) => sendAudioToSttApi(blob))
                     .then(({ text }) => {
-                        setInputValue(text || getMockTranscript());
-                        setLastTranscript(text || getMockTranscript());
+                        const transcript = text || getMockTranscript();
+                        setInputValue(transcript);
+                        setLastTranscript(transcript);
                         setIsRecording(false);
                     })
                     .catch(() => {
-                        setInputValue(getMockTranscript());
-                        setLastTranscript(getMockTranscript());
+                        const mock = getMockTranscript();
+                        setInputValue(mock);
+                        setLastTranscript(mock);
                         setIsRecording(false);
                     });
                 return;
@@ -552,7 +554,26 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         // Starting: prefer Faster-Whisper STT when API URL is set
         if (isFasterWhisperSttEnabled()) {
             setIsRecording(true);
-            const controller = recordAudioForStt();
+            const handleAutoStop = () => {
+                const ctrl = fwRecordingRef.current;
+                if (!ctrl) return;
+                fwRecordingRef.current = null;
+                ctrl.stop()
+                    .then((blob) => sendAudioToSttApi(blob))
+                    .then(({ text }) => {
+                        const transcript = text || getMockTranscript();
+                        setInputValue(transcript);
+                        setLastTranscript(transcript);
+                        setIsRecording(false);
+                    })
+                    .catch(() => {
+                        const mock = getMockTranscript();
+                        setInputValue(mock);
+                        setLastTranscript(mock);
+                        setIsRecording(false);
+                    });
+            };
+            const controller = recordAudioForStt(handleAutoStop);
             controller.start()
                 .then(() => {
                     fwRecordingRef.current = controller;

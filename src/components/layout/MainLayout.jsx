@@ -21,20 +21,8 @@ export function MainLayout({ children, activeTab, setActiveTab }) {
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
         <Header />
 
-        <main className="flex-1 overflow-y-auto overflow-x-hidden min-w-0 relative p-6 flex flex-col items-stretch">
-          <div
-            className="absolute inset-0 pointer-events-none overflow-hidden"
-            aria-hidden
-          >
-            <div
-              className="absolute top-0 left-1/2 -translate-x-1/2 w-[130%] h-[80%] opacity-30"
-              style={{
-                background: 'radial-gradient(ellipse 65% 50% at 50% 0%, rgba(100,170,145,0.25) 0%, rgba(60,120,100,0.08) 45%, transparent 70%)',
-                filter: 'blur(24px)',
-              }}
-            />
-          </div>
-          <div className="relative z-10 flex flex-col items-stretch">{children}</div>
+        <main className="flex-1 overflow-y-auto overflow-x-hidden min-w-0 relative p-6 flex flex-col items-stretch min-h-0">
+          <div className="relative z-10 flex flex-col items-stretch flex-1 min-h-0">{children}</div>
         </main>
       </div>
     </div>
