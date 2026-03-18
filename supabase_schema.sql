@@ -57,6 +57,7 @@ create table sessions (
   start_time timestamp with time zone,
   end_time timestamp with time zone,
   status text check (status in ('Scheduled', 'In Progress', 'Completed', 'Cancelled')) default 'Scheduled',
+  type text check (type in ('practice', 'exam')) default 'practice',
   score int check (score >= 0 and score <= 100),
   feedback_notes text,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null

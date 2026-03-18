@@ -2,7 +2,7 @@ import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 
 export function MainLayout({ children, activeTab, setActiveTab }) {
-  const hideLandingChrome = activeTab === 'landing' || activeTab === 'auth' || activeTab === 'onboarding' || activeTab === 'student-usage-setup';
+  const hideLandingChrome = activeTab === 'landing' || activeTab === 'auth' || activeTab === 'auth-signup' || activeTab === 'onboarding' || activeTab === 'student-usage-setup';
 
   // Landing / auth / onboarding: no fixed height, natural document scroll — one scrollbar only
   if (hideLandingChrome) {

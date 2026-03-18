@@ -134,13 +134,37 @@ export function StudentHub({ setActiveTab }) {
         .order('start_time', { ascending: true })
         .limit(4);
 
-      // Fetch assigned exams (instructor-assigned via Assign Exam page)
+      // Fetch exam sessions (instructor-assigned via Assign Exam page, stored in sessions with type='exam')
+      let examsFromSessions = [];
+      const { data: examSessions, error: examErr } = await supabase
+        .from('sessions')
+        .select(`id, start_time, status, session_type, case:cases(title), examiner:profiles!examiner_id(full_name)`)
+        .eq('student_id', user.id)
+        .eq('session_type', 'exam')
+        .eq('status', 'Scheduled')
+        .order('start_time', { ascending: true });
+
+      if (!examErr && examSessions?.length) {
+        examsFromSessions = examSessions.map((s) => ({
+          id: s.id,
+          exam_date: s.start_time,
+          case_name: s.case?.title || 'Exam',
+          status: 'scheduled',
+          instructor: s.examiner,
+        }));
+      }
+
+      // Legacy: also check exams table if used elsewhere
       const { data: examsData } = await supabase
         .from('exams')
         .select(`id, exam_date, case_name, status, station:stations(name, room_number), instructor:profiles!instructor_id(full_name)`)
         .eq('student_id', user.id)
         .eq('status', 'scheduled')
         .order('exam_date', { ascending: true });
+
+      const allExams = [...examsFromSessions, ...(examsData || [])].sort(
+        (a, b) => new Date(a.exam_date || 0) - new Date(b.exam_date || 0)
+      );
 
       const scored = allCompleted.filter(s => s.score != null);
       const avgScore = scored.length
@@ -164,11 +188,11 @@ export function StudentHub({ setActiveTab }) {
         total: allCompleted.length,
         avgScore,
         streak,
-        upcoming: (examsData?.length || 0) + (upcoming || []).length,
+        upcoming: allExams.length + (upcoming || []).length,
       });
       setRecent(recent || []);
       setUpcoming(upcoming || []);
-      setUpcomingExams(examsData || []);
+      setUpcomingExams(allExams);
       setDomains(domainScores);
       setLoading(false);
     })();
@@ -255,7 +279,7 @@ export function StudentHub({ setActiveTab }) {
           }}
           className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shrink-0"
         >
-          View Exam
+          Start Exam
           <ChevronRight size={18} />
         </button>
       )}

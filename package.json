@@ -10,14 +10,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "cobe": "^0.6.4",
-    "class-variance-authority": "^0.7.1",
-    "dotted-map": "^2.2.3",
-    "mathjs": "^14.0.0",
     "@supabase/supabase-js": "^2.95.3",
+    "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "cobe": "^0.6.4",
+    "dotted-map": "^2.2.3",
     "framer-motion": "^12.34.3",
     "lucide-react": "^0.562.0",
+    "mathjs": "^14.9.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "recharts": "^3.6.0",
