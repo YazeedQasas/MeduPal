@@ -63,6 +63,15 @@ create table sessions (
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
+-- 5b. SESSION SCORES (Detailed per-skill scores for each session)
+create table session_scores (
+  id uuid default uuid_generate_v4() primary key,
+  session_id uuid references sessions(id) on delete cascade,
+  skill_type text,
+  score integer,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
 -- 6. EVENTS (Session Logs/Timeline)
 create table session_events (
   id uuid default uuid_generate_v4() primary key,
@@ -123,6 +132,7 @@ alter table manikins enable row level security;
 alter table cases enable row level security;
 alter table stations enable row level security;
 alter table sessions enable row level security;
+alter table session_scores enable row level security;
 alter table controllers enable row level security;
 alter table sensors enable row level security;
 alter table alerts enable row level security;
@@ -135,6 +145,24 @@ create policy "Enable read access for all tables" on manikins for select using (
 create policy "Enable read access for all tables" on cases for select using (true);
 create policy "Enable read access for all tables" on stations for select using (true);
 create policy "Enable read access for all tables" on sessions for select using (true);
+create policy "Enable read access for all tables" on session_scores for select using (true);
 create policy "Enable read access for all tables" on controllers for select using (true);
 create policy "Enable read access for all tables" on sensors for select using (true);
 create policy "Enable read access for all tables" on alerts for select using (true);
+
+-- Allow authenticated users full access for now (mirrors existing repo approach).
+create policy "Enable insert for authenticated users only"
+  on session_scores for insert
+  to authenticated
+  with check (true);
+
+create policy "Enable update for authenticated users only"
+  on session_scores for update
+  to authenticated
+  using (true)
+  with check (true);
+
+create policy "Enable delete for authenticated users only"
+  on session_scores for delete
+  to authenticated
+  using (true);

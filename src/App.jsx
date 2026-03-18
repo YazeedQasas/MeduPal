@@ -234,7 +234,7 @@ function AppContent() {
             </div>
           );
         }
-        return <AssignExamPage />;
+        return <AssignExamPage setActiveTab={setActiveTab} />;
 
       case "cases":
         return <Cases />;

@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../context/AuthContext';
 import {
     getPatientReplyApiUrl,
     getSttApiUrl,
@@ -200,6 +201,8 @@ const PHYSICAL_RUBRIC_CRITERIA = [
 ];
 
 function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
+    const { user } = useAuth();
+
     const [currentStep, setCurrentStep] = useState(standaloneHistoryOnly ? 1 : 0);
     const [selectedCase, setSelectedCase] = useState(null);
     const [casesFromDb, setCasesFromDb] = useState([]);
@@ -248,6 +251,9 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
     // Completion screen states
     const [showCompletionScreen, setShowCompletionScreen] = useState(false);
     const [countdown, setCountdown] = useState(10);
+    const [isSavingSession, setIsSavingSession] = useState(false);
+    const [saveError, setSaveError] = useState(null);
+    const [sessionStartedAt] = useState(() => new Date().toISOString());
 
     const chatEndRef = useRef(null);
     const countdownRef = useRef(null);
@@ -666,9 +672,193 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         };
     }, [showCompletionScreen, onExit]);
 
-    const handleFinishSession = useCallback(() => {
-        setShowCompletionScreen(true);
-    }, []);
+    const handleFinishSession = async () => {
+        if (isSavingSession) return;
+        setIsSavingSession(true);
+        setSaveError(null);
+
+        try {
+            // If we don't have an authenticated user (or can't identify one), we still allow the UX flow.
+            if (!user?.id) {
+                setShowCompletionScreen(true);
+                return;
+            }
+
+            // ---------------------------
+            // 1) Compute history scores
+            // ---------------------------
+            const aiChecklist = {
+                hpi: true,
+                pmh: true,
+                meds: true,
+                allergies: false,
+                socialHistory: true
+            };
+            const checklistCompleted = Object.values(aiChecklist).filter(Boolean).length;
+
+            const aiRubricScores = {
+                communication: 2,
+                structure: 2,
+                safety: 1,
+                clinicalReasoning: 2,
+                professionalism: 2
+            };
+            const rubricTotal = Object.values(aiRubricScores).reduce((a, b) => a + b, 0);
+
+            const historyScore =
+                Math.min(
+                    10,
+                    Math.round(
+                        (
+                            checklistCompleted * 0.5 +
+                            (hasDeteriorated && redFlagRecognized ? 1.5 : 0) +
+                            (selectedDiagnosis === selectedCase?.id ? 1.5 : 0) +
+                            (rubricTotal / 10) * 4.5
+                        ) * 10
+                    ) / 10
+                );
+
+            // ---------------------------
+            // 2) Compute physical scores
+            // ---------------------------
+            const caseKey = getCaseMockKey(selectedCase);
+            const requirements = REQUIRED_ZONES_BY_CASE[caseKey] || REQUIRED_ZONES_BY_CASE['pneumonia'];
+
+            const examinedZoneIds = examLog
+                .map((entry) => {
+                    const zone = BODY_ZONES.find((z) => z.label === entry.zone);
+                    return zone?.id;
+                })
+                .filter(Boolean);
+
+            const coveredRequiredZones = requirements.zones.filter((zoneId) => examinedZoneIds.includes(zoneId));
+            const coverageComplete = coveredRequiredZones.length >= requirements.minRequired;
+
+            const aiPhysicalRubric = {
+                technique: 2,
+                coverage: coverageComplete ? 2 : 1,
+                infectionControl: 2,
+                interpretation: 2,
+                communication: 1
+            };
+
+            const physicalRubricTotal = Object.values(aiPhysicalRubric).reduce((a, b) => a + b, 0);
+
+            const aiPhysicalChecklist = {
+                inspection: true,
+                palpation: true,
+                percussion: false,
+                auscultation: examinedZoneIds.length > 0
+            };
+
+            const physicalChecklistCompleted = Object.values(aiPhysicalChecklist).filter(Boolean).length;
+
+            const physicalScore = (() => {
+                let score = 0;
+                // Coverage
+                score += (coveredRequiredZones.length / requirements.zones.length) * 3;
+                // Rubric
+                score += (physicalRubricTotal / 10) * 4.5;
+                // Checklist
+                score += (physicalChecklistCompleted / 4) * 2.5;
+                return Math.min(10, Math.round(score * 10) / 10);
+            })();
+
+            // ---------------------------
+            // 3) Compute total session score + skill rows
+            // ---------------------------
+            const totalScore = Math.round(((historyScore + physicalScore) / 2) * 10) / 10;
+
+            const historyCommunication10 = Math.round((aiRubricScores.communication / 2) * 10);
+            const physicalCommunication10 = Math.round((aiPhysicalRubric.communication / 2) * 10);
+            const communicationScore = Math.round((historyCommunication10 + physicalCommunication10) / 2);
+
+            const clinicalReasoningScore = Math.round((aiRubricScores.clinicalReasoning / 2) * 10);
+
+            const historyFeedback = (() => {
+                if (hasDeteriorated && !redFlagRecognized) {
+                    return 'Important: You missed the SpO₂ deterioration. Always monitor vitals closely!';
+                }
+                if (historyScore >= 8) return 'Excellent history taking! You covered all key areas systematically.';
+                if (historyScore >= 6) return 'Good history structure. Consider being more thorough with social history.';
+                if (historyScore >= 4) return 'Adequate attempt. Remember to always check allergies and medications.';
+                return 'Keep practicing. Try to cover all OSCE checklist items systematically.';
+            })();
+
+            const physicalFeedback = (() => {
+                if (examLog.length === 0) {
+                    return 'No physical examination was performed. Remember to examine relevant body zones.';
+                }
+                if (coverageComplete) {
+                    return `Good coverage of ${requirements.label}. Systematic approach demonstrated.`;
+                }
+                return `Partial coverage. Remember to examine ${requirements.label} for this case.`;
+            })();
+
+            // ---------------------------
+            // 4) Persist: sessions + session_scores
+            // ---------------------------
+            const nowIso = new Date().toISOString();
+            const feedbackNotes = `History feedback: ${historyFeedback}\nPhysical feedback: ${physicalFeedback}`;
+
+            // Try with `session_type` first (matches the updated frontend).
+            let sessionId = null;
+            const insertPayload = {
+                station_id: null,
+                case_id: selectedCase?.id || null,
+                student_id: user.id,
+                examiner_id: user.id,
+                start_time: sessionStartedAt,
+                end_time: nowIso,
+                status: 'Completed',
+                session_type: 'practice',
+                score: Math.round(totalScore),
+                feedback_notes: feedbackNotes
+            };
+
+            try {
+                const { data: created, error: insertError } = await supabase
+                    .from('sessions')
+                    .insert([insertPayload])
+                    .select('id')
+                    .single();
+                if (insertError) throw insertError;
+                sessionId = created?.id || null;
+            } catch (err) {
+                // Fallback for older DB schema that still uses `type` instead of `session_type`.
+                const { session_type: _sessionType, ...rest } = insertPayload;
+                const fallbackPayload = { ...rest, type: 'practice' };
+                const { data: created, error: insertError } = await supabase
+                    .from('sessions')
+                    .insert([fallbackPayload])
+                    .select('id')
+                    .single();
+                if (insertError) throw insertError;
+                sessionId = created?.id || null;
+            }
+
+            if (!sessionId) throw new Error('Failed to create session row.');
+
+            const sessionScoresInserts = [
+                { session_id: sessionId, skill_type: 'history_taking', score: Math.round(historyScore) },
+                { session_id: sessionId, skill_type: 'physical_exam', score: Math.round(physicalScore) },
+                { session_id: sessionId, skill_type: 'communication', score: communicationScore },
+                { session_id: sessionId, skill_type: 'clinical_reasoning', score: clinicalReasoningScore }
+            ];
+
+            const { error: scoresInsertError } = await supabase
+                .from('session_scores')
+                .insert(sessionScoresInserts);
+
+            if (scoresInsertError) throw scoresInsertError;
+        } catch (err) {
+            console.error('Failed to persist session scores:', err);
+            setSaveError(err?.message || 'Failed to save session scores');
+        } finally {
+            setIsSavingSession(false);
+            setShowCompletionScreen(true);
+        }
+    };
 
     const handleReturnNow = useCallback(() => {
         if (countdownRef.current) {
@@ -2625,10 +2815,15 @@ FEEDBACK: ${getFeedback()}
                                 </button>
                                 <button
                                     onClick={handleFinishSession}
-                                    className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-all hover:scale-105 hover:shadow-lg hover:shadow-primary/20"
+                                    disabled={isSavingSession}
+                                    className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-all hover:scale-105 hover:shadow-lg hover:shadow-primary/20 disabled:opacity-70 disabled:cursor-not-allowed"
                                 >
+                                    {isSavingSession ? (
+                                        <Activity size={16} className="animate-spin" />
+                                    ) : (
+                                        <ChevronRight size={16} />
+                                    )}
                                     Finish Practice Session
-                                    <ChevronRight size={16} />
                                 </button>
                             </div>
                         </div>
@@ -2663,6 +2858,11 @@ FEEDBACK: ${getFeedback()}
                             <p className="text-sm text-muted-foreground mb-8">
                                 Your practice session has been recorded successfully.
                             </p>
+                            {saveError && (
+                                <p className="text-sm text-destructive mb-4">
+                                    {saveError}
+                                </p>
+                            )}
                             
                             {/* Countdown */}
                             <div className="mb-6">

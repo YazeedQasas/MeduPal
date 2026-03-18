@@ -259,12 +259,9 @@ export function StudentHub({ setActiveTab }) {
         <div>
           <h2 className="text-lg font-bold text-foreground">Upcoming Exam</h2>
           {nextExam ? (
-            <>
-              <p className="text-sm font-semibold text-foreground mt-0.5">{nextExam.case?.title || 'Exam'}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {fmt(nextExam.start_time)} · {examinerName}
-              </p>
-            </>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {fmt(nextExam.start_time)} · {examinerName}
+            </p>
           ) : (
             <p className="text-sm text-muted-foreground mt-0.5">No scheduled exam at this time.</p>
           )}
