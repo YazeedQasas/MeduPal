@@ -355,13 +355,26 @@ export function Students() {
                             {isInstructor && (
                                 <div className="mb-4 p-3 bg-muted/30 rounded-lg">
                                     <p className="text-[10px] uppercase font-bold text-muted-foreground mb-1 tracking-wider">Advisor</p>
-                                    <p className="text-xs font-semibold text-foreground">
-                                        {student.isAdvisedByMe
-                                            ? 'Advised by you'
-                                            : student.advisorName
-                                                ? `Advised by ${student.advisorName}`
-                                                : 'Not advised'}
-                                    </p>
+                                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                                        <p className="text-xs font-semibold text-foreground">
+                                            {student.isAdvisedByMe
+                                                ? 'Advised by you'
+                                                : student.advisorName
+                                                    ? `Advised by ${student.advisorName}`
+                                                    : 'Not advised'}
+                                        </p>
+                                        {student.isAdvisedByMe && (
+                                            <button
+                                                type="button"
+                                                disabled={loading}
+                                                onClick={() => handleUnadvise(student.id)}
+                                                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-destructive/15 text-destructive hover:bg-destructive/25 border border-destructive/30"
+                                            >
+                                                {loading ? <Loader2 size={12} className="animate-spin" /> : <UserMinus size={12} />}
+                                                Unadvise
+                                            </button>
+                                        )}
+                                    </div>
                                 </div>
                             )}
 
@@ -392,15 +405,6 @@ export function Students() {
                                         )}
                                         {student.isAdvisedByMe && (
                                             <>
-                                                <button
-                                                    type="button"
-                                                    disabled={loading}
-                                                    onClick={() => handleUnadvise(student.id)}
-                                                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-muted hover:bg-muted/80 text-muted-foreground"
-                                                >
-                                                    {loading ? <Loader2 size={14} className="animate-spin" /> : <UserMinus size={14} />}
-                                                    Unadvise
-                                                </button>
                                                 <button
                                                     type="button"
                                                     onClick={() => openAssignSession(student.id)}

@@ -47,29 +47,53 @@ export function ExamPage({ setActiveTab }) {
     }
 
     const fetchUpcomingExam = async () => {
-      // Fetch from exams table (instructor-assigned via Assign Exam page)
-      const { data: examData } = await supabase
-        .from('exams')
+      // Fetch from sessions table (instructor-assigned via Assign Exam page, session_type='exam')
+      const { data: sessionData } = await supabase
+        .from('sessions')
         .select(
-          `id, exam_date, case_name, status, notes, station:stations(name, room_number), instructor:profiles!instructor_id(full_name)`
+          `id, start_time, status, session_type, case:cases(title), examiner:profiles!examiner_id(full_name)`
         )
         .eq('student_id', user.id)
-        .eq('status', 'scheduled')
-        .order('exam_date', { ascending: true })
+        .eq('session_type', 'exam')
+        .eq('status', 'Scheduled')
+        .order('start_time', { ascending: true })
         .limit(1)
         .maybeSingle();
 
-      if (examData) {
+      if (sessionData) {
         setExam({
-          id: examData.id,
-          case: { title: examData.case_name },
-          start_time: examData.exam_date,
-          status: examData.status === 'scheduled' ? 'Scheduled' : examData.status,
-          station: examData.station,
-          examiner: examData.instructor,
+          id: sessionData.id,
+          case: { title: sessionData.case?.title || 'Exam' },
+          start_time: sessionData.start_time,
+          status: 'Scheduled',
+          station: null,
+          examiner: sessionData.examiner,
         });
       } else {
-        setExam(null);
+        // Fallback: legacy exams table
+        const { data: examData } = await supabase
+          .from('exams')
+          .select(
+            `id, exam_date, case_name, status, station:stations(name, room_number), instructor:profiles!instructor_id(full_name)`
+          )
+          .eq('student_id', user.id)
+          .eq('status', 'scheduled')
+          .order('exam_date', { ascending: true })
+          .limit(1)
+          .maybeSingle();
+
+        if (examData) {
+          setExam({
+            id: examData.id,
+            case: { title: examData.case_name },
+            start_time: examData.exam_date,
+            status: examData.status === 'scheduled' ? 'Scheduled' : examData.status,
+            station: examData.station,
+            examiner: examData.instructor,
+          });
+        } else {
+          setExam(null);
+        }
       }
       setLoading(false);
     };

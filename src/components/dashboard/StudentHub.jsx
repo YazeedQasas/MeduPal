@@ -473,22 +473,65 @@ export function StudentHub({ setActiveTab }) {
         .eq('student_id', user.id)
         .order('start_time', { ascending: false }).limit(5);
 
+      // Fetch exam sessions (instructor-assigned via Assign Exam page, stored in sessions with type='exam')
+      let examsFromSessions = [];
+      const { data: examSessions, error: examErr } = await supabase
+        .from('sessions')
+        .select(`id, start_time, status, session_type, case:cases(title), examiner:profiles!examiner_id(full_name)`)
+        .eq('student_id', user.id)
+        .eq('session_type', 'exam')
+        .eq('status', 'Scheduled')
+        .order('start_time', { ascending: true });
+
+      if (!examErr && examSessions?.length) {
+        examsFromSessions = examSessions.map((s) => ({
+          id: s.id,
+          exam_date: s.start_time,
+          case_name: s.case?.title || 'Exam',
+          status: 'scheduled',
+          instructor: s.examiner,
+        }));
+      }
+
+      // Legacy: also check exams table if used elsewhere
       const { data: examsData } = await supabase
         .from('exams')
         .select('id, exam_date, case_name, status, station:stations(name, room_number), instructor:profiles!instructor_id(full_name)')
         .eq('student_id', user.id).eq('status', 'scheduled')
         .order('exam_date', { ascending: true });
 
-      const scored   = all.filter(s => s.score != null);
-      const avgScore = scored.length ? (scored.reduce((a, b) => a + b.score, 0) / scored.length).toFixed(1) : null;
-      const days     = new Set(all.map(s => new Date(s.start_time).toDateString()));
+      const allExams = [...examsFromSessions, ...(examsData || [])].sort(
+        (a, b) => new Date(a.exam_date || 0) - new Date(b.exam_date || 0)
+      );
+
+      const scored = allCompleted.filter(s => s.score != null);
+      const avgScore = scored.length
+        ? (scored.reduce((a, b) => a + b.score, 0) / scored.length).toFixed(1)
+        : null;
+
+      const sessionDays = new Set(allCompleted.map(s => new Date(s.start_time).toDateString()));
       let streak = 0;
       const cur = new Date();
-      while (days.has(cur.toDateString())) { streak++; cur.setDate(cur.getDate() - 1); }
+      while (sessionDays.has(cur.toDateString())) {
+        streak++;
+        cur.setDate(cur.getDate() - 1);
+      }
 
-      setStats({ total: all.length, avgScore, streak, upcoming: examsData?.length || 0 });
+      const domainScores = DEFAULT_DOMAINS.map((d, i) => ({
+        label: d.label,
+        score: scored.length ? Math.min(10, parseFloat(avgScore) * [1, 0.95, 0.9, 0.93, 0.85][i]) : 0,
+      }));
+
+      setStats({
+        total: allCompleted.length,
+        avgScore,
+        streak,
+        upcoming: allExams.length + (upcoming || []).length,
+      });
       setRecent(recent || []);
-      setUpcomingExams(examsData || []);
+      setUpcoming(upcoming || []);
+      setUpcomingExams(allExams);
+      setDomains(domainScores);
       setLoading(false);
     })();
   }, [user?.id]);
@@ -518,6 +561,65 @@ export function StudentHub({ setActiveTab }) {
     { icon: TrendingUp, label: 'My Sessions',    sub: 'View history & scores', color: '#34c97a', tab: 'student-history' },
     { icon: Activity,   label: 'My Profile',     sub: 'Settings & progress',   color: '#f59e0b', tab: 'student-settings' },
   ];
+
+  // ── Upcoming Exam card (reusable) ──
+  const UpcomingExamCard = () => (
+    <div className={cn(CARD_CLASS, 'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4')}>
+      <div className="flex items-center gap-4">
+        <div className="w-12 h-12 rounded-xl bg-amber-500/15 flex items-center justify-center shrink-0">
+          <ClipboardCheck size={24} className="text-amber-400" />
+        </div>
+        <div>
+          <h2 className="text-lg font-bold text-foreground">Upcoming Exam</h2>
+          {nextExam ? (
+            <>
+              <p className="text-sm font-semibold text-foreground mt-0.5">{nextExam.case?.title || 'Exam'}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {fmt(nextExam.start_time)} · {examinerName}
+              </p>
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground mt-0.5">No scheduled exam at this time.</p>
+          )}
+        </div>
+      </div>
+      {nextExam && (
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab?.('student-exam');
+            window.history.pushState(null, '', '/exam');
+          }}
+          className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shrink-0"
+        >
+          Start Exam
+          <ChevronRight size={18} />
+        </button>
+      )}
+    </div>
+  );
+
+  // ── No capabilities card ──
+  const NoCapabilitiesCard = () => (
+    <div className={CARD_CLASS}>
+      <div className="flex flex-col items-center text-center py-8">
+        <div className="w-14 h-14 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center mb-4">
+          <ClipboardCheck size={28} />
+        </div>
+        <h2 className="text-lg font-semibold text-foreground mb-1">No capabilities enabled yet.</h2>
+        <p className="text-sm text-muted-foreground mb-6 max-w-sm">
+          Ask your instructor to enable practice or exam access in your profile settings.
+        </p>
+        <button
+          type="button"
+          onClick={() => setActiveTab?.('student-settings')}
+          className="px-6 py-2.5 rounded-xl text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+        >
+          Contact Instructor
+        </button>
+      </div>
+    </div>
+  );
 
   return (
     <div style={{ background: P.page, height: '100%' }} className="min-h-0">
