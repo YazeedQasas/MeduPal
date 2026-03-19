@@ -28,6 +28,7 @@ import { ExamPage } from "./components/dashboard/ExamPage";
 import { AssignExamPage } from "./components/dashboard/AssignExamPage";
 import { StudentHistory } from "./components/dashboard/StudentHistory";
 import { StudentProgress } from "./components/dashboard/StudentProgress";
+import { StudentProfile } from "./components/dashboard/StudentProfile";
 
 function AppContent() {
   const [activeTab, setActiveTab] = useState("landing");
@@ -90,7 +91,7 @@ function AppContent() {
       setActiveTab("student-exam");
       window.history.replaceState(null, "", "/exam");
     }
-  }, [loading, user, role, activeTab]);
+  }, [loading, user, role]);
 
   // URL-based redirect: instructor /assign-exam
   useEffect(() => {
@@ -284,6 +285,23 @@ function AppContent() {
           );
         }
         return <StudentHistory />;
+      case "student-profile":
+        if (role !== "student") {
+          return (
+            <div className="flex items-center justify-center h-[500px]">
+              <div className="text-center">
+                <h2 className="text-2xl font-bold text-muted-foreground">Profile</h2>
+                <p className="text-muted-foreground mt-2">This page is for students only.</p>
+              </div>
+            </div>
+          );
+        }
+        return (
+          <StudentProfile
+            student={user}
+            onBack={() => setActiveTab("student-dashboard")}
+          />
+        );
       case "student-settings":
         if (role !== "student") {
           return (

@@ -559,7 +559,7 @@ export function StudentHub({ setActiveTab }) {
     { icon: BookOpen,   label: 'Browse Cases',   sub: 'Filter by specialty',   color: '#4f8ef7', tab: 'student-practice' },
     { icon: Brain,      label: 'AI Practice',    sub: 'Voice-enabled session', color: '#8b5cf6', href: '/practice-history' },
     { icon: TrendingUp, label: 'My Sessions',    sub: 'View history & scores', color: '#34c97a', tab: 'student-history' },
-    { icon: Activity,   label: 'My Profile',     sub: 'Settings & progress',   color: '#f59e0b', tab: 'student-settings' },
+    { icon: Activity,   label: 'My Profile',     sub: 'View your profile',     color: '#f59e0b', tab: 'student-profile' },
   ];
 
   // ── Upcoming Exam card (reusable) ──
@@ -976,7 +976,7 @@ export function StudentHub({ setActiveTab }) {
                   </p>
                   <button
                     type="button"
-                    onClick={() => { setActiveTab?.('student-usage-setup'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                    onClick={() => { setActiveTab?.('student-practice'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
                     className="mt-5 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-opacity hover:opacity-90"
                     style={{ background: P.accent, color: '#0a0a0a' }}
                   >
@@ -1001,7 +1001,7 @@ export function StudentHub({ setActiveTab }) {
             displayName={displayName}
             stats={stats}
             loading={loading}
-            onGoToProfile={() => setActiveTab?.('student-settings')}
+            onGoToProfile={() => setActiveTab?.('student-profile')}
           />
 
           {/* AI assistant (no card background) */}
