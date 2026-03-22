@@ -1,12 +1,12 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { 
-    X, 
-    Send, 
+import {
+    X,
+    Send,
     Mic,
     MicOff,
-    Brain, 
-    MessageCircle, 
-    Stethoscope, 
+    Brain,
+    MessageCircle,
+    Stethoscope,
     FileText,
     ChevronRight,
     ChevronLeft,
@@ -26,7 +26,10 @@ import {
     Hand,
     Circle,
     Square,
-    ListChecks
+    ListChecks,
+    Shuffle,
+    ArrowLeft,
+    Search,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { supabase } from '../../lib/supabase';
@@ -89,6 +92,30 @@ const CASE_SYMPTOMS = {
     'asthma': ['Wheeze', 'Dyspnea', 'Chest tightness', 'Cough', 'Nocturnal symptoms'],
     'copd': ['Wheeze', 'Chronic cough', 'Dyspnea', 'Chest tightness', 'Sputum production', 'Fatigue']
 };
+
+/* ── Dashboard-matched palette ── */
+const P = {
+    card:     'hsl(var(--card))',
+    border:   'rgba(255,255,255,0.07)',
+    text:     '#f4f4f5',
+    muted:    '#71717a',
+    tag:      'rgba(255,255,255,0.06)',
+    tagText:  '#a1a1aa',
+    accent:   '#6ee7b7',
+    accentBg: 'rgba(110,231,183,0.12)',
+};
+
+/* ── System category config ── */
+const SYSTEM_CONFIG = {
+    Cardiac:          { icon: Heart,      bg: 'rgba(239,68,68,0.12)',    color: '#f87171' },
+    Cardiology:       { icon: Heart,      bg: 'rgba(239,68,68,0.12)',    color: '#f87171' },
+    Respiratory:      { icon: Wind,       bg: 'rgba(59,130,246,0.12)',   color: '#60a5fa' },
+    Pulmonology:      { icon: Wind,       bg: 'rgba(59,130,246,0.12)',   color: '#60a5fa' },
+    Neurology:        { icon: Brain,      bg: 'rgba(168,85,247,0.12)',   color: '#c084fc' },
+    Gastroenterology: { icon: Activity,   bg: 'rgba(245,158,11,0.12)',   color: '#fbbf24' },
+    Pediatrics:       { icon: User,       bg: 'rgba(16,185,129,0.12)',   color: '#34d399' },
+};
+const DEFAULT_SYS = { icon: Stethoscope, bg: 'rgba(110,231,183,0.1)', color: '#6ee7b7' };
 
 const CASE_PATIENT_REPLIES = {
     'pneumonia': [
@@ -216,8 +243,9 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
     ]);
     const [inputValue, setInputValue] = useState('');
     const [isTyping, setIsTyping] = useState(false);
-    const [isSelecting, setIsSelecting] = useState(false);
-    const [selectionCountdown, setSelectionCountdown] = useState(10);
+    const [caseSelected, setCaseSelected] = useState(false);
+    const [selectedSystem, setSelectedSystem] = useState(null);
+    const [caseSearch, setCaseSearch] = useState('');
     const [patientStatus, setPatientStatus] = useState(INITIAL_VITALS);
     const [isDeteriorating, setIsDeteriorating] = useState(false);
     const [hasDeteriorated, setHasDeteriorated] = useState(false);
@@ -257,7 +285,6 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
 
     const chatEndRef = useRef(null);
     const countdownRef = useRef(null);
-    const selectionCountdownRef = useRef(null);
     const timerRef = useRef(null);
     const deteriorationTimeoutRef = useRef(null);
     const recognitionRef = useRef(null);
@@ -310,32 +337,6 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
     }, [standaloneHistoryOnly, casesFromDb, selectedCase]);
 
     useEffect(() => {
-        if (!isSelecting) return;
-        
-        selectionCountdownRef.current = setInterval(() => {
-            setSelectionCountdown(prev => {
-                if (prev <= 1) {
-                    if (selectionCountdownRef.current) {
-                        clearInterval(selectionCountdownRef.current);
-                        selectionCountdownRef.current = null;
-                    }
-                    setIsSelecting(false);
-                    setCurrentStep(1);
-                    return 0;
-                }
-                return prev - 1;
-            });
-        }, 1000);
-        
-        return () => {
-            if (selectionCountdownRef.current) {
-                clearInterval(selectionCountdownRef.current);
-                selectionCountdownRef.current = null;
-            }
-        };
-    }, [isSelecting]);
-
-    useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
@@ -379,13 +380,19 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         return TITLE_TO_MOCK_KEY[caseObj.title] || 'pneumonia';
     }, []);
 
-    const handleAICaseSelect = () => {
-        if (isSelecting || casesFromDb.length === 0) return;
-        
-        const randomCase = casesFromDb[Math.floor(Math.random() * casesFromDb.length)];
-        setSelectedCase(randomCase);
-        setIsSelecting(true);
-        setSelectionCountdown(10);
+    const handleRandomAll = () => {
+        if (casesFromDb.length === 0) return;
+        const pick = casesFromDb[Math.floor(Math.random() * casesFromDb.length)];
+        setSelectedCase(pick);
+        setCaseSelected(true);
+    };
+
+    const handleRandomFromSystem = () => {
+        const pool = casesFromDb.filter(c => c.category === selectedSystem);
+        if (pool.length === 0) return;
+        const pick = pool[Math.floor(Math.random() * pool.length)];
+        setSelectedCase(pick);
+        setCaseSelected(true);
     };
 
     const getPatientReply = useCallback(() => {
@@ -535,13 +542,15 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                 controller.stop()
                     .then((blob) => sendAudioToSttApi(blob))
                     .then(({ text }) => {
-                        setInputValue(text || getMockTranscript());
-                        setLastTranscript(text || getMockTranscript());
+                        const transcript = text || getMockTranscript();
+                        setInputValue(transcript);
+                        setLastTranscript(transcript);
                         setIsRecording(false);
                     })
                     .catch(() => {
-                        setInputValue(getMockTranscript());
-                        setLastTranscript(getMockTranscript());
+                        const mock = getMockTranscript();
+                        setInputValue(mock);
+                        setLastTranscript(mock);
                         setIsRecording(false);
                     });
                 return;
@@ -559,7 +568,26 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         // Starting: prefer Faster-Whisper STT when API URL is set
         if (isFasterWhisperSttEnabled()) {
             setIsRecording(true);
-            const controller = recordAudioForStt();
+            const handleAutoStop = () => {
+                const ctrl = fwRecordingRef.current;
+                if (!ctrl) return;
+                fwRecordingRef.current = null;
+                ctrl.stop()
+                    .then((blob) => sendAudioToSttApi(blob))
+                    .then(({ text }) => {
+                        const transcript = text || getMockTranscript();
+                        setInputValue(transcript);
+                        setLastTranscript(transcript);
+                        setIsRecording(false);
+                    })
+                    .catch(() => {
+                        const mock = getMockTranscript();
+                        setInputValue(mock);
+                        setLastTranscript(mock);
+                        setIsRecording(false);
+                    });
+            };
+            const controller = recordAudioForStt(handleAutoStop);
             controller.start()
                 .then(() => {
                     fwRecordingRef.current = controller;
@@ -996,37 +1024,40 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
             </header>
 
             {/* Stepper */}
-            <div className="bg-card/50 border-b border-white/5 px-6 py-3 flex-shrink-0">
-                <div className="flex items-center justify-center gap-2 max-w-3xl mx-auto">
+            <div className="flex-shrink-0 px-8 py-5 flex items-center justify-between" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                {/* Left: current step info */}
+                <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
+                        style={{ background: P.accentBg, color: P.accent, border: `1px solid rgba(110,231,183,0.25)` }}>
+                        {currentStep + 1}
+                    </div>
+                    <div>
+                        <p className="text-[10px] font-medium uppercase tracking-widest" style={{ color: P.muted }}>Step {currentStep + 1} of {STEPS.length}</p>
+                        <p className="text-sm font-semibold" style={{ color: P.text }}>{STEPS[currentStep].label}</p>
+                    </div>
+                </div>
+
+                {/* Right: dot trail */}
+                <div className="flex items-center gap-2">
                     {STEPS.map((step, index) => {
                         const isActive = currentStep === step.id;
                         const isCompleted = currentStep > step.id;
-                        const StepIcon = step.icon;
-
                         return (
-                            <React.Fragment key={step.id}>
+                            <div key={step.id} className="flex items-center gap-2">
                                 <div
-                                    className={cn(
-                                        "flex items-center gap-2 px-3 py-2 rounded-lg transition-all",
-                                        isActive && "bg-primary/10 text-primary border border-primary/20",
-                                        isCompleted && "text-emerald-500",
-                                        !isActive && !isCompleted && "text-muted-foreground opacity-50"
-                                    )}
-                                >
-                                    {isCompleted ? (
-                                        <CheckCircle2 size={16} />
-                                    ) : (
-                                        <StepIcon size={16} />
-                                    )}
-                                    <span className="text-xs font-medium hidden sm:inline">{step.label}</span>
-                                </div>
-                                {index < STEPS.length - 1 && (
-                                    <div className={cn(
-                                        "w-6 h-0.5 rounded-full",
-                                        isCompleted ? "bg-emerald-500" : "bg-white/10"
-                                    )} />
-                                )}
-                            </React.Fragment>
+                                    className="rounded-full transition-all duration-300"
+                                    style={{
+                                        width: isActive ? 24 : 6,
+                                        height: 6,
+                                        background: isCompleted
+                                            ? P.accent
+                                            : isActive
+                                                ? P.accent
+                                                : 'rgba(255,255,255,0.12)',
+                                        opacity: isActive ? 1 : isCompleted ? 0.7 : 0.4,
+                                    }}
+                                />
+                            </div>
                         );
                     })}
                 </div>
@@ -1034,79 +1065,389 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
 
             {/* Content */}
             <div className="flex-1 overflow-hidden">
-                {/* Step 0: AI Case Selection (hidden when standalone history page) */}
-                {!standaloneHistoryOnly && currentStep === 0 && (
-                    <div className="h-full flex items-center justify-center p-6">
-                        <div className="text-center max-w-md">
-                            <div className={cn(
-                                "w-20 h-20 rounded-full bg-primary/10 text-primary flex items-center justify-center mx-auto mb-6 transition-all",
-                                isSelecting && "animate-pulse"
-                            )}>
-                                <Brain size={40} />
-                            </div>
-                            <h2 className="text-2xl font-bold text-foreground mb-2">AI Case Selection</h2>
-                            <p className="text-muted-foreground mb-8">
-                                Let our AI choose an appropriate clinical case for your practice session based on your learning progress.
-                            </p>
-                            
-                            {casesLoading ? (
-                                <div className="px-8 py-4 rounded-xl text-lg font-medium bg-muted/50 text-muted-foreground border border-white/5">
-                                    Loading cases...
-                                </div>
-                            ) : casesError ? (
-                                <div className="space-y-3">
-                                    <p className="text-sm text-red-400">{casesError}</p>
-                                    <button
-                                        onClick={fetchCases}
-                                        className="px-6 py-3 rounded-xl text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-                                    >
-                                        Retry
-                                    </button>
-                                </div>
-                            ) : casesFromDb.length === 0 ? (
-                                <p className="text-sm text-muted-foreground">No cases found in database</p>
-                            ) : !selectedCase ? (
-                                <button
-                                    onClick={handleAICaseSelect}
-                                    disabled={isSelecting}
-                                    className={cn(
-                                        "px-8 py-4 rounded-xl text-lg font-medium bg-primary text-primary-foreground transition-all shadow-lg shadow-primary/20",
-                                        isSelecting 
-                                            ? "opacity-70 cursor-wait" 
-                                            : "hover:bg-primary/90 hover:scale-105"
-                                    )}
-                                >
-                                    Let AI Choose Case
-                                </button>
-                            ) : (
-                                <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
-                                    <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 mb-4">
-                                        <p className="text-emerald-500 text-sm font-medium mb-2">AI selected:</p>
-                                        <h3 className="text-xl font-bold text-foreground">{selectedCase.title}</h3>
-                                        <span className={cn(
-                                            "inline-block mt-2 text-xs px-2 py-1 rounded-full font-medium",
-                                            selectedCase.category === 'Cardiac' || selectedCase.category === 'Cardiology'
-                                                ? "bg-red-500/10 text-red-400" 
-                                                : "bg-blue-500/10 text-blue-400"
-                                        )}>
-                                            {selectedCase.category}
-                                        </span>
-                                    </div>
-                                    {isSelecting ? (
-                                        <div className="space-y-1">
-                                            <p className="text-muted-foreground text-sm">AI is selecting the best case for you...</p>
-                                            <p className="text-xs text-muted-foreground">
-                                                Starting in {selectionCountdown}s...
-                                            </p>
+                {/* Step 0: Case Selection */}
+                {!standaloneHistoryOnly && currentStep === 0 && (() => {
+                    // Derive unique systems from fetched cases
+                    const systems = Object.entries(
+                        casesFromDb.reduce((acc, c) => {
+                            acc[c.category] = (acc[c.category] || 0) + 1;
+                            return acc;
+                        }, {})
+                    ).map(([name, count]) => ({ name, count, ...(SYSTEM_CONFIG[name] || DEFAULT_SYS) }));
+
+                    return (
+                        <div className="flex overflow-hidden" style={{ height: '100%' }}>
+
+                            {/* ── Left: selection panel ── */}
+                            <div className="w-[380px] flex-shrink-0 overflow-y-auto relative" style={{ borderRight: `1px solid ${P.border}` }}>
+                                <div className="px-6 pt-8 pb-8">
+
+                                    {/* ── Headline ── */}
+                                    {!selectedSystem ? (
+                                        <div className="mb-8">
+                                            <p className="text-[11px] font-semibold uppercase tracking-widest mb-4" style={{ color: P.muted }}>Practice Session</p>
+                                            <h2 className="text-[28px] font-light leading-tight mb-1" style={{ color: P.text }}>
+                                                What would you like
+                                            </h2>
+                                            <h2 className="text-[28px] font-semibold leading-tight" style={{ color: P.accent }}>
+                                                to practise today?
+                                            </h2>
                                         </div>
                                     ) : (
-                                        <p className="text-muted-foreground text-sm">Starting session...</p>
+                                        <div className="mb-7">
+                                            <button
+                                                onClick={() => { setSelectedSystem(null); setSelectedCase(null); setCaseSelected(false); setCaseSearch(''); }}
+                                                className="inline-flex items-center gap-1.5 text-xs mb-5 px-3 py-1.5 rounded-full transition-colors hover:bg-white/5"
+                                                style={{ color: P.muted, border: `1px solid ${P.border}` }}
+                                            >
+                                                <ArrowLeft size={12} /> Back to systems
+                                            </button>
+                                            <h2 className="text-[26px] font-semibold leading-tight mb-1" style={{ color: P.text }}>{selectedSystem}</h2>
+                                            <p className="text-sm" style={{ color: P.muted }}>Pick a case or get one assigned at random</p>
+                                        </div>
+                                    )}
+
+                                    {/* ── States ── */}
+                                    {casesLoading ? (
+                                        <div className="flex items-center gap-3 py-10">
+                                            <Activity size={15} className="animate-spin" style={{ color: P.accent }} />
+                                            <span className="text-sm" style={{ color: P.muted }}>Loading cases...</span>
+                                        </div>
+                                    ) : casesError ? (
+                                        <div className="space-y-3 py-8">
+                                            <p className="text-sm text-red-400">{casesError}</p>
+                                            <button onClick={fetchCases} className="text-sm font-medium underline underline-offset-2 hover:opacity-70" style={{ color: P.accent }}>Retry</button>
+                                        </div>
+                                    ) : casesFromDb.length === 0 ? (
+                                        <p className="text-sm py-10" style={{ color: P.muted }}>No cases found.</p>
+
+                                    ) : caseSelected ? (
+                                        /* ── Confirmation ── */
+                                        <div className="animate-in fade-in slide-in-from-bottom-3 duration-300 space-y-3">
+                                            <div className="rounded-3xl px-5 py-5" style={{ background: P.accentBg, border: `1px solid rgba(110,231,183,0.2)` }}>
+                                                <div className="flex items-center gap-2 mb-3">
+                                                    <div className="w-1.5 h-1.5 rounded-full" style={{ background: P.accent }} />
+                                                    <p className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: P.accent }}>Selected case</p>
+                                                </div>
+                                                <p className="text-[17px] font-semibold leading-snug mb-3" style={{ color: P.text }}>{selectedCase.title}</p>
+                                                <span className="inline-flex items-center text-xs px-3 py-1 rounded-full font-medium" style={{ background: 'rgba(255,255,255,0.07)', color: P.tagText }}>
+                                                    {selectedCase.category}
+                                                </span>
+                                            </div>
+                                            <button
+                                                onClick={() => setCurrentStep(1)}
+                                                className="w-full py-3.5 rounded-full text-sm font-semibold flex items-center justify-center gap-2 transition-all hover:opacity-90"
+                                                style={{ background: P.accent, color: '#0a0a0a', boxShadow: `0 4px 20px rgba(110,231,183,0.2)` }}
+                                            >
+                                                <Play size={13} fill="#0a0a0a" /> Begin Session
+                                            </button>
+                                            <button
+                                                onClick={() => { setSelectedCase(null); setCaseSelected(false); }}
+                                                className="w-full py-2.5 rounded-full text-sm font-medium transition-colors hover:bg-white/5"
+                                                style={{ color: P.muted }}
+                                            >
+                                                Change case
+                                            </button>
+                                        </div>
+
+                                    ) : !selectedSystem ? (
+                                        /* ── System chips ── */
+                                        <>
+                                            <p className="text-xs font-medium mb-3" style={{ color: P.muted }}>Select a system</p>
+                                            <div className="flex flex-wrap gap-2 mb-8">
+                                                {systems.map(({ name, icon: Icon, bg, color }) => (
+                                                    <button
+                                                        key={name}
+                                                        onClick={() => setSelectedSystem(name)}
+                                                        className="flex items-center gap-2 px-3.5 py-2 rounded-full text-sm font-medium transition-all hover:brightness-110 active:scale-95"
+                                                        style={{ background: 'rgba(255,255,255,0.04)', border: `1px solid rgba(255,255,255,0.09)`, color: P.text }}
+                                                    >
+                                                        <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: bg }}>
+                                                            <Icon size={11} style={{ color }} />
+                                                        </div>
+                                                        {name}
+                                                    </button>
+                                                ))}
+                                            </div>
+
+                                            <div className="flex items-center gap-3 mb-5">
+                                                <div className="flex-1 h-px" style={{ background: P.border }} />
+                                                <span className="text-xs" style={{ color: P.muted }}>or skip ahead</span>
+                                                <div className="flex-1 h-px" style={{ background: P.border }} />
+                                            </div>
+
+                                            <button
+                                                onClick={handleRandomAll}
+                                                className="w-full py-3 rounded-full text-sm font-medium flex items-center justify-center gap-2.5 transition-all hover:bg-white/5 active:scale-[0.98]"
+                                                style={{ border: `1px solid rgba(110,231,183,0.25)`, color: P.accent }}
+                                            >
+                                                <Shuffle size={14} />
+                                                Assign me a random case
+                                            </button>
+                                        </>
+
+                                    ) : (
+                                        /* ── Cases list ── */
+                                        <>
+                                            <button
+                                                onClick={handleRandomFromSystem}
+                                                className="w-full py-3 rounded-full text-sm font-medium flex items-center justify-center gap-2.5 mb-5 transition-all hover:bg-white/5 active:scale-[0.98]"
+                                                style={{ border: `1px solid rgba(110,231,183,0.25)`, color: P.accent }}
+                                            >
+                                                <Shuffle size={14} />
+                                                Random {selectedSystem} case
+                                            </button>
+
+                                            {/* Search bar */}
+                                            <div className="relative mb-5">
+                                                <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: P.muted }} />
+                                                <input
+                                                    type="text"
+                                                    placeholder="Search cases…"
+                                                    value={caseSearch}
+                                                    onChange={e => setCaseSearch(e.target.value)}
+                                                    className="w-full pl-9 pr-4 py-2.5 rounded-full text-sm outline-none transition-all"
+                                                    style={{
+                                                        background: 'rgba(255,255,255,0.04)',
+                                                        border: `1px solid rgba(255,255,255,0.09)`,
+                                                        color: P.text,
+                                                        caretColor: P.accent,
+                                                    }}
+                                                    onFocus={e => e.target.style.border = `1px solid rgba(110,231,183,0.35)`}
+                                                    onBlur={e => e.target.style.border = `1px solid rgba(255,255,255,0.09)`}
+                                                />
+                                            </div>
+
+                                            {(() => {
+                                                const filtered = casesFromDb
+                                                    .filter(c => c.category === selectedSystem)
+                                                    .filter(c => c.title.toLowerCase().includes(caseSearch.toLowerCase()));
+                                                return filtered.length === 0 ? (
+                                                    <p className="text-sm px-3 py-4" style={{ color: P.muted }}>No cases match "{caseSearch}"</p>
+                                                ) : (
+                                                    <div className="space-y-0.5">
+                                                        {filtered.map((c) => (
+                                                            <button
+                                                                key={c.id}
+                                                                onClick={() => { setSelectedCase(c); setCaseSelected(true); }}
+                                                                className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl text-left transition-colors hover:bg-white/5 group"
+                                                            >
+                                                                <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: P.accentBg }}>
+                                                                    <Stethoscope size={13} style={{ color: P.accent }} />
+                                                                </div>
+                                                                <span className="flex-1 text-sm font-medium" style={{ color: P.text }}>
+                                                                    {caseSearch ? c.title.split(new RegExp(`(${caseSearch})`, 'gi')).map((part, i) =>
+                                                                        part.toLowerCase() === caseSearch.toLowerCase()
+                                                                            ? <mark key={i} style={{ background: P.accentBg, color: P.accent, borderRadius: 3 }}>{part}</mark>
+                                                                            : part
+                                                                    ) : c.title}
+                                                                </span>
+                                                                <ChevronRight size={13} className="opacity-0 group-hover:opacity-50 transition-opacity flex-shrink-0" style={{ color: P.accent }} />
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                );
+                                            })()}
+                                        </>
                                     )}
                                 </div>
-                            )}
+                            </div>
+
+                            {/* ── Right: 3D Manikin HUD ── */}
+                            <div className="flex-1 relative overflow-hidden">
+
+                                {/* background atmosphere */}
+                                <div className="absolute inset-0" style={{ background: 'radial-gradient(ellipse at 55% 45%, rgba(110,231,183,0.07) 0%, transparent 60%)' }} />
+                                <div className="absolute inset-0" style={{ background: 'radial-gradient(ellipse at 25% 75%, rgba(59,130,246,0.05) 0%, transparent 50%)' }} />
+                                {/* dot grid */}
+                                <div className="absolute inset-0 pointer-events-none" style={{
+                                    backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.09) 1px, transparent 1px)',
+                                    backgroundSize: '24px 24px',
+                                }} />
+                                {/* bottom fade */}
+                                <div className="absolute bottom-0 left-0 right-0 h-28 pointer-events-none z-10" style={{ background: 'linear-gradient(to top, hsl(var(--background)), transparent)' }} />
+
+                                {/* ── Corner brackets (HUD frame) ── */}
+                                {[
+                                    { top: 12, left: 12, borderTop: true, borderLeft: true },
+                                    { top: 12, right: 12, borderTop: true, borderRight: true },
+                                    { bottom: 12, left: 12, borderBottom: true, borderLeft: true },
+                                    { bottom: 12, right: 12, borderBottom: true, borderRight: true },
+                                ].map((pos, i) => (
+                                    <div key={i} className="absolute pointer-events-none z-20" style={{
+                                        top: pos.top, left: pos.left, right: pos.right, bottom: pos.bottom,
+                                        width: 22, height: 22,
+                                        borderTop: pos.borderTop ? `2px solid rgba(110,231,183,0.35)` : 'none',
+                                        borderLeft: pos.borderLeft ? `2px solid rgba(110,231,183,0.35)` : 'none',
+                                        borderRight: pos.borderRight ? `2px solid rgba(110,231,183,0.35)` : 'none',
+                                        borderBottom: pos.borderBottom ? `2px solid rgba(110,231,183,0.35)` : 'none',
+                                    }} />
+                                ))}
+
+                                {/* ── Top bar ── */}
+                                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1.5 rounded-full"
+                                    style={{ background: 'rgba(10,10,10,0.6)', border: `1px solid ${P.border}`, backdropFilter: 'blur(8px)' }}>
+                                    <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: P.accent }} />
+                                    <span className="text-[11px] font-semibold tracking-wide" style={{ color: P.text }}>Anatomy Simulator</span>
+                                    <span className="text-[11px]" style={{ color: P.muted }}>· Drag to rotate</span>
+                                </div>
+
+                                {/* ── Left side vitals ── */}
+                                <div className="absolute left-4 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-2.5 pointer-events-none">
+                                    {/* Heart Rate */}
+                                    <div className="rounded-xl px-3 py-2.5" style={{ background: 'rgba(10,10,10,0.65)', border: '1px solid rgba(239,68,68,0.25)', backdropFilter: 'blur(10px)', minWidth: 110 }}>
+                                        <div className="flex items-center gap-1.5 mb-1">
+                                            <Heart size={11} style={{ color: '#f87171' }} />
+                                            <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#f87171' }}>Heart Rate</span>
+                                        </div>
+                                        <p className="text-lg font-bold leading-none" style={{ color: P.text }}>88 <span className="text-xs font-normal" style={{ color: P.muted }}>bpm</span></p>
+                                        {/* mini ECG line */}
+                                        <svg width="80" height="18" viewBox="0 0 80 18" className="mt-1.5 opacity-60">
+                                            <polyline points="0,10 12,10 16,3 20,16 24,10 28,10 36,10 40,5 44,14 48,10 80,10"
+                                                fill="none" stroke="#f87171" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                                        </svg>
+                                    </div>
+                                    {/* Temperature */}
+                                    <div className="rounded-xl px-3 py-2.5" style={{ background: 'rgba(10,10,10,0.65)', border: '1px solid rgba(251,191,36,0.2)', backdropFilter: 'blur(10px)', minWidth: 110 }}>
+                                        <div className="flex items-center gap-1.5 mb-1">
+                                            <Thermometer size={11} style={{ color: '#fbbf24' }} />
+                                            <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#fbbf24' }}>Temp</span>
+                                        </div>
+                                        <p className="text-lg font-bold leading-none" style={{ color: P.text }}>37.8 <span className="text-xs font-normal" style={{ color: P.muted }}>°C</span></p>
+                                    </div>
+                                    {/* Weight */}
+                                    <div className="rounded-xl px-3 py-2.5" style={{ background: 'rgba(10,10,10,0.65)', border: `1px solid ${P.border}`, backdropFilter: 'blur(10px)', minWidth: 110 }}>
+                                        <div className="flex items-center gap-1.5 mb-1">
+                                            <Scale size={11} style={{ color: P.muted }} />
+                                            <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: P.muted }}>Weight</span>
+                                        </div>
+                                        <p className="text-lg font-bold leading-none" style={{ color: P.text }}>78 <span className="text-xs font-normal" style={{ color: P.muted }}>kg</span></p>
+                                    </div>
+                                </div>
+
+                                {/* ── Right side vitals ── */}
+                                <div className="absolute right-4 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-2.5 pointer-events-none">
+                                    {/* SpO2 */}
+                                    <div className="rounded-xl px-3 py-2.5" style={{ background: 'rgba(10,10,10,0.65)', border: '1px solid rgba(96,165,250,0.25)', backdropFilter: 'blur(10px)', minWidth: 110 }}>
+                                        <div className="flex items-center gap-1.5 mb-1">
+                                            <Wind size={11} style={{ color: '#60a5fa' }} />
+                                            <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#60a5fa' }}>SpO₂</span>
+                                        </div>
+                                        <p className="text-lg font-bold leading-none" style={{ color: P.text }}>97 <span className="text-xs font-normal" style={{ color: P.muted }}>%</span></p>
+                                        {/* SpO2 bar */}
+                                        <div className="mt-2 h-1 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
+                                            <div className="h-full rounded-full" style={{ width: '97%', background: 'linear-gradient(90deg, #3b82f6, #60a5fa)' }} />
+                                        </div>
+                                    </div>
+                                    {/* Resp Rate */}
+                                    <div className="rounded-xl px-3 py-2.5" style={{ background: 'rgba(10,10,10,0.65)', border: '1px solid rgba(110,231,183,0.2)', backdropFilter: 'blur(10px)', minWidth: 110 }}>
+                                        <div className="flex items-center gap-1.5 mb-1">
+                                            <Activity size={11} style={{ color: P.accent }} />
+                                            <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: P.accent }}>Resp Rate</span>
+                                        </div>
+                                        <p className="text-lg font-bold leading-none" style={{ color: P.text }}>18 <span className="text-xs font-normal" style={{ color: P.muted }}>/min</span></p>
+                                    </div>
+                                    {/* Age */}
+                                    <div className="rounded-xl px-3 py-2.5" style={{ background: 'rgba(10,10,10,0.65)', border: `1px solid ${P.border}`, backdropFilter: 'blur(10px)', minWidth: 110 }}>
+                                        <div className="flex items-center gap-1.5 mb-1">
+                                            <User size={11} style={{ color: P.muted }} />
+                                            <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: P.muted }}>Age</span>
+                                        </div>
+                                        <p className="text-lg font-bold leading-none" style={{ color: P.text }}>45 <span className="text-xs font-normal" style={{ color: P.muted }}>yrs</span></p>
+                                    </div>
+                                </div>
+
+                                {/* ── Patient Info Widget ── */}
+                                <div className="absolute bottom-10 left-4 z-20 rounded-2xl overflow-hidden pointer-events-none"
+                                    style={{ width: 210, background: 'rgba(8,8,8,0.72)', border: `1px solid ${P.border}`, backdropFilter: 'blur(14px)' }}>
+                                    {/* header */}
+                                    <div className="flex items-center justify-between px-3 py-2" style={{ borderBottom: `1px solid ${P.border}` }}>
+                                        <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: P.muted }}>Patient Info</span>
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold" style={{ background: 'rgba(110,231,183,0.1)', color: P.accent }}>Pre-session</span>
+                                    </div>
+                                    {/* avatar + identity */}
+                                    <div className="flex items-center gap-2.5 px-3 py-2.5" style={{ borderBottom: `1px solid ${P.border}` }}>
+                                        <div className="w-10 h-10 rounded-xl flex-shrink-0 flex items-center justify-center relative overflow-hidden"
+                                            style={{ background: 'linear-gradient(145deg, rgba(90,125,138,0.4) 0%, rgba(40,60,80,0.6) 100%)', border: `1px solid ${P.border}` }}>
+                                            <User size={18} style={{ color: '#52525b' }} />
+                                            <div className="absolute inset-0" style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, transparent 60%)' }} />
+                                        </div>
+                                        <div>
+                                            <div className="flex items-center gap-1 mb-1">
+                                                <span className="text-[10px] px-1.5 py-px rounded font-semibold" style={{ background: 'rgba(255,255,255,0.06)', color: P.tagText }}>78 kg</span>
+                                                <span className="text-[10px] px-1.5 py-px rounded font-semibold" style={{ background: 'rgba(239,68,68,0.12)', color: '#f87171' }}>A+</span>
+                                            </div>
+                                            <p className="text-xs font-bold" style={{ color: P.text }}>Unknown Patient</p>
+                                            <p className="text-[10px]" style={{ color: P.muted }}>Male · 45 years old</p>
+                                        </div>
+                                    </div>
+                                    {/* vitals */}
+                                    <div className="grid grid-cols-2" style={{ borderBottom: `1px solid ${P.border}` }}>
+                                        <div className="px-3 py-2" style={{ borderRight: `1px solid ${P.border}` }}>
+                                            <div className="flex items-center gap-1 mb-0.5">
+                                                <Activity size={9} style={{ color: '#f87171' }} />
+                                                <span className="text-[9px] uppercase tracking-wide font-semibold" style={{ color: P.muted }}>BP</span>
+                                            </div>
+                                            <p className="text-xs font-bold" style={{ color: P.text }}>120/80 <span className="text-[9px] font-normal" style={{ color: P.muted }}>mmHg</span></p>
+                                        </div>
+                                        <div className="px-3 py-2">
+                                            <div className="flex items-center gap-1 mb-0.5">
+                                                <Heart size={9} style={{ color: '#f87171' }} />
+                                                <span className="text-[9px] uppercase tracking-wide font-semibold" style={{ color: P.muted }}>HR</span>
+                                            </div>
+                                            <p className="text-xs font-bold" style={{ color: P.text }}>88 <span className="text-[9px] font-normal" style={{ color: P.muted }}>bpm</span></p>
+                                        </div>
+                                    </div>
+                                    {/* body condition */}
+                                    <div className="px-3 py-2.5">
+                                        <div className="flex items-center justify-between mb-1.5">
+                                            <span className="text-[9px] uppercase tracking-wide font-semibold" style={{ color: P.muted }}>Body Condition</span>
+                                            <span className="text-[10px] font-bold" style={{ color: P.accent }}>96%</span>
+                                        </div>
+                                        <div className="h-1 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.07)' }}>
+                                            <div className="h-full rounded-full" style={{ width: '96%', background: `linear-gradient(90deg, ${P.accent}80, ${P.accent})` }} />
+                                        </div>
+                                        <p className="text-[9px] mt-1" style={{ color: P.muted }}>Stable · no prior conditions</p>
+                                    </div>
+                                </div>
+
+                                {/* ── Bottom system tags ── */}
+                                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 pointer-events-none">
+                                    {systems.map(({ name, icon: Icon, color, bg }) => (
+                                        <div key={name} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg"
+                                            style={{ background: 'rgba(10,10,10,0.65)', border: `1px solid ${P.border}`, backdropFilter: 'blur(8px)' }}>
+                                            <div className="w-4 h-4 rounded-md flex items-center justify-center" style={{ background: bg }}>
+                                                <Icon size={10} style={{ color }} />
+                                            </div>
+                                            <span className="text-[11px] font-medium" style={{ color: P.tagText }}>{name}</span>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {/* ── 3D model ── */}
+                                {/* eslint-disable-next-line react/no-unknown-property */}
+                                <model-viewer
+                                    src="/human_anatomy_male_torso.glb"
+                                    alt="Practice manikin"
+                                    auto-rotate
+                                    auto-rotate-delay="500"
+                                    rotation-per-second="12deg"
+                                    camera-controls
+                                    disable-zoom
+                                    camera-orbit="0deg 75deg 2.2m"
+                                    style={{
+                                        width: '100%',
+                                        height: '100%',
+                                        background: 'transparent',
+                                        '--progress-bar-color': 'transparent',
+                                        '--progress-mask': 'transparent',
+                                    }}
+                                />
+                            </div>
+
                         </div>
-                    </div>
-                )}
+                    );
+                })()}
 
                 {/* Step 1: History Taking */}
                 {currentStep === 1 && (

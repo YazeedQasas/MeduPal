@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(find 'c:/Users/Cobra Shop/Desktop/Work/Medupal/Medupal/src' -name *.config.* -o -name *router* -o -name *routes*)",
+      "Bash(GIT_EDITOR=true git rebase --continue)"
     ]
   }
 }

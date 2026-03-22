@@ -1,6 +1,6 @@
 /* Aligned with landing: pure black, near-black cards, subtle borders, teal accents */
 :root {
-  --background: 0 0% 0%;
+  --background: 210 5% 5%;
   --foreground: 0 0% 91%;
 
   --card: 0 0% 3%;
@@ -49,6 +49,16 @@ body {
   font-family: 'Poppins', system-ui, sans-serif;
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
+}
+
+/* Hide scrollbars but keep scroll (cross-browser) */
+.no-scrollbar {
+  -ms-overflow-style: none; /* IE/Edge */
+  scrollbar-width: none;    /* Firefox */
+}
+.no-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 /* Text selection — theme teal instead of default blue */

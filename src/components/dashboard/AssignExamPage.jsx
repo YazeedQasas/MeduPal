@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   FileCheck,
   User,
@@ -7,34 +7,61 @@ import {
   Calendar,
   Clock,
   FileText,
+  Search,
+  Users,
+  CheckCircle2,
+  AlertCircle,
+  BarChart2,
+  TrendingUp,
+  Settings2,
 } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
 import { cn } from '../../lib/utils';
 
-const CARD_CLASS = 'rounded-xl border border-neutral-800 bg-[#0f1111] p-6';
+const CARD_CLASS = 'rounded-xl border border-neutral-800 bg-[#0f1111] p-6 transition-all duration-200';
 const INPUT_CLASS = 'w-full px-4 py-2.5 rounded-xl border border-neutral-700 bg-neutral-900/50 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50';
+
+const CHART_COLORS = ['#64a091', '#f59e0b', '#10b981', '#6366f1', '#ec4899'];
+
+function getMinDateString() {
+  const today = new Date();
+  return today.toISOString().split('T')[0];
+}
+
+function getMinTimeString() {
+  const now = new Date();
+  const hours = String(now.getHours()).padStart(2, '0');
+  const mins = String(now.getMinutes()).padStart(2, '0');
+  return `${hours}:${mins}`;
+}
 
 export function AssignExamPage({ setActiveTab }) {
   const { user, role } = useAuth();
-  // IDs of students checked for receiving the exam.
   const [selectedStudents, setSelectedStudents] = useState([]);
-  // Full profile objects for students advised by this instructor (backed by advisor_assignments).
   const [advisorStudents, setAdvisorStudents] = useState([]);
   const [cases, setCases] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [error, setError] = useState('');
   const [skippedDueToConflict, setSkippedDueToConflict] = useState(0);
   const [caseId, setCaseId] = useState('');
   const [examDate, setExamDate] = useState('');
   const [examTime, setExamTime] = useState('');
-  const hasInitializedSelectionRef = useRef(false);
+  const [assignToAll, setAssignToAll] = useState(true);
+  const [studentSearch, setStudentSearch] = useState('');
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [dateError, setDateError] = useState('');
+  const [timeError, setTimeError] = useState('');
+  const [examStats, setExamStats] = useState({ upcoming: 0, thisWeek: 0, byCase: [], byStatus: [] });
 
   const isInstructor = role === 'instructor' || role === 'admin';
 
-  const fetchSelectedStudents = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     if (!user?.id || !isInstructor) return;
+
     const { data: assignments } = await supabase
       .from('advisor_assignments')
       .select('student_id')
@@ -55,19 +82,75 @@ export function AssignExamPage({ setActiveTab }) {
       .eq('role', 'student');
 
     const safeProfiles = profiles || [];
-    const ids = safeProfiles.map((p) => p.id);
     setAdvisorStudents(safeProfiles);
-
-    // On first load, default to selecting all advised students.
-    // After that, preserve the instructor's current checkbox selection (including empty).
-    if (!hasInitializedSelectionRef.current) {
-      setSelectedStudents(ids);
-      hasInitializedSelectionRef.current = true;
-    } else {
-      const idsSet = new Set(ids);
-      setSelectedStudents((prev) => prev.filter((id) => idsSet.has(id)));
-    }
+    setSelectedStudents(safeProfiles.map((p) => p.id));
     setLoading(false);
+  }, [user?.id, isInstructor]);
+
+  const fetchExamStats = useCallback(async () => {
+    if (!user?.id || !isInstructor) return;
+    try {
+      const now = new Date();
+      const weekEnd = new Date(now);
+      weekEnd.setDate(weekEnd.getDate() + 7);
+
+      let sessions = [];
+      const { data: sessionsByType } = await supabase
+        .from('sessions')
+        .select('id, start_time, status, case_id, case:cases(title)')
+        .eq('examiner_id', user.id)
+        .eq('session_type', 'exam')
+        .gte('start_time', now.toISOString())
+        .order('start_time', { ascending: true });
+      sessions = sessionsByType || [];
+      if (sessions.length === 0) {
+        const { data: sessionsByLegacy } = await supabase
+          .from('sessions')
+          .select('id, start_time, status, case_id, case:cases(title)')
+          .eq('examiner_id', user.id)
+          .eq('type', 'exam')
+          .gte('start_time', now.toISOString())
+          .order('start_time', { ascending: true });
+        sessions = sessionsByLegacy || [];
+      }
+
+      const upcoming = sessions.length;
+      const thisWeek = sessions.filter((s) => new Date(s.start_time) <= weekEnd).length;
+
+      const caseCounts = {};
+      sessions.forEach((s) => {
+        const name = s.case?.title || 'Unknown';
+        caseCounts[name] = (caseCounts[name] || 0) + 1;
+      });
+      const byCase = Object.entries(caseCounts).map(([name, count]) => ({ name, count }));
+
+      const { data: allByType } = await supabase
+        .from('sessions')
+        .select('status')
+        .eq('examiner_id', user.id)
+        .eq('session_type', 'exam');
+      let allExams = allByType || [];
+      if (allExams.length === 0) {
+        const { data: allByLegacy } = await supabase
+          .from('sessions')
+          .select('status')
+          .eq('examiner_id', user.id)
+          .eq('type', 'exam');
+        allExams = allByLegacy || [];
+      }
+
+      const statusCounts = { Scheduled: 0, Completed: 0, 'In Progress': 0, Cancelled: 0 };
+      allExams.forEach((s) => {
+        if (statusCounts[s.status] !== undefined) statusCounts[s.status]++;
+      });
+      const byStatus = Object.entries(statusCounts)
+        .filter(([, v]) => v > 0)
+        .map(([name, value]) => ({ name, value }));
+
+      setExamStats({ upcoming, thisWeek, byCase, byStatus });
+    } catch (err) {
+      console.error(err);
+    }
   }, [user?.id, isInstructor]);
 
   useEffect(() => {
@@ -76,7 +159,8 @@ export function AssignExamPage({ setActiveTab }) {
       return;
     }
     const load = async () => {
-      await fetchSelectedStudents();
+      await fetchData();
+      await fetchExamStats();
       const { data } = await supabase
         .from('cases')
         .select('id, title')
@@ -85,70 +169,140 @@ export function AssignExamPage({ setActiveTab }) {
       setCases(data || []);
     };
     load();
-  }, [isInstructor, fetchSelectedStudents]);
+  }, [isInstructor, fetchData, fetchExamStats]);
 
-  const handleAssignExam = async (e) => {
-    e.preventDefault();
-    if (!selectedStudents.length || !caseId || !examDate || !examTime) {
-      alert('Please select students, case, date, and time.');
-      return;
+  const filteredStudents = useMemo(() => {
+    if (!studentSearch.trim()) return advisorStudents;
+    const q = studentSearch.toLowerCase();
+    return advisorStudents.filter(
+      (s) =>
+        (s.full_name || '').toLowerCase().includes(q) ||
+        (s.email || '').toLowerCase().includes(q)
+    );
+  }, [advisorStudents, studentSearch]);
+
+  const selectedProfiles = useMemo(
+    () => advisorStudents.filter((s) => selectedStudents.includes(s.id)),
+    [advisorStudents, selectedStudents]
+  );
+
+  const selectedCase = cases.find((c) => c.id === caseId);
+  const minDate = getMinDateString();
+  const minTime = getMinTimeString();
+
+  const isDateInPast = useMemo(() => {
+    if (!examDate) return false;
+    const d = new Date(examDate);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    d.setHours(0, 0, 0, 0);
+    return d < today;
+  }, [examDate]);
+
+  const isDateTimeInPast = useMemo(() => {
+    if (!examDate || !examTime) return false;
+    const d = new Date(`${examDate}T${examTime}`);
+    return d <= new Date();
+  }, [examDate, examTime]);
+
+  useEffect(() => {
+    if (examDate && examTime) {
+      if (isDateInPast) setDateError('Please select a future date.');
+      else setDateError('');
+      if (isDateTimeInPast) setTimeError('Please select a future time.');
+      else setTimeError('');
+    } else {
+      setDateError('');
+      setTimeError('');
     }
-    const scheduledAt = new Date(`${examDate}T${examTime}`);
-    if (isNaN(scheduledAt.getTime())) {
-      alert('Please enter a valid date and time.');
-      return;
-    }
-    setSkippedDueToConflict(0);
+  }, [examDate, examTime, isDateInPast, isDateTimeInPast]);
+
+  const canAssign =
+    selectedStudents.length > 0 &&
+    !!caseId &&
+    !!examDate &&
+    !!examTime &&
+    !isDateInPast &&
+    !isDateTimeInPast &&
+    !submitting;
+
+  const toggleStudent = (studentId) => {
+    setSelectedStudents((prev) =>
+      prev.includes(studentId)
+        ? prev.filter((id) => id !== studentId)
+        : [...prev, studentId]
+    );
+    setSuccess(false);
+    setError('');
+  };
+
+  const handleAssignToAll = (checked) => {
+    setAssignToAll(checked);
+    if (checked) setSelectedStudents(advisorStudents.map((s) => s.id));
+    setSuccess(false);
+    setError('');
+  };
+
+  const handleSelectAllVisible = () => {
+    const visibleIds = filteredStudents.map((s) => s.id);
+    setSelectedStudents((prev) => [...new Set([...prev, ...visibleIds])]);
+  };
+
+  const handleDeselectAllVisible = () => {
+    const visibleIds = new Set(filteredStudents.map((s) => s.id));
+    setSelectedStudents((prev) => prev.filter((id) => !visibleIds.has(id)));
+  };
+
+  const handleAssignExam = async () => {
+    if (!canAssign) return;
+
     setSubmitting(true);
     setSuccess(false);
-    try {
-      const selectedProfiles = advisorStudents.filter((s) => selectedStudents.includes(s.id));
-      if (!selectedProfiles.length) {
-        alert('Please select at least one student to assign.');
-        setSubmitting(false);
-        return;
-      }
+    setError('');
+    setShowConfirmModal(false);
 
-      const selectedIds = selectedProfiles.map((p) => p.id);
+    try {
+      const selectedProfilesLocal = advisorStudents.filter((s) =>
+        selectedStudents.includes(s.id)
+      );
+      const selectedIds = selectedProfilesLocal.map((p) => p.id);
+      const scheduledAt = new Date(`${examDate}T${examTime}`);
       const scheduledAtIso = scheduledAt.toISOString();
 
-      // Prevent duplicates: don't create a scheduled exam session if the student already has one at the same time.
       let existingSessions = [];
       try {
-        const { data, error } = await supabase
+        const { data, err } = await supabase
           .from('sessions')
           .select('student_id')
           .eq('session_type', 'exam')
           .eq('start_time', scheduledAtIso)
           .in('student_id', selectedIds)
           .neq('status', 'Cancelled');
-        if (error) throw error;
+        if (err) throw err;
         existingSessions = data || [];
-      } catch (err) {
-        // Backward compatibility for DB schema still using `type` instead of `session_type`.
-        const { data, error } = await supabase
+      } catch {
+        const { data, err } = await supabase
           .from('sessions')
           .select('student_id')
           .eq('type', 'exam')
           .eq('start_time', scheduledAtIso)
           .in('student_id', selectedIds)
           .neq('status', 'Cancelled');
-        if (error) throw error;
+        if (err) throw err;
         existingSessions = data || [];
       }
 
-      const existingIds = new Set((existingSessions || []).map((s) => s.student_id));
-      const toAssignProfiles = selectedProfiles.filter((p) => !existingIds.has(p.id));
-      const skippedCount = selectedProfiles.length - toAssignProfiles.length;
-      setSkippedDueToConflict(skippedCount > 0 ? skippedCount : 0);
+      const existingIds = new Set(existingSessions.map((s) => s.student_id));
+      const toAssign = selectedProfilesLocal.filter((p) => !existingIds.has(p.id));
+      setSkippedDueToConflict(selectedProfilesLocal.length - toAssign.length);
 
-      if (!toAssignProfiles.length) {
-        alert('All selected students already have an exam scheduled at this time.');
+      if (!toAssign.length) {
+        setError('All selected students already have an exam scheduled at this time.');
         setSubmitting(false);
         return;
       }
 
-      const baseInserts = toAssignProfiles.map((s) => ({
+      const baseInserts = toAssign.map((s) => ({
         student_id: s.id,
         examiner_id: user.id,
         case_id: caseId,
@@ -156,32 +310,49 @@ export function AssignExamPage({ setActiveTab }) {
         status: 'Scheduled',
       }));
 
-      // Try `session_type` first, fallback to `type`.
       let insertError = null;
       try {
-        const { error } = await supabase.from('sessions').insert(
+        const { error: err } = await supabase.from('sessions').insert(
           baseInserts.map((row) => ({ ...row, session_type: 'exam' }))
         );
-        insertError = error;
+        insertError = err;
       } catch (err) {
         insertError = err;
       }
 
       if (insertError) {
-        const { error: fallbackError } = await supabase.from('sessions').insert(
+        const { error: fallbackErr } = await supabase.from('sessions').insert(
           baseInserts.map((row) => ({ ...row, type: 'exam' }))
         );
-        if (fallbackError) throw fallbackError;
+        if (fallbackErr) throw fallbackErr;
       }
 
       setSuccess(true);
+      fetchExamStats();
     } catch (err) {
       console.error(err);
-      alert(err?.message || 'Failed to assign exam.');
+      setError(err?.message || 'Failed to assign exam.');
     } finally {
       setSubmitting(false);
     }
   };
+
+  const resetForm = () => {
+    setSuccess(false);
+    setError('');
+    setSkippedDueToConflict(0);
+    setCaseId('');
+    setExamDate('');
+    setExamTime('');
+  };
+
+  const formattedDateTime =
+    examDate && examTime
+      ? new Date(`${examDate}T${examTime}`).toLocaleString([], {
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        })
+      : '—';
 
   if (!isInstructor) {
     return (
@@ -192,9 +363,7 @@ export function AssignExamPage({ setActiveTab }) {
               <FileCheck size={28} />
             </div>
             <h2 className="text-lg font-semibold text-foreground mb-2">Access denied</h2>
-            <p className="text-sm text-muted-foreground">
-              This page is for instructors only.
-            </p>
+            <p className="text-sm text-muted-foreground">This page is for instructors only.</p>
           </div>
         </div>
       </div>
@@ -205,8 +374,8 @@ export function AssignExamPage({ setActiveTab }) {
     return (
       <div className="max-w-2xl mx-auto">
         <div className={CARD_CLASS}>
-          <div className="flex flex-col items-center justify-center py-12">
-            <Loader2 className="w-8 h-8 text-primary animate-spin mb-4" />
+          <div className="flex flex-col items-center justify-center py-16">
+            <Loader2 className="w-10 h-10 text-primary animate-spin mb-4" />
             <p className="text-sm text-muted-foreground">Loading...</p>
           </div>
         </div>
@@ -214,283 +383,412 @@ export function AssignExamPage({ setActiveTab }) {
     );
   }
 
-  const canAssign = selectedStudents.length > 0 && !!caseId && !!examDate && !!examTime && !submitting && !success;
-  const selectedCase = cases.find((c) => c.id === caseId);
-  const previewDateTime = examDate && examTime ? `${examDate} ${examTime}` : '—';
-  const selectedProfilesForPreview = advisorStudents.filter((s) => selectedStudents.includes(s.id));
-  const previewSelectedNames = selectedProfilesForPreview.map((s) => s.full_name || 'Unnamed');
-  const previewStudentsToShow = previewSelectedNames.slice(0, 4);
-  const previewExtraCount = Math.max(0, previewSelectedNames.length - previewStudentsToShow.length);
-
-  const toggleStudentSelection = (studentId) => {
-    setSelectedStudents((prev) => {
-      const isSelected = prev.includes(studentId);
-      return isSelected ? prev.filter((id) => id !== studentId) : [...prev, studentId];
-    });
-    if (success) {
-      setSuccess(false);
-      setSkippedDueToConflict(0);
-    }
-  };
-
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* LEFT: Selected Students */}
-        <section className={CARD_CLASS}>
-          <div className="flex items-center justify-between gap-3 mb-4">
-            <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">
-              Selected Students
-            </h2>
-            <div className="text-xs text-muted-foreground">
-              {selectedStudents.length} selected
-            </div>
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-12 space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-xl bg-amber-500/15 flex items-center justify-center shrink-0">
+            <FileCheck size={24} className="text-amber-400" />
           </div>
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">Assign Exam</h1>
+            <p className="text-sm text-muted-foreground">Schedule exams and manage your students.</p>
+          </div>
+        </div>
+      </div>
 
-          {advisorStudents.length === 0 ? (
-            <div className="text-center py-10">
-              <User size={40} className="mx-auto text-muted-foreground/50 mb-3" />
-              <p className="text-muted-foreground">No students selected yet.</p>
-              <p className="text-sm text-muted-foreground/80 mt-1">
-                Go to <strong>Students</strong> and click <strong>Advise</strong>.
-              </p>
+      {/* Success card */}
+      {success && (
+        <div className={cn(CARD_CLASS, 'border-emerald-500/30 bg-emerald-500/5')}>
+          <div className="flex items-start gap-4">
+            <div className="w-12 h-12 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0">
+              <CheckCircle2 size={24} className="text-emerald-400" />
             </div>
-          ) : (
-            <div>
-              {selectedStudents.length === 0 && (
-                <p className="text-xs text-muted-foreground text-center mb-4">
-                  Use the checkboxes below to choose who receives the exam.
+            <div className="flex-1 min-w-0">
+              <h3 className="text-lg font-semibold text-emerald-400">Exams assigned successfully</h3>
+              {skippedDueToConflict > 0 && (
+                <p className="text-sm text-emerald-200/90 mt-1">
+                  Skipped {skippedDueToConflict} student{skippedDueToConflict === 1 ? '' : 's'} due to a scheduling conflict.
                 </p>
               )}
-              <div className="space-y-3">
-                {advisorStudents.map((student) => {
-                const isChecked = selectedStudents.includes(student.id);
-                return (
-                <div
-                  key={student.id}
-                  className="flex items-start justify-between gap-3 p-3 bg-muted/20 border border-white/5 rounded-lg"
+              <div className="flex flex-wrap gap-3 mt-4">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab?.('sessions')}
+                  className="px-4 py-2.5 rounded-xl text-sm font-semibold bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 border border-emerald-500/30"
                 >
-                  <div className="flex items-start gap-3 min-w-0">
-                    <input
-                      type="checkbox"
-                      checked={isChecked}
-                      onChange={() => toggleStudentSelection(student.id)}
-                      disabled={submitting}
-                      className="mt-1.5 h-4 w-4 rounded border-neutral-700 bg-neutral-900/50 text-primary focus:ring-primary/50"
-                      aria-label={`Select ${student.full_name || 'student'}`}
-                    />
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-foreground truncate">
-                        {student.full_name || 'Unnamed'}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1.5">
-                        <Mail size={13} />
-                        <span className="truncate">{student.email || 'No email'}</span>
-                      </p>
-                    </div>
-                  </div>
-                </div>
-                );
-                })}
+                  View Sessions
+                </button>
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="px-4 py-2.5 rounded-xl text-sm font-medium border border-neutral-600 text-foreground hover:bg-neutral-800/50"
+                >
+                  Assign Another
+                </button>
               </div>
             </div>
-          )}
-        </section>
+          </div>
+        </div>
+      )}
 
-        {/* RIGHT: Exam setup */}
-        <section className={CARD_CLASS}>
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-12 h-12 rounded-xl bg-amber-500/15 flex items-center justify-center shrink-0">
-              <FileCheck size={24} className="text-amber-400" />
-            </div>
-            <div>
-              <h2 className="text-2xl font-bold text-foreground">Assign Exam</h2>
-              <p className="text-sm text-muted-foreground mt-1">
-                Configure the case and schedule. Students are selected from <strong>advisor_assignments</strong>.
-              </p>
+      {/* Error card */}
+      {error && (
+        <div className={cn(CARD_CLASS, 'border-red-500/30 bg-red-500/5')}>
+          <div className="flex items-start gap-4">
+            <AlertCircle size={24} className="text-red-400 shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <h3 className="text-lg font-semibold text-red-400">Error</h3>
+              <p className="text-sm text-red-200/90 mt-1">{error}</p>
+              <button
+                type="button"
+                onClick={() => setError('')}
+                className="mt-3 text-sm text-red-400 hover:underline"
+              >
+                Dismiss
+              </button>
             </div>
           </div>
+        </div>
+      )}
 
-          <form onSubmit={handleAssignExam} className="space-y-4">
-            {/* Select Case */}
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-2">
-                <FileText className="w-4 h-4 inline mr-1.5 -mt-0.5" />
-                Select Case
-              </label>
-              <select
-                value={caseId}
-                onChange={(e) => {
-                  setCaseId(e.target.value);
-                  if (success) {
-                    setSuccess(false);
-                    setSkippedDueToConflict(0);
-                  }
-                }}
-                className={INPUT_CLASS}
-                required
-              >
-                <option value="">Select Case</option>
-                {cases.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.title}
-                  </option>
-                ))}
-              </select>
+      {/* Stats + Graphs row */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className={CARD_CLASS}>
+          <h3 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4 flex items-center gap-2">
+            <TrendingUp size={16} className="text-primary" />
+            Exam Overview
+          </h3>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="rounded-xl bg-neutral-900/50 p-4 border border-neutral-800">
+              <span className="block text-2xl font-bold text-foreground">{examStats.upcoming}</span>
+              <span className="text-xs text-muted-foreground">Upcoming exams</span>
             </div>
+            <div className="rounded-xl bg-neutral-900/50 p-4 border border-neutral-800">
+              <span className="block text-2xl font-bold text-primary">{examStats.thisWeek}</span>
+              <span className="text-xs text-muted-foreground">This week</span>
+            </div>
+          </div>
+        </div>
 
-            {/* Date */}
+        <div className={CARD_CLASS}>
+          <h3 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4 flex items-center gap-2">
+            <BarChart2 size={16} className="text-primary" />
+            Exams by case
+          </h3>
+          <div className="h-[120px]">
+            {examStats.byCase.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={examStats.byCase} layout="vertical" margin={{ top: 0, right: 20, left: 60, bottom: 0 }}>
+                  <XAxis type="number" hide />
+                  <YAxis dataKey="name" type="category" width={55} tick={{ fill: '#94a3b8', fontSize: 11 }} />
+                  <Bar dataKey="count" radius={[0, 4, 4, 0]} barSize={14}>
+                    {examStats.byCase.map((_, i) => (
+                      <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="text-xs text-muted-foreground text-center py-8">No upcoming exams yet</p>
+            )}
+          </div>
+        </div>
+
+        <div className={CARD_CLASS}>
+          <h3 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4 flex items-center gap-2">
+            <BarChart2 size={16} className="text-primary" />
+            Exam status
+          </h3>
+          <div className="h-[120px]">
+            {examStats.byStatus.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={examStats.byStatus}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={30}
+                    outerRadius={45}
+                    paddingAngle={2}
+                  >
+                    {examStats.byStatus.map((_, i) => (
+                      <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: 8 }}
+                    formatter={(v) => [v, '']}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="text-xs text-muted-foreground text-center py-8">No exam data yet</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Control panel: all cards in one view */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        {/* Card 1: Select Exam */}
+        <div className={CARD_CLASS}>
+          <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4 flex items-center gap-2">
+            <FileText size={18} className="text-primary" />
+            Select exam
+          </h2>
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground mb-2">Case</label>
+            <select
+              value={caseId}
+              onChange={(e) => {
+                setCaseId(e.target.value);
+                setSuccess(false);
+                setError('');
+              }}
+              className={INPUT_CLASS}
+            >
+              <option value="">— Select a case —</option>
+              {cases.map((c) => (
+                <option key={c.id} value={c.id}>{c.title}</option>
+              ))}
+            </select>
+            <p className="mt-1.5 text-xs text-muted-foreground">Choose the OSCE case for this exam.</p>
+          </div>
+        </div>
+
+        {/* Card 2: Schedule */}
+        <div className={CARD_CLASS}>
+          <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4 flex items-center gap-2">
+            <Calendar size={18} className="text-primary" />
+            Schedule
+          </h2>
+          <div className="space-y-4">
             <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-2">
-                <Calendar className="w-4 h-4 inline mr-1.5 -mt-0.5" />
-                Select Date
-              </label>
+              <label className="block text-xs font-medium text-muted-foreground mb-2">Date</label>
               <input
                 type="date"
                 value={examDate}
+                min={minDate}
                 onChange={(e) => {
                   setExamDate(e.target.value);
-                  if (success) {
-                    setSuccess(false);
-                    setSkippedDueToConflict(0);
-                  }
+                  setDateError('');
+                  setSuccess(false);
+                  setError('');
                 }}
-                className={INPUT_CLASS}
-                required
+                className={cn(INPUT_CLASS, dateError && 'border-red-500/50')}
               />
+              {dateError && (
+                <p className="mt-1 text-xs text-red-400 flex items-center gap-1">
+                  <AlertCircle size={12} /> {dateError}
+                </p>
+              )}
+              <p className="mt-1 text-xs text-muted-foreground">No past dates allowed.</p>
             </div>
-
-            {/* Time */}
             <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-2">
-                <Clock className="w-4 h-4 inline mr-1.5 -mt-0.5" />
-                Select Time
-              </label>
+              <label className="block text-xs font-medium text-muted-foreground mb-2">Time</label>
               <input
                 type="time"
                 value={examTime}
+                min={examDate === minDate ? minTime : undefined}
                 onChange={(e) => {
                   setExamTime(e.target.value);
-                  if (success) {
-                    setSuccess(false);
-                    setSkippedDueToConflict(0);
-                  }
+                  setTimeError('');
+                  setSuccess(false);
+                  setError('');
                 }}
-                className={INPUT_CLASS}
-                required
+                className={cn(INPUT_CLASS, timeError && 'border-red-500/50')}
               />
-            </div>
-
-            {submitting && (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 size={16} className="animate-spin" />
-                <span>Assigning exams...</span>
-              </div>
-            )}
-
-            {success && (
-              <div className="mt-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3">
-                <p className="text-sm font-semibold text-emerald-400">
-                  Exams assigned successfully
+              {timeError && (
+                <p className="mt-1 text-xs text-red-400 flex items-center gap-1">
+                  <AlertCircle size={12} /> {timeError}
                 </p>
-                {skippedDueToConflict > 0 && (
-                  <p className="text-xs text-emerald-200/80 mt-1">
-                    Skipped {skippedDueToConflict} student{skippedDueToConflict === 1 ? '' : 's'} due to a time conflict.
-                  </p>
-                )}
-                <div className="flex flex-wrap gap-3 mt-3">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSuccess(false);
-                      setActiveTab?.('sessions');
-                    }}
-                    className="px-4 py-2.5 rounded-xl text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-                  >
-                    View Sessions
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSuccess(false);
-                      setSkippedDueToConflict(0);
-                      setCaseId('');
-                      setExamDate('');
-                      setExamTime('');
-                    }}
-                    className="px-4 py-2.5 rounded-xl text-sm font-medium border border-neutral-700 text-foreground hover:bg-neutral-800/50 transition-colors"
-                  >
-                    Assign Another
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Button */}
-            <button
-              type="submit"
-              disabled={!canAssign}
-              className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {submitting ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Assigning exams...
-                </>
-              ) : (
-                <>
-                  <FileCheck size={18} />
-                  Assign Exam
-                </>
               )}
-            </button>
-          </form>
-
-          {/* Exam Preview */}
-          <div className="mt-5 pt-5 border-t border-white/5">
-            <h3 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-3">
-              Exam Preview
-            </h3>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-xs text-muted-foreground uppercase tracking-wider">Case</span>
-                <span className="text-sm font-semibold text-foreground">
-                  {selectedCase?.title || '—'}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-xs text-muted-foreground uppercase tracking-wider">Students</span>
-                <span className="text-sm font-semibold text-foreground">
-                  {selectedStudents.length || 0}
-                </span>
-              </div>
-              {selectedProfilesForPreview.length > 0 && (
-                <div className="mt-2 pt-2 border-t border-white/5">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wider mb-2">Selected students</p>
-                  <div className="space-y-1">
-                    {previewStudentsToShow.map((name, idx) => (
-                      <div key={idx} className="flex items-center justify-between gap-3">
-                        <span className="text-sm text-foreground truncate">{name}</span>
-                      </div>
-                    ))}
-                    {previewExtraCount > 0 && (
-                      <p className="text-xs text-muted-foreground">
-                        +{previewExtraCount} more
-                      </p>
-                    )}
-                  </div>
-                </div>
-              )}
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-xs text-muted-foreground uppercase tracking-wider">Date & Time</span>
-                <span className="text-sm font-semibold text-foreground">
-                  {previewDateTime}
-                </span>
-              </div>
+              <p className="mt-1 text-xs text-muted-foreground">If today, select a future time.</p>
             </div>
           </div>
-        </section>
+        </div>
+
+        {/* Card 3: Control panel */}
+        <div className={CARD_CLASS}>
+          <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4 flex items-center gap-2">
+            <Settings2 size={18} className="text-primary" />
+            Control panel
+          </h2>
+          <div className="space-y-4">
+            <div className="rounded-xl bg-neutral-900/30 border border-neutral-800 p-4">
+              <p className="text-xs text-muted-foreground mb-1">Summary</p>
+              <p className="text-sm font-medium text-foreground">
+                {selectedCase?.title || '—'} → {selectedStudents.length} students
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">{formattedDateTime}</p>
+            </div>
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => canAssign && setShowConfirmModal(true)}
+                disabled={!canAssign}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {submitting ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" />
+                    Assigning...
+                  </>
+                ) : (
+                  <>
+                    <FileCheck size={18} />
+                    Assign exam
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={resetForm}
+                className="w-full px-4 py-2.5 rounded-xl text-sm font-medium border border-neutral-700 text-foreground hover:bg-neutral-800/50"
+              >
+                Reset form
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab?.('sessions')}
+                className="w-full px-4 py-2.5 rounded-xl text-sm font-medium border border-neutral-700 text-muted-foreground hover:bg-neutral-800/50 hover:text-foreground"
+              >
+                View sessions
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
+
+      {/* Card: Select Students (full width) */}
+      <div className={CARD_CLASS}>
+        <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-4 flex items-center gap-2">
+          <Users size={18} className="text-primary" />
+          Select students
+        </h2>
+
+        {advisorStudents.length === 0 ? (
+          <div className="text-center py-12 rounded-xl border border-neutral-800 bg-neutral-900/30">
+            <User size={40} className="mx-auto text-muted-foreground/50 mb-3" />
+            <p className="text-muted-foreground">No students in your advisee list.</p>
+            <p className="text-sm text-muted-foreground/80 mt-1">Go to Students and assign advisees first.</p>
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-col sm:flex-row gap-3 mb-4">
+              <div className="relative flex-1">
+                <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  type="text"
+                  placeholder="Search by name or email..."
+                  value={studentSearch}
+                  onChange={(e) => setStudentSearch(e.target.value)}
+                  className={cn(INPUT_CLASS, 'pl-10')}
+                />
+              </div>
+              <div className="flex items-center gap-4 flex-wrap">
+                <label className="flex items-center gap-2 text-sm text-foreground cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={assignToAll}
+                    onChange={(e) => handleAssignToAll(e.target.checked)}
+                    className="rounded border-neutral-700 bg-neutral-900/50 text-primary focus:ring-primary/50"
+                  />
+                  Assign to all
+                </label>
+                <button
+                  type="button"
+                  onClick={handleSelectAllVisible}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/15 text-primary hover:bg-primary/25"
+                >
+                  Select visible
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeselectAllVisible}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-neutral-800 text-muted-foreground hover:bg-neutral-700"
+                >
+                  Deselect visible
+                </button>
+                <span className="text-xs text-muted-foreground">
+                  {selectedStudents.length} / {advisorStudents.length} selected
+                </span>
+              </div>
+            </div>
+            <div className="max-h-64 overflow-y-auto space-y-2 rounded-xl border border-neutral-800 p-3">
+              {filteredStudents.map((student) => {
+                const isChecked = selectedStudents.includes(student.id);
+                return (
+                  <label
+                    key={student.id}
+                    className={cn(
+                      'flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors',
+                      isChecked ? 'bg-primary/10 border-primary/30' : 'bg-neutral-900/30 border-neutral-800 hover:bg-neutral-800/50'
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => toggleStudent(student.id)}
+                      className="rounded border-neutral-700 bg-neutral-900/50 text-primary focus:ring-primary/50"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-foreground truncate">{student.full_name || 'Unnamed'}</p>
+                      <p className="text-xs text-muted-foreground truncate flex items-center gap-1">
+                        <Mail size={12} /> {student.email || 'No email'}
+                      </p>
+                    </div>
+                  </label>
+                );
+              })}
+              {filteredStudents.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-6">No students match your search.</p>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Confirmation modal */}
+      {showConfirmModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          onClick={() => !submitting && setShowConfirmModal(false)}
+        >
+          <div
+            className={cn(CARD_CLASS, 'max-w-md w-full shadow-2xl')}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-foreground mb-2">Confirm assignment</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Assign <strong>{selectedCase?.title}</strong> to <strong>{selectedStudents.length}</strong> student
+              {selectedStudents.length === 1 ? '' : 's'} on {formattedDateTime}.
+            </p>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setShowConfirmModal(false)}
+                disabled={submitting}
+                className="flex-1 px-4 py-2.5 rounded-xl text-sm font-medium border border-neutral-700 text-foreground hover:bg-neutral-800/50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleAssignExam}
+                disabled={submitting}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                {submitting ? <><Loader2 size={16} className="animate-spin" /> Assigning...</> : 'Confirm'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
