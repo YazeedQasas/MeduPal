@@ -264,6 +264,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
     const mockRecordingTimeoutRef = useRef(null);
     const fwRecordingRef = useRef(null);
     const preferredVoiceRef = useRef(null);
+    const sessionIdRef = useRef(null);
 
     useEffect(() => {
         const pickVoice = () => {
@@ -672,6 +673,118 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         };
     }, [showCompletionScreen, onExit]);
 
+    // Compute history score (same logic as step 2 evaluation UI)
+    const computeHistoryScore = useCallback(() => {
+        const aiChecklist = {
+            hpi: true,
+            pmh: true,
+            meds: true,
+            allergies: false,
+            socialHistory: true
+        };
+        const checklistCompleted = Object.values(aiChecklist).filter(Boolean).length;
+        const aiRubricScores = {
+            communication: 2,
+            structure: 2,
+            safety: 1,
+            clinicalReasoning: 2,
+            professionalism: 2
+        };
+        const rubricTotal = Object.values(aiRubricScores).reduce((a, b) => a + b, 0);
+        let score = 0;
+        score += checklistCompleted * 0.5;
+        if (hasDeteriorated && redFlagRecognized) score += 1.5;
+        if (selectedDiagnosis === selectedCase?.id) score += 1.5;
+        score += (rubricTotal / 10) * 4.5;
+        return Math.min(10, Math.round(score * 10) / 10);
+    }, [hasDeteriorated, redFlagRecognized, selectedDiagnosis, selectedCase?.id]);
+
+    // Compute physical score (same logic as step 4 evaluation UI)
+    const computePhysicalScore = useCallback(() => {
+        const caseKey = getCaseMockKey(selectedCase);
+        const requirements = REQUIRED_ZONES_BY_CASE[caseKey] || REQUIRED_ZONES_BY_CASE['pneumonia'];
+        const examinedZoneIds = examLog
+            .map((entry) => {
+                const zone = BODY_ZONES.find((z) => z.label === entry.zone);
+                return zone?.id;
+            })
+            .filter(Boolean);
+        const coveredRequiredZones = requirements.zones.filter((zoneId) => examinedZoneIds.includes(zoneId));
+        const coverageComplete = coveredRequiredZones.length >= requirements.minRequired;
+        const aiPhysicalRubric = {
+            technique: 2,
+            coverage: coverageComplete ? 2 : 1,
+            infectionControl: 2,
+            interpretation: 2,
+            communication: 1
+        };
+        const physicalRubricTotal = Object.values(aiPhysicalRubric).reduce((a, b) => a + b, 0);
+        const aiPhysicalChecklist = {
+            inspection: true,
+            palpation: true,
+            percussion: false,
+            auscultation: examinedZoneIds.length > 0
+        };
+        const physicalChecklistCompleted = Object.values(aiPhysicalChecklist).filter(Boolean).length;
+        let score = 0;
+        score += (coveredRequiredZones.length / requirements.zones.length) * 3;
+        score += (physicalRubricTotal / 10) * 4.5;
+        score += (physicalChecklistCompleted / 4) * 2.5;
+        return Math.min(10, Math.round(score * 10) / 10);
+    }, [selectedCase, getCaseMockKey, examLog]);
+
+    // Create session row if not yet created; returns session_id.
+    const ensureSessionCreated = useCallback(async () => {
+        if (sessionIdRef.current) return sessionIdRef.current;
+        if (!user?.id) return null;
+        const insertPayload = {
+            station_id: null,
+            case_id: selectedCase?.id || null,
+            student_id: user.id,
+            examiner_id: user.id,
+            start_time: sessionStartedAt,
+            end_time: null,
+            status: 'In Progress',
+            session_type: 'practice',
+            score: null,
+            feedback_notes: null
+        };
+        try {
+            const { data: created, error } = await supabase
+                .from('sessions')
+                .insert([insertPayload])
+                .select('id')
+                .single();
+            if (error) throw error;
+            if (created?.id) {
+                sessionIdRef.current = created.id;
+                return created.id;
+            }
+        } catch (err) {
+            const { session_type: _t, ...rest } = insertPayload;
+            const { data: created, error } = await supabase
+                .from('sessions')
+                .insert([{ ...rest, type: 'practice' }])
+                .select('id')
+                .single();
+            if (error) throw error;
+            if (created?.id) {
+                sessionIdRef.current = created.id;
+                return created.id;
+            }
+        }
+        return null;
+    }, [user?.id, selectedCase?.id, sessionStartedAt]);
+
+    // Insert/upsert skill score into session_scores. Uses upsert to avoid duplicates when re-submitting.
+    const insertSessionScore = useCallback(async (sessionId, skillType, score) => {
+        if (!sessionId || !skillType) return;
+        const row = { session_id: sessionId, skill_type: skillType, score: Math.round(score) };
+        await supabase
+            .from('session_scores')
+            .upsert(row, { onConflict: 'session_id,skill_type' });
+    }, []);
+
     const handleFinishSession = async () => {
         if (isSavingSession) return;
         setIsSavingSession(true);
@@ -684,96 +797,19 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                 return;
             }
 
-            // ---------------------------
-            // 1) Compute history scores
-            // ---------------------------
-            const aiChecklist = {
-                hpi: true,
-                pmh: true,
-                meds: true,
-                allergies: false,
-                socialHistory: true
-            };
-            const checklistCompleted = Object.values(aiChecklist).filter(Boolean).length;
+            const historyScore = computeHistoryScore();
+            const physicalScore = computePhysicalScore();
 
-            const aiRubricScores = {
-                communication: 2,
-                structure: 2,
-                safety: 1,
-                clinicalReasoning: 2,
-                professionalism: 2
-            };
-            const rubricTotal = Object.values(aiRubricScores).reduce((a, b) => a + b, 0);
-
-            const historyScore =
-                Math.min(
-                    10,
-                    Math.round(
-                        (
-                            checklistCompleted * 0.5 +
-                            (hasDeteriorated && redFlagRecognized ? 1.5 : 0) +
-                            (selectedDiagnosis === selectedCase?.id ? 1.5 : 0) +
-                            (rubricTotal / 10) * 4.5
-                        ) * 10
-                    ) / 10
-                );
-
-            // ---------------------------
-            // 2) Compute physical scores
-            // ---------------------------
             const caseKey = getCaseMockKey(selectedCase);
             const requirements = REQUIRED_ZONES_BY_CASE[caseKey] || REQUIRED_ZONES_BY_CASE['pneumonia'];
-
             const examinedZoneIds = examLog
                 .map((entry) => {
                     const zone = BODY_ZONES.find((z) => z.label === entry.zone);
                     return zone?.id;
                 })
                 .filter(Boolean);
-
             const coveredRequiredZones = requirements.zones.filter((zoneId) => examinedZoneIds.includes(zoneId));
             const coverageComplete = coveredRequiredZones.length >= requirements.minRequired;
-
-            const aiPhysicalRubric = {
-                technique: 2,
-                coverage: coverageComplete ? 2 : 1,
-                infectionControl: 2,
-                interpretation: 2,
-                communication: 1
-            };
-
-            const physicalRubricTotal = Object.values(aiPhysicalRubric).reduce((a, b) => a + b, 0);
-
-            const aiPhysicalChecklist = {
-                inspection: true,
-                palpation: true,
-                percussion: false,
-                auscultation: examinedZoneIds.length > 0
-            };
-
-            const physicalChecklistCompleted = Object.values(aiPhysicalChecklist).filter(Boolean).length;
-
-            const physicalScore = (() => {
-                let score = 0;
-                // Coverage
-                score += (coveredRequiredZones.length / requirements.zones.length) * 3;
-                // Rubric
-                score += (physicalRubricTotal / 10) * 4.5;
-                // Checklist
-                score += (physicalChecklistCompleted / 4) * 2.5;
-                return Math.min(10, Math.round(score * 10) / 10);
-            })();
-
-            // ---------------------------
-            // 3) Compute total session score + skill rows
-            // ---------------------------
-            const totalScore = Math.round(((historyScore + physicalScore) / 2) * 10) / 10;
-
-            const historyCommunication10 = Math.round((aiRubricScores.communication / 2) * 10);
-            const physicalCommunication10 = Math.round((aiPhysicalRubric.communication / 2) * 10);
-            const communicationScore = Math.round((historyCommunication10 + physicalCommunication10) / 2);
-
-            const clinicalReasoningScore = Math.round((aiRubricScores.clinicalReasoning / 2) * 10);
 
             const historyFeedback = (() => {
                 if (hasDeteriorated && !redFlagRecognized) {
@@ -795,62 +831,42 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                 return `Partial coverage. Remember to examine ${requirements.label} for this case.`;
             })();
 
-            // ---------------------------
-            // 4) Persist: sessions + session_scores
-            // ---------------------------
             const nowIso = new Date().toISOString();
             const feedbackNotes = `History feedback: ${historyFeedback}\nPhysical feedback: ${physicalFeedback}`;
 
-            // Try with `session_type` first (matches the updated frontend).
-            let sessionId = null;
-            const insertPayload = {
-                station_id: null,
-                case_id: selectedCase?.id || null,
-                student_id: user.id,
-                examiner_id: user.id,
-                start_time: sessionStartedAt,
-                end_time: nowIso,
-                status: 'Completed',
-                session_type: 'practice',
-                score: Math.round(totalScore),
-                feedback_notes: feedbackNotes
-            };
+            // 1) Ensure same session_id for all scores (do NOT create new session_id)
+            let sessionId = await ensureSessionCreated();
+            if (!sessionId) sessionId = sessionIdRef.current;
+            if (!sessionId) throw new Error('Failed to create or retrieve session row.');
 
-            try {
-                const { data: created, error: insertError } = await supabase
-                    .from('sessions')
-                    .insert([insertPayload])
-                    .select('id')
-                    .single();
-                if (insertError) throw insertError;
-                sessionId = created?.id || null;
-            } catch (err) {
-                // Fallback for older DB schema that still uses `type` instead of `session_type`.
-                const { session_type: _sessionType, ...rest } = insertPayload;
-                const fallbackPayload = { ...rest, type: 'practice' };
-                const { data: created, error: insertError } = await supabase
-                    .from('sessions')
-                    .insert([fallbackPayload])
-                    .select('id')
-                    .single();
-                if (insertError) throw insertError;
-                sessionId = created?.id || null;
-            }
+            // 2) Insert skill scores into session_scores (same session_id)
+            await insertSessionScore(sessionId, 'history_taking', historyScore);
+            await insertSessionScore(sessionId, 'physical_examination', physicalScore);
 
-            if (!sessionId) throw new Error('Failed to create session row.');
-
-            const sessionScoresInserts = [
-                { session_id: sessionId, skill_type: 'history_taking', score: Math.round(historyScore) },
-                { session_id: sessionId, skill_type: 'physical_exam', score: Math.round(physicalScore) },
-                { session_id: sessionId, skill_type: 'communication', score: communicationScore },
-                { session_id: sessionId, skill_type: 'clinical_reasoning', score: clinicalReasoningScore }
-            ];
-
-            const { error: scoresInsertError } = await supabase
+            // 3) Fetch all scores for this session
+            const { data: scoreRows } = await supabase
                 .from('session_scores')
-                .insert(sessionScoresInserts);
+                .select('score')
+                .eq('session_id', sessionId);
 
-            if (scoresInsertError) throw scoresInsertError;
+            // 4) Calculate total/average score (only aggregate same session_id)
+            const scores = (scoreRows || []).map((r) => r.score).filter((n) => n != null);
+            const avgScore = scores.length > 0
+                ? scores.reduce((sum, s) => sum + s, 0) / scores.length
+                : ((historyScore + physicalScore) / 2); // fallback if fetch empty
+            // Scale 0–10 → 0–100 for sessions.score
+            const sessionScore = Math.round(avgScore * 10);
+
+            // 5) Update sessions table
+            await supabase
+                .from('sessions')
+                .update({
+                    end_time: nowIso,
+                    score: sessionScore,
+                    status: 'Completed',
+                    feedback_notes: feedbackNotes
+                })
+                .eq('id', sessionId);
         } catch (err) {
             console.error('Failed to persist session scores:', err);
             setSaveError(err?.message || 'Failed to save session scores');
@@ -926,7 +942,19 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         triggerAutoDeteriorationInternal();
     };
 
-    const goNext = () => {
+    const goNext = async () => {
+        // Save history_taking when finishing History Evaluation (step 2)
+        if (currentStep === 2 && user?.id) {
+            try {
+                const sid = await ensureSessionCreated();
+                if (sid) {
+                    const historyScore = computeHistoryScore();
+                    await insertSessionScore(sid, 'history_taking', historyScore);
+                }
+            } catch (err) {
+                console.error('Failed to save history score:', err);
+            }
+        }
         if (currentStep < STEPS.length - 1) setCurrentStep(currentStep + 1);
     };
 

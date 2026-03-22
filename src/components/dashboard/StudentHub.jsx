@@ -113,7 +113,7 @@ export function StudentHub({ setActiveTab }) {
     (async () => {
       const { data: completed } = await supabase
         .from('sessions')
-        .select(`id, start_time, end_time, score, status, case:cases(title, category, difficulty)`)
+        .select(`id, start_time, end_time, score, status, session_type, type, case:cases(title, category, difficulty)`)
         .eq('student_id', user.id)
         .eq('status', 'Completed')
         .order('start_time', { ascending: false });
@@ -121,7 +121,7 @@ export function StudentHub({ setActiveTab }) {
 
       const { data: recent } = await supabase
         .from('sessions')
-        .select(`id, start_time, status, score, case:cases(title, category, difficulty)`)
+        .select(`id, start_time, status, score, session_type, type, case:cases(title, category, difficulty)`)
         .eq('student_id', user.id)
         .order('start_time', { ascending: false })
         .limit(5);
@@ -166,7 +166,8 @@ export function StudentHub({ setActiveTab }) {
         (a, b) => new Date(a.exam_date || 0) - new Date(b.exam_date || 0)
       );
 
-      const scored = allCompleted.filter(s => s.score != null);
+      // Only include practice sessions in avg (students cannot see exam scores)
+      const scored = allCompleted.filter(s => s.score != null && (s.session_type === 'practice' || s.type === 'practice'));
       const avgScore = scored.length
         ? (scored.reduce((a, b) => a + b.score, 0) / scored.length).toFixed(1)
         : null;
@@ -544,8 +545,8 @@ export function StudentHub({ setActiveTab }) {
                       <span className={cn('text-[10px] font-semibold px-2 py-0.5 rounded-full border', statusCls)}>
                         {s.status}
                       </span>
-                      {s.score != null && (
-                        <span className="text-sm font-semibold text-primary">{s.score.toFixed(1)}/10</span>
+                      {s.score != null && (s.session_type === 'practice' || s.type === 'practice') && (
+                        <span className="text-sm font-semibold text-primary">{s.score <= 10 ? `${s.score.toFixed(1)}/10` : `${Math.round(s.score)}%`}</span>
                       )}
                     </div>
                   </li>

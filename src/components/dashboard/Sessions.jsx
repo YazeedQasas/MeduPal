@@ -83,6 +83,7 @@ function Sessions() {
                 duration: s.end_time ? 'Completed' : '—',
                 status: s.status,
                 score: s.score,
+                sessionType: s.session_type ?? s.type ?? 'practice', // practice | exam — instructors see all scores
                 station: s.station?.name || 'Unknown'
             }));
             setSessions(formatted);
