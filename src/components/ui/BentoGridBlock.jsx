@@ -99,7 +99,7 @@ export function BentoGridBlock() {
                   How one program improved OSCE pass rates.
                 </h3>
                 <p className="text-sm text-white/40 md:text-base leading-loose">
-                  They moved practice onto MeduPal: same cases and stations, with structured feedback and progress tracking. Students came in better prepared.
+                  They moved practice onto Xpatient: same cases and stations, with structured feedback and progress tracking. Students came in better prepared.
                 </p>
               </div>
               <div className="mt-8 flex items-center justify-between gap-4">

@@ -1,18 +1,47 @@
 """
 STT server: capture audio from browser (Web API) and transcribe with OpenAI Whisper.
-Patient replies via Ollama (Llama 3). Run: python -m uvicorn main:app --reload --port 8000
+Patient replies via Groq (OpenAI-compatible API), with Ollama fallback. Run: python -m uvicorn main:app --reload --port 8000
 """
+import logging
 import os
 import random
 import shutil
 import tempfile
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
+
+
+def _get_env_from_file(filename: str, key: str) -> str:
+    """
+    Read a KEY=value pair from a dotenv-style file.
+    Supports optional surrounding single/double quotes.
+    """
+    try:
+        env_path = Path(__file__).resolve().parent.parent / filename
+        if not env_path.is_file():
+            return ""
+        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            if k.strip() != key:
+                continue
+            value = v.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+                value = value[1:-1]
+            return value.strip()
+    except Exception:
+        return ""
+    return ""
 
 # Case key resolution: display titles (and aliases) -> stable keys for persona/fallback lookup.
 # Align with TITLE_TO_MOCK_KEY in StudentPracticeFlow.jsx.
@@ -320,6 +349,52 @@ def _build_ollama_messages(
     return messages
 
 
+GROQ_CHAT_URL = os.getenv(
+    "GROQ_CHAT_COMPLETIONS_URL",
+    "https://api.groq.com/openai/v1/chat/completions",
+).strip()
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_TIMEOUT = float(os.getenv("GROQ_TIMEOUT", "60"))
+
+
+async def _groq_chat(messages: list[dict]) -> str:
+    """
+    Call Groq chat completions (OpenAI-compatible). `messages` uses the same shape as for Ollama
+    (system / user / assistant with string content). Returns assistant text only, or empty string.
+    Raises ValueError if GROQ_API_KEY is not set; raises httpx.HTTPError on HTTP failure.
+    """
+    api_key = (
+        os.getenv("GROQ_API_KEY", "").strip()
+        or _get_env_from_file(".env.local", "GROQ_API_KEY")
+        or _get_env_from_file(".env", "GROQ_API_KEY")
+    )
+    if not api_key:
+        raise ValueError(
+            "GROQ_API_KEY is not set in the environment. "
+            "Set GROQ_API_KEY to use Groq for patient replies; Ollama will be used as fallback."
+        )
+    print("🔥 USING GROQ")
+    async with httpx.AsyncClient(timeout=GROQ_TIMEOUT) as client:
+        r = await client.post(
+            GROQ_CHAT_URL,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={"model": GROQ_MODEL, "messages": messages},
+        )
+        r.raise_for_status()
+        data = r.json()
+    choices = data.get("choices") or []
+    if not choices:
+        return ""
+    msg = choices[0].get("message") or {}
+    content = msg.get("content")
+    if isinstance(content, str) and content.strip():
+        return content.strip()
+    return ""
+
+
 async def _ollama_chat(
     system: str,
     current_question: str,
@@ -376,7 +451,7 @@ async def tts(body: TTSRequest):
 
 @app.post("/patient-reply")
 async def patient_reply(body: PatientReplyRequest):
-    """Generate a patient reply using Ollama (Llama 3). Falls back to canned reply on failure."""
+    """Generate a patient reply using Groq; on failure, Ollama; then canned replies if both fail."""
     case_key = resolve_case_key(body.case_id, body.case_title)
     persona = PATIENT_PERSONAS.get(case_key)
     title = body.case_title or body.case_id.replace("-", " ").title()
@@ -386,11 +461,27 @@ async def patient_reply(body: PatientReplyRequest):
     )
     current_question = body.student_question.strip()
 
-    text = await _ollama_chat(
-        system,
-        current_question,
-        conversation_history=body.conversation_history,
+    messages = _build_ollama_messages(
+        system, body.conversation_history, current_question
     )
+
+    text: str | None = None
+    groq_ok = False
+    try:
+        text = await _groq_chat(messages)
+        groq_ok = True
+    except Exception as e:
+        logger.warning("Groq patient reply failed: %s; falling back to Ollama.", e)
+
+    if groq_ok and not text:
+        logger.warning("Groq returned empty assistant text; falling back to Ollama.")
+
+    if not text:
+        text = await _ollama_chat(
+            system,
+            current_question,
+            conversation_history=body.conversation_history,
+        )
     if not text:
         text = _fallback_reply(case_key)
 

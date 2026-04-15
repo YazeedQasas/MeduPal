@@ -25,6 +25,7 @@ export default function AuthPage({ setActiveTab, initialMode = 'signin' }) {
       const r = profile?.role;
       if (r === 'admin' || r === 'instructor') {
         setActiveTab('dashboard');
+        if (typeof window !== 'undefined') window.history.replaceState(null, '', '/dashboard');
       } else if (r === 'student') {
         setActiveTab('student-dashboard');
         if (typeof window !== 'undefined') window.history.replaceState(null, '', '/student-dashboard');

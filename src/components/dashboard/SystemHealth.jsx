@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { BadgeCheck, Wifi, WifiOff, Activity, Mic, Volume2, Heart, Wind } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { supabase } from '../../lib/supabase';
+import { glassCardStyle, DASHBOARD_THEME } from './DashboardShell';
 
-export function SystemHealth() {
+export function SystemHealth({ variant }) {
     const [sensors, setSensors] = useState([]);
 
     useEffect(() => {
@@ -48,11 +49,15 @@ export function SystemHealth() {
     }, []);
 
     const operationalRate = sensors.length > 0 ? Math.round((sensors.filter(s => s.status === 'online').length / sensors.length) * 100) : 100;
+    const isGlass = variant === 'glass';
 
     return (
-        <div className="bg-card rounded-2xl border border-border shadow-[0_0_0_1px_rgba(0,0,0,0.4)] overflow-hidden flex flex-col h-full">
-            <div className="p-4 border-b border-border flex justify-between items-center">
-                <h3 className="font-semibold text-foreground flex items-center gap-2">
+        <div
+            className={cn('rounded-2xl overflow-hidden flex flex-col h-full', !isGlass && 'bg-card border border-border shadow-[0_0_0_1px_rgba(0,0,0,0.4)]')}
+            style={isGlass ? glassCardStyle : undefined}
+        >
+            <div className="p-4 border-b flex justify-between items-center" style={{ borderColor: isGlass ? 'rgba(255,255,255,0.08)' : undefined }}>
+                <h3 className="font-semibold flex items-center gap-2" style={isGlass ? { color: DASHBOARD_THEME.text } : {}}>
                     <Activity className="text-primary" size={18} />
                     System Health
                 </h3>
@@ -64,17 +69,17 @@ export function SystemHealth() {
                 </span>
             </div>
 
-            <div className="divide-y divide-border/50">
+            <div className="divide-y" style={{ borderColor: isGlass ? 'rgba(255,255,255,0.06)' : undefined }}>
                 {sensors.map((item) => (
-                    <div key={item.id} className="p-3 flex items-center justify-between hover:bg-muted/30 transition-colors">
+                    <div key={item.id} className="p-3 flex items-center justify-between transition-colors" style={isGlass ? {} : {}}>
                         <div className="flex items-center gap-3">
                             <div className={cn("w-2 h-2 rounded-full",
                                 item.status === 'online' ? 'bg-emerald-500' :
                                     item.status === 'warning' ? 'bg-amber-500' : 'bg-destructive'
                             )} />
                             <div>
-                                <p className="text-sm font-medium text-foreground">{item.name}</p>
-                                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                                <p className="text-sm font-medium" style={isGlass ? { color: DASHBOARD_THEME.text } : {}}>{item.name}</p>
+                                <p className="text-xs flex items-center gap-1" style={isGlass ? { color: DASHBOARD_THEME.muted } : {}}>
                                     {item.status === 'online' ? <Wifi size={10} /> : <WifiOff size={10} />}
                                     {item.ping}
                                 </p>

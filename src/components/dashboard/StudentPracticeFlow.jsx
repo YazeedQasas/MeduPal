@@ -533,6 +533,24 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         return transcripts[Math.floor(Math.random() * transcripts.length)];
     }, [selectedCase, getCaseMockKey]);
 
+    const reportSttIssue = useCallback((message, error = null) => {
+        if (error) {
+            console.error('[STT] Error response:', error);
+        }
+        setMessages(prev => [...prev, { role: 'alert', content: message, ts: Date.now() }]);
+    }, []);
+
+    const applySttTranscript = useCallback((text) => {
+        const transcript = typeof text === 'string' ? text : '';
+        console.log('[STT] raw transcript:', transcript);
+        console.log('[STT] transcript length:', transcript.length);
+        setInputValue(transcript);
+        setLastTranscript(transcript);
+        if (!transcript.trim()) {
+            reportSttIssue('No speech was detected. Please try again and speak clearly.');
+        }
+    }, [reportSttIssue]);
+
     const toggleRecording = useCallback(() => {
         if (isRecording) {
             // Stopping: either Faster-Whisper recording or browser SpeechRecognition
@@ -542,15 +560,11 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                 controller.stop()
                     .then((blob) => sendAudioToSttApi(blob))
                     .then(({ text }) => {
-                        const transcript = text || getMockTranscript();
-                        setInputValue(transcript);
-                        setLastTranscript(transcript);
+                        applySttTranscript(text);
                         setIsRecording(false);
                     })
-                    .catch(() => {
-                        const mock = getMockTranscript();
-                        setInputValue(mock);
-                        setLastTranscript(mock);
+                    .catch((error) => {
+                        reportSttIssue('Speech transcription failed. Check your STT server and try again.', error);
                         setIsRecording(false);
                     });
                 return;
@@ -575,15 +589,11 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                 ctrl.stop()
                     .then((blob) => sendAudioToSttApi(blob))
                     .then(({ text }) => {
-                        const transcript = text || getMockTranscript();
-                        setInputValue(transcript);
-                        setLastTranscript(transcript);
+                        applySttTranscript(text);
                         setIsRecording(false);
                     })
-                    .catch(() => {
-                        const mock = getMockTranscript();
-                        setInputValue(mock);
-                        setLastTranscript(mock);
+                    .catch((error) => {
+                        reportSttIssue('Speech transcription failed. Check your STT server and try again.', error);
                         setIsRecording(false);
                     });
             };
@@ -592,11 +602,9 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                 .then(() => {
                     fwRecordingRef.current = controller;
                 })
-                .catch(() => {
+                .catch((error) => {
                     setIsRecording(false);
-                    const mockText = getMockTranscript();
-                    setInputValue(mockText);
-                    setLastTranscript(mockText);
+                    reportSttIssue('Microphone access failed. Please allow microphone permissions and retry.', error);
                 });
             return;
         }
@@ -647,7 +655,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                 setIsRecording(false);
             }, 1500);
         }
-    }, [isRecording, getMockTranscript]);
+    }, [isRecording, getMockTranscript, applySttTranscript, reportSttIssue]);
 
     // Cleanup speech recognition, Faster-Whisper recording, and synthesis on unmount
     useEffect(() => {
@@ -3220,7 +3228,7 @@ FEEDBACK: ${getFeedback()}
                             
                             {/* Subtitle */}
                             <p className="text-lg text-primary mb-2">
-                                Thank you for using MeduPal
+                                Thank you for using Xpatient
                             </p>
                             
                             {/* Description */}

@@ -212,6 +212,8 @@ This project is licensed under the MIT License.
 ## 👥 Authors
 
 - **Yazeed Qasas** - [GitHub](https://github.com/YazeedQasas)
+- **Ro'a Alshamali** - [GitHub](https://github.com/rua-code)
+  
 
 ## 🙏 Acknowledgments
 

@@ -22,7 +22,7 @@ export function StudentOnboarding({ setActiveTab }) {
       {/* Top section */}
       <div className="text-center mb-12">
         <h1 className="text-3xl md:text-4xl font-bold text-foreground tracking-tight">
-          Welcome to MeduPal
+          Welcome to Xpatient
         </h1>
         <p className="mt-3 text-muted-foreground text-lg">
           Choose how you want to start your clinical session
@@ -47,7 +47,7 @@ export function StudentOnboarding({ setActiveTab }) {
           </div>
           <h2 className="text-xl font-bold text-foreground mb-2">Practice Training</h2>
           <p className="text-sm text-muted-foreground mb-6 leading-relaxed">
-            Practice clinical skills using the MeduPal manikin and sensors.
+            Practice clinical skills using the Xpatient manikin and sensors.
           </p>
           <span className="inline-flex items-center gap-2 text-sm font-semibold text-primary">
             Start Practice
@@ -83,7 +83,7 @@ export function StudentOnboarding({ setActiveTab }) {
       {/* What you can do section */}
       <div className="rounded-2xl border border-white/10 bg-card/50 p-8">
         <h3 className="text-lg font-semibold text-foreground mb-6">
-          What you can do with MeduPal
+          What you can do with Xpatient
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
           {FEATURES.map((item) => (
