@@ -75,7 +75,10 @@ export default function RoleSelectPage({ setActiveTab }) {
             }
             console.log('[Onboarding] Role selected and saved:', { role: selected, userId: user?.id });
             if (selected === 'instructor') {
-                if (typeof window !== 'undefined') window.localStorage.removeItem('medupal_onboarding_pending');
+                if (typeof window !== 'undefined') {
+                    window.localStorage.removeItem('medupal_onboarding_pending');
+                    window.history.replaceState(null, '', '/dashboard');
+                }
                 setActiveTab('dashboard');
             } else {
                 setActiveTab('student-usage-setup');
@@ -257,7 +260,7 @@ export default function RoleSelectPage({ setActiveTab }) {
                         <div className="relative z-10 shrink-0 py-8 px-8 text-center">
                             <p className="text-[10px] tracking-[0.2em] uppercase text-white/30 mb-3">Your journey starts here</p>
                             <p className="text-white/50 text-sm max-w-xs mx-auto leading-relaxed">
-                                MeduPal adapts to your role — giving you exactly the tools you need, nothing more.
+                                Xpatient adapts to your role — giving you exactly the tools you need, nothing more.
                             </p>
                         </div>
                     </div>

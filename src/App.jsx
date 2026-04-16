@@ -1,11 +1,6 @@
 import { useState, useEffect } from "react";
 import { MainLayout } from "./components/layout/MainLayout";
-import { StatCards } from "./components/dashboard/StatCards";
-import { ActiveStations } from "./components/dashboard/ActiveStations";
-import { SystemHealth } from "./components/dashboard/SystemHealth";
-import { AlertsFeed } from "./components/dashboard/AlertsFeed";
-import { LearningPerformance } from "./components/dashboard/LearningPerformance";
-import { QuickActions } from "./components/dashboard/QuickActions";
+import { AdminDashboard } from "./components/dashboard/AdminDashboard";
 import { Cases } from "./components/dashboard/Cases";
 import Sessions from "./components/dashboard/Sessions";
 import { Students } from "./components/dashboard/Students";
@@ -26,12 +21,14 @@ import StudentPracticeFlow from "./components/dashboard/StudentPracticeFlow";
 import { StudentUsageSetup } from "./components/dashboard/StudentUsageSetup";
 import { ExamPage } from "./components/dashboard/ExamPage";
 import { AssignExamPage } from "./components/dashboard/AssignExamPage";
+import { DashboardShell } from "./components/dashboard/DashboardShell";
 import { StudentHistory } from "./components/dashboard/StudentHistory";
 import { StudentProgress } from "./components/dashboard/StudentProgress";
 import { StudentProfile } from "./components/dashboard/StudentProfile";
 
 function AppContent() {
   const [activeTab, setActiveTab] = useState("landing");
+  const [instructorViewingStudent, setInstructorViewingStudent] = useState(null);
   const { user, loading, role } = useAuth();
 
   // Dedicated URL: /practice-history — standalone History Taking (voice) page for AI work
@@ -93,17 +90,29 @@ function AppContent() {
     }
   }, [loading, user, role]);
 
-  // URL-based redirect: instructor /assign-exam
+  // URL-based redirect: instructor — default to dashboard; /assign-exam, /students, /sessions when explicitly visited
   useEffect(() => {
     if (loading || !user) return;
     const isInstructor = role === "instructor" || role === "admin";
     if (!isInstructor) return;
+    if (activeTab === "auth" || activeTab === "auth-signup" || activeTab === "onboarding") return;
     const path = window.location.pathname;
-    if (path === "/assign-exam") {
+    if (path === "/" || path === "/home" || path === "/dashboard") {
+      setActiveTab("dashboard");
+      if (path === "/" || path === "/home") {
+        window.history.replaceState(null, "", "/dashboard");
+      }
+    } else if (path === "/assign-exam") {
       setActiveTab("assign-exam");
       window.history.replaceState(null, "", "/assign-exam");
+    } else if (path === "/students") {
+      setActiveTab("students");
+      window.history.replaceState(null, "", "/students");
+    } else if (path === "/sessions") {
+      setActiveTab("sessions");
+      window.history.replaceState(null, "", "/sessions");
     }
-  }, [loading, user, role]);
+  }, [loading, user, role, activeTab]);
 
   // Don't show landing/dashboard until we know auth state (avoids flash of landing on refresh)
   if (loading) {
@@ -154,7 +163,15 @@ function AppContent() {
 
       case "dashboard":
         if (role === "instructor") {
-          return <InstructorDashboard setActiveTab={setActiveTab} />;
+          return (
+            <InstructorDashboard
+              setActiveTab={setActiveTab}
+              onViewStudentProfile={(student) => {
+                setInstructorViewingStudent(student);
+                setActiveTab("instructor-student-profile");
+              }}
+            />
+          );
         }
         if (role !== "admin") {
           return (
@@ -170,34 +187,7 @@ function AppContent() {
             </div>
           );
         }
-        return (
-          <div className="max-w-[1600px] mx-auto space-y-6">
-            <StatCards />
-            <ActiveStations onViewAll={() => setActiveTab("stations")} />
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[500px]">
-              <div className="lg:col-span-1 h-full">
-                <SystemHealth />
-              </div>
-              <div className="lg:col-span-1 h-full">
-                <LearningPerformance />
-              </div>
-              <div className="lg:col-span-1 flex flex-col gap-6 h-full">
-                <div className="flex-1 min-h-0">
-                  <AlertsFeed />
-                </div>
-                <div className="shrink-0">
-                  <QuickActions
-                    onStartSession={() => setActiveTab("sessions")}
-                    onManageStudents={() => setActiveTab("students")}
-                    onViewAnalytics={() => setActiveTab("cases")}
-                    onRunDiagnostics={() => setActiveTab("hardware")}
-                    onOpenSettings={() => setActiveTab("settings")}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-        );
+        return <AdminDashboard setActiveTab={setActiveTab} />;
       case "student-portal":
         return <StudentDashboard setActiveTab={setActiveTab} />;
 
@@ -235,14 +225,34 @@ function AppContent() {
             </div>
           );
         }
-        return <AssignExamPage />;
+        return (
+          <DashboardShell>
+            <AssignExamPage setActiveTab={setActiveTab} />
+          </DashboardShell>
+        );
 
       case "cases":
         return <Cases />;
       case "sessions":
-        return <Sessions />;
+        return (
+          (role === "instructor" || role === "admin") ? (
+            <DashboardShell>
+              <Sessions />
+            </DashboardShell>
+          ) : (
+            <Sessions />
+          )
+        );
       case "students":
-        return <Students />;
+        return (
+          (role === "instructor" || role === "admin") ? (
+            <DashboardShell>
+              <Students />
+            </DashboardShell>
+          ) : (
+            <Students />
+          )
+        );
       case "hardware":
         return <Hardware />;
       case "student-hardware":
@@ -301,6 +311,37 @@ function AppContent() {
             student={user}
             onBack={() => setActiveTab("student-dashboard")}
           />
+        );
+      case "instructor-student-profile":
+        if ((role !== "instructor" && role !== "admin") || !instructorViewingStudent) {
+          return (
+            <div className="flex items-center justify-center h-[500px]">
+              <div className="text-center">
+                <h2 className="text-2xl font-bold text-muted-foreground">Student Profile</h2>
+                <p className="text-muted-foreground mt-2">No student selected.</p>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("dashboard")}
+                  className="mt-4 px-4 py-2 rounded-lg bg-primary text-primary-foreground"
+                >
+                  Back to Dashboard
+                </button>
+              </div>
+            </div>
+          );
+        }
+        return (
+          <DashboardShell>
+            <div className="p-6">
+              <StudentProfile
+                student={instructorViewingStudent}
+                onBack={() => {
+                  setInstructorViewingStudent(null);
+                  setActiveTab("dashboard");
+                }}
+              />
+            </div>
+          </DashboardShell>
         );
       case "student-settings":
         if (role !== "student") {

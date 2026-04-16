@@ -1,79 +1,176 @@
-import { PlayCircle, BarChart2, Activity, Settings2, Users } from 'lucide-react';
+import { BarChart2, Activity, Settings2, Users, FileCheck, UserCircle2, ChevronRight } from 'lucide-react';
+import { cn } from '../../lib/utils';
+import { glassCardGlowStyle, DASHBOARD_THEME } from './DashboardShell';
+
+const ACCENT_RGB = DASHBOARD_THEME.accentRgb || '6, 95, 70';
+
+function ActionCard({ icon: Icon, label, sub, onClick, disabled, highlight, isGlass }) {
+  const baseStyle = {
+    background: isGlass ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.05)',
+    border: highlight ? `1px solid rgba(${ACCENT_RGB},0.4)` : '1px solid rgba(255,255,255,0.08)',
+  };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        'group w-full flex items-center gap-3 p-3 rounded-2xl text-left transition-all duration-200',
+        'hover:scale-[1.02] hover:shadow-lg disabled:opacity-50 disabled:hover:scale-100'
+      )}
+      style={{
+        ...baseStyle,
+        boxShadow: highlight ? `0 0 20px rgba(${ACCENT_RGB},0.1)` : 'none',
+      }}
+    >
+      <div
+        className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-transform group-hover:scale-110"
+        style={{ background: DASHBOARD_THEME.accentBg, color: DASHBOARD_THEME.accent }}
+      >
+        <Icon size={18} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium" style={{ color: DASHBOARD_THEME.text }}>{label}</p>
+        {sub && <p className="text-xs mt-0.5" style={{ color: DASHBOARD_THEME.muted }}>{sub}</p>}
+      </div>
+      <ChevronRight size={16} style={{ color: DASHBOARD_THEME.muted }} />
+    </button>
+  );
+}
+
+function IconActionCard({ icon: Icon, label, onClick, disabled, highlight, chromeless, inlineLabel }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+      aria-label={label}
+      className={cn(
+        'group relative w-full h-12 rounded-xl flex items-center justify-center transition-all',
+        inlineLabel && 'justify-start gap-2 px-3',
+        'hover:scale-[1.03] disabled:opacity-50 disabled:hover:scale-100'
+      )}
+      style={{
+        background: chromeless ? 'transparent' : 'rgba(255,255,255,0.04)',
+        border: chromeless ? '1px solid transparent' : (highlight ? `1px solid rgba(${ACCENT_RGB},0.45)` : '1px solid rgba(255,255,255,0.1)'),
+        boxShadow: chromeless ? 'none' : (highlight ? `0 0 16px rgba(${ACCENT_RGB},0.15)` : 'none'),
+      }}
+    >
+      <Icon size={18} style={{ color: DASHBOARD_THEME.accent }} />
+      {inlineLabel && (
+        <span className="text-xs font-medium truncate" style={{ color: DASHBOARD_THEME.text }}>
+          {label}
+        </span>
+      )}
+      <span
+        className={cn(
+          'absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-1 rounded-md text-[10px] font-medium opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity whitespace-nowrap',
+          inlineLabel && 'hidden'
+        )}
+        style={{ background: 'rgba(15,23,42,0.96)', border: '1px solid rgba(255,255,255,0.12)', color: '#e5e7eb' }}
+      >
+        {label}
+      </span>
+    </button>
+  );
+}
 
 export function QuickActions({
-  onStartSession,
+  onAssignExam,
   onViewAnalytics,
   onRunDiagnostics,
   onManageStudents,
   onOpenSettings,
+  onOpenProfile,
+  variant,
+  highlightAssign,
+  iconOnly,
+  oneRow,
 } = {}) {
+  const isGlass = variant === 'glass';
+
+  const containerStyle = isGlass
+    ? { ...glassCardGlowStyle }
+    : {
+        background: 'linear-gradient(135deg, hsl(var(--primary) / 0.08), hsl(var(--primary) / 0.03))',
+      };
+
+  const containerClass = isGlass
+    ? 'rounded-2xl p-4 flex flex-col gap-3 backdrop-blur-xl'
+    : 'bg-card rounded-2xl border border-border p-4 flex flex-col gap-3';
+
+  const isTopStrip = !!(iconOnly && oneRow);
+  const effectiveContainerStyle = isTopStrip
+    ? { background: 'transparent', border: 'none', boxShadow: 'none', padding: 0 }
+    : containerStyle;
+  const effectiveContainerClass = isTopStrip
+    ? 'flex flex-col gap-2'
+    : containerClass;
+
   return (
-    <div
-      className="bg-card rounded-2xl border border-border shadow-[0_0_0_1px_rgba(0,0,0,0.4)] p-4 flex flex-col justify-center gap-3"
-      style={{ background: 'linear-gradient(135deg, hsl(var(--primary) / 0.08), hsl(var(--primary) / 0.03))' }}
-    >
-      <h3 className="font-semibold text-primary mb-1">Quick Actions</h3>
-
-      <button
-        type="button"
-        onClick={onStartSession}
-        className="w-full flex items-center gap-2 p-2.5 bg-background/80 rounded-xl border border-border hover:border-primary/30 transition-all text-sm font-medium text-foreground text-left group disabled:opacity-60 disabled:hover:border-border"
-        disabled={!onStartSession}
+    <div className={effectiveContainerClass} style={effectiveContainerStyle}>
+      <h3
+        className={cn('font-semibold mb-1', isTopStrip && 'hidden')}
+        style={isGlass ? { color: DASHBOARD_THEME.accent } : {}}
       >
-        <div className="p-1.5 bg-primary/10 rounded-md text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
-          <PlayCircle size={16} />
-        </div>
-        Start new session
-      </button>
+        Quick Actions
+      </h3>
 
-      <button
-        type="button"
-        onClick={onManageStudents}
-        className="w-full flex items-center gap-2 p-2.5 bg-background/80 rounded-xl border border-border hover:border-primary/30 transition-all text-sm font-medium text-foreground text-left group disabled:opacity-60 disabled:hover:border-border"
-        disabled={!onManageStudents}
-      >
-        <div className="p-1.5 bg-primary/10 rounded-md text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
-          <Users size={16} />
+      {iconOnly ? (
+        <div className={cn(oneRow ? 'grid grid-cols-3 md:grid-cols-6 gap-2' : 'grid grid-cols-3 gap-2')}>
+          <IconActionCard icon={FileCheck} label="Assign exam" onClick={onAssignExam} disabled={!onAssignExam} highlight={highlightAssign} chromeless={isTopStrip} inlineLabel={isTopStrip} />
+          <IconActionCard icon={Users} label="Manage students" onClick={onManageStudents} disabled={!onManageStudents} chromeless={isTopStrip} inlineLabel={isTopStrip} />
+          <IconActionCard icon={BarChart2} label="Analytics" onClick={onViewAnalytics} disabled={!onViewAnalytics} chromeless={isTopStrip} inlineLabel={isTopStrip} />
+          <IconActionCard icon={Activity} label="Diagnostics" onClick={onRunDiagnostics} disabled={!onRunDiagnostics} chromeless={isTopStrip} inlineLabel={isTopStrip} />
+          <IconActionCard icon={Settings2} label="Settings" onClick={onOpenSettings} disabled={!onOpenSettings} chromeless={isTopStrip} inlineLabel={isTopStrip} />
+          <IconActionCard icon={UserCircle2} label="Profile" onClick={onOpenProfile} disabled={!onOpenProfile} chromeless={isTopStrip} inlineLabel={isTopStrip} />
         </div>
-        Manage students & advisees
-      </button>
-
-      <button
-        type="button"
-        onClick={onViewAnalytics}
-        className="w-full flex items-center gap-2 p-2.5 bg-background/80 rounded-xl border border-border hover:border-primary/30 transition-all text-sm font-medium text-foreground text-left group disabled:opacity-60 disabled:hover:border-border"
-        disabled={!onViewAnalytics}
-      >
-        <div className="p-1.5 bg-primary/10 rounded-md text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
-          <BarChart2 size={16} />
+      ) : (
+        <div className="space-y-2">
+          <ActionCard
+            icon={FileCheck}
+            label="Assign exam"
+            sub="Schedule exams for students"
+            onClick={onAssignExam}
+            disabled={!onAssignExam}
+            highlight={highlightAssign}
+            isGlass={isGlass}
+          />
+          <ActionCard
+            icon={Users}
+            label="Manage students"
+            sub="View & assign advisees"
+            onClick={onManageStudents}
+            disabled={!onManageStudents}
+            isGlass={isGlass}
+          />
+          <ActionCard
+            icon={BarChart2}
+            label="Performance & analytics"
+            sub="View cases & stats"
+            onClick={onViewAnalytics}
+            disabled={!onViewAnalytics}
+            isGlass={isGlass}
+          />
+          <ActionCard
+            icon={Activity}
+            label="Hardware diagnostics"
+            sub="Run diagnostics"
+            onClick={onRunDiagnostics}
+            disabled={!onRunDiagnostics}
+            isGlass={isGlass}
+          />
+          <ActionCard
+            icon={Settings2}
+            label="Open settings"
+            sub="App configuration"
+            onClick={onOpenSettings}
+            disabled={!onOpenSettings}
+            isGlass={isGlass}
+          />
         </div>
-        Performance & analytics
-      </button>
-
-      <button
-        type="button"
-        onClick={onRunDiagnostics}
-        className="w-full flex items-center gap-2 p-2.5 bg-background/80 rounded-xl border border-border hover:border-primary/30 transition-all text-sm font-medium text-foreground text-left group disabled:opacity-60 disabled:hover:border-border"
-        disabled={!onRunDiagnostics}
-      >
-        <div className="p-1.5 bg-primary/10 rounded-md text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
-          <Activity size={16} />
-        </div>
-        Run hardware diagnostics
-      </button>
-
-      <button
-        type="button"
-        onClick={onOpenSettings}
-        className="w-full flex items-center gap-2 p-2.5 bg-background/80 rounded-xl border border-border hover:border-primary/30 transition-all text-sm font-medium text-foreground text-left group disabled:opacity-60 disabled:hover:border-border"
-        disabled={!onOpenSettings}
-      >
-        <div className="p-1.5 bg-primary/10 rounded-md text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
-          <Settings2 size={16} />
-        </div>
-        Open settings
-      </button>
+      )}
     </div>
   );
 }
-

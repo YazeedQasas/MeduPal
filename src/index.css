@@ -1,6 +1,6 @@
-/* Aligned with landing: pure black, near-black cards, subtle borders, teal accents */
+/* Global black + green gradient background */
 :root {
-  --background: 210 5% 5%;
+  --background: 0 0% 2%;
   --foreground: 0 0% 91%;
 
   --card: 0 0% 3%;
@@ -37,18 +37,29 @@
 html {
   margin: 0;
   padding: 0;
-  overflow-x: hidden; /* prevents horizontal scroll at root; does NOT create a secondary Y scroll context */
+  overflow-x: hidden;
+  height: 100%;
+  min-height: 100%;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(0,255,150,0.08), transparent 40%),
+    radial-gradient(circle at 80% 0%, rgba(0,255,150,0.06), transparent 40%),
+    #050505;
 }
 
 body {
   margin: 0;
   padding: 0;
+  height: 100%;
+  min-height: 100%;
+  font-family: 'Poppins', system-ui, sans-serif;
+  background: transparent;
+  color: hsl(var(--foreground));
 }
 
-body {
-  font-family: 'Poppins', system-ui, sans-serif;
-  background-color: hsl(var(--background));
-  color: hsl(var(--foreground));
+#root {
+  height: 100%;
+  min-height: 100%;
+  background: transparent;
 }
 
 /* Hide scrollbars but keep scroll (cross-browser) */

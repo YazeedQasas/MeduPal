@@ -6,7 +6,7 @@ export function Header() {
     const displayName = profile?.full_name || user?.email?.split('@')[0] || 'User';
 
     return (
-        <header className="h-16 border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10 flex items-center justify-between px-6">
+        <header className="h-16 shrink-0 border-b border-border/80 bg-card/60 backdrop-blur-md sticky top-0 z-10 flex items-center justify-between px-4 sm:px-6 lg:px-8 shadow-[0_1px_0_rgba(0,0,0,0.25)]">
             <div className="flex items-center gap-4">
                 <h2 className="text-lg font-semibold text-foreground">Welcome back, {displayName}</h2>
                 <div className="h-4 w-px bg-border" />

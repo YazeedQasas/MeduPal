@@ -38,7 +38,7 @@ const USAGE_OPTIONS = [
   {
     id: 'practice',
     title: 'Practice with Manikin',
-    description: 'Use MeduPal hardware and sensors to practice clinical skills',
+    description: 'Use Xpatient hardware and sensors to practice clinical skills',
     icon: Stethoscope,
     has_hardware: true,
     can_exam: false,
@@ -153,7 +153,7 @@ export function StudentUsageSetup({ setActiveTab }) {
               </button>
 
               <h1 className="animate-element animate-delay-100 text-4xl md:text-5xl font-semibold leading-tight text-white/95">
-                How will you use<br />MeduPal?
+                How will you use<br />Xpatient?
               </h1>
               <p className="animate-element animate-delay-200 text-white/45">
                 Choose the option that best fits your goals.
@@ -264,7 +264,7 @@ export function StudentUsageSetup({ setActiveTab }) {
             <div className="relative z-10 shrink-0 py-8 px-8 text-center">
               <p className="text-[10px] tracking-[0.2em] uppercase text-white/30 mb-3">Your journey starts here</p>
               <p className="text-white/50 text-sm max-w-xs mx-auto leading-relaxed">
-                MeduPal adapts to how you learn — practice with hardware, take exams, or both.
+                Xpatient adapts to how you learn — practice with hardware, take exams, or both.
               </p>
             </div>
           </div>

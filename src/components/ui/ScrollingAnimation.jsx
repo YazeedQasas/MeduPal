@@ -17,7 +17,7 @@ export default function ScrollingAnimation({
   images = defaultImages,
   title = 'Empowering',
   titleLine2 = 'Every Student',
-  subtitle = 'From first-years to final exams, MeduPal gives you the tools to master clinical skills.',
+  subtitle = 'From first-years to final exams, Xpatient gives you the tools to master clinical skills.',
 }) {
   const [progress, setProgress] = useState(0);
   const sectionRef = useRef(null);

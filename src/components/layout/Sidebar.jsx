@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { LayoutDashboard, FileText, HardDrive, Settings, Activity, LogOut, GraduationCap, UserCog, Home, Play, TrendingUp, History, Cpu, FileCheck } from 'lucide-react';
+import { MedicalCrossIcon } from '../ui/MedicalCrossIcon';
 import { motion } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -43,17 +44,17 @@ function Logo() {
     <a
       href="#"
       onClick={(e) => e.preventDefault()}
-      className="font-normal flex space-x-2 items-center text-sm text-foreground py-1 relative z-20"
+      className="font-normal flex items-center text-sm text-foreground py-1 relative z-20"
     >
-      <div className="h-5 w-6 bg-primary rounded-br-lg rounded-tr-sm rounded-tl-lg rounded-bl-sm flex-shrink-0 flex items-center justify-center">
-        <Activity className="h-3 w-3 text-primary-foreground" />
+      <div className="h-5 w-6 flex-shrink-0 flex items-center justify-center -mr-0.5">
+        <MedicalCrossIcon size={18} color="#10b981" />
       </div>
       <motion.span
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        className="font-medium text-foreground whitespace-pre"
+        className="font-medium text-foreground whitespace-nowrap"
       >
-        MeduPal
+        patient
       </motion.span>
     </a>
   );
@@ -64,11 +65,9 @@ function LogoIcon() {
     <a
       href="#"
       onClick={(e) => e.preventDefault()}
-      className="font-normal flex space-x-2 items-center text-sm text-foreground py-1 relative z-20"
+      className="font-normal flex items-center justify-center text-sm text-foreground py-1 relative z-20"
     >
-      <div className="h-5 w-6 bg-primary rounded-br-lg rounded-tr-sm rounded-tl-lg rounded-bl-sm flex-shrink-0 flex items-center justify-center">
-        <Activity className="h-3 w-3 text-primary-foreground" />
-      </div>
+      <MedicalCrossIcon size={18} color="#10b981" />
     </a>
   );
 }
@@ -176,8 +175,14 @@ export function Sidebar({ activeTab, setActiveTab }) {
                     window.history.pushState(null, '', '/student-dashboard');
                   } else if (item.id === 'student-exam') {
                     window.history.pushState(null, '', '/exam');
+                  } else if (item.id === 'dashboard') {
+                    window.history.pushState(null, '', '/dashboard');
                   } else if (item.id === 'assign-exam') {
                     window.history.pushState(null, '', '/assign-exam');
+                  } else if (item.id === 'students') {
+                    window.history.pushState(null, '', '/students');
+                  } else if (item.id === 'sessions') {
+                    window.history.pushState(null, '', '/sessions');
                   }
                 }}
               />

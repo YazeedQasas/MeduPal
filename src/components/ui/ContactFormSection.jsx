@@ -105,13 +105,13 @@ export function ContactFormSection() {
                 </div>
                 <div className="space-y-3">
                   <a
-                    href="mailto:hello@medupal.com"
+                    href="mailto:hello@xpatint.com"
                     className="flex items-center gap-3 rounded-xl border border-white/8 bg-white/5 p-3 text-white/70 hover:text-white hover:border-white/12 transition-colors"
                   >
                     <Mail className="h-4 w-4 text-white/50 shrink-0" />
                     <div className="text-sm">
                       <span className="text-white/50 block text-[10px] uppercase tracking-wider">Email</span>
-                      hello@medupal.com
+                      hello@xpatint.com
                     </div>
                   </a>
                   <div className="flex items-center gap-3 rounded-xl border border-white/8 bg-white/5 p-3 text-white/70">
@@ -181,7 +181,7 @@ export function ContactFormSection() {
                   <textarea
                     id="message"
                     name="message"
-                    placeholder="Tell us about your programme, timeline, or how you'd like to use MeduPal…"
+                    placeholder="Tell us about your programme, timeline, or how you'd like to use Xpatient…"
                     value={formData.message}
                     onChange={handleChange}
                     rows={4}

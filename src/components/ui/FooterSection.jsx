@@ -79,7 +79,7 @@ export function Footer() {
         <AnimatedContainer className="space-y-4">
           <Frame className="size-8 text-white/70" />
           <p className="mt-8 text-sm md:mt-0" style={{ color: 'rgba(255,255,255,0.4)' }}>
-            © {new Date().getFullYear()} MeduPal. All rights reserved.
+            © {new Date().getFullYear()} Xpatient. All rights reserved.
           </p>
         </AnimatedContainer>
 

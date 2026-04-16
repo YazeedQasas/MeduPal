@@ -159,7 +159,6 @@ export function ExamPage({ setActiveTab }) {
   const stationName =
     exam.station?.name ||
     (exam.station?.room_number ? `Room ${exam.station.room_number}` : null) ||
-    exam.case?.title ||
     '—';
   const examinerName = exam.examiner?.full_name || 'Instructor';
 
@@ -186,7 +185,7 @@ export function ExamPage({ setActiveTab }) {
             <div>
               <p className="text-xs text-muted-foreground uppercase tracking-wider">Title</p>
               <p className="text-sm font-semibold text-foreground">
-                {exam.case?.title || 'Respiratory OSCE'}
+                Scheduled OSCE exam
               </p>
             </div>
           </div>

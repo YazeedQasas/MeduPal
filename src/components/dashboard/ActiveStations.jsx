@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import { Play, Pause, MoreVertical, Clock, Users } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { cn } from '../../lib/utils';
+import { glassCardStyle, DASHBOARD_THEME } from './DashboardShell';
 
 
-export function ActiveStations({ onViewAll }) {
+export function ActiveStations({ onViewAll, variant }) {
     const [stations, setStations] = useState([]);
 
     useEffect(() => {
@@ -72,13 +73,19 @@ export function ActiveStations({ onViewAll }) {
         return () => clearInterval(interval);
     }, []);
 
+    const isGlass = variant === 'glass';
+    const cardClass = isGlass ? 'hover:border-[#065f46]/30' : 'bg-card border border-border shadow-[0_0_0_1px_rgba(0,0,0,0.4)] hover:border-primary/30';
+    const titleColor = isGlass ? DASHBOARD_THEME.text : undefined;
+    const linkColor = isGlass ? DASHBOARD_THEME.accent : undefined;
+
     return (
         <div className="mb-6">
             <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-bold text-foreground">Available Stations</h3>
+                <h3 className="text-lg font-bold" style={isGlass ? { color: titleColor } : {}}>Available Stations</h3>
                 <button
                     onClick={onViewAll}
-                    className="text-sm text-primary hover:underline"
+                    className="text-sm font-medium hover:opacity-80 transition-opacity"
+                    style={isGlass ? { color: linkColor } : {}}
                 >
                     View All Map
                 </button>
@@ -86,19 +93,27 @@ export function ActiveStations({ onViewAll }) {
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 {stations.map((station) => (
-                    <div key={station.id} className="bg-card rounded-2xl border border-border shadow-[0_0_0_1px_rgba(0,0,0,0.4)] p-4 relative group hover:border-primary/30 transition-colors">
+                    <div
+                        key={station.id}
+                        className={cn(
+                            'rounded-2xl p-4 relative group transition-colors',
+                            cardClass,
+                            isGlass && 'backdrop-blur-xl'
+                        )}
+                        style={isGlass ? glassCardStyle : {}}
+                    >
 
                         <div className="flex justify-between items-start mb-3">
                             <div className="flex items-center gap-2">
                                 <div className={cn("w-2 h-2 rounded-full", station.status === 'active' ? 'bg-emerald-500 animate-pulse' : station.status === 'critical' ? 'bg-amber-500' : 'bg-muted')} />
-                                <span className="font-semibold text-foreground">Room {station.room}</span>
+                                <span className="font-semibold" style={isGlass ? { color: DASHBOARD_THEME.text } : {}}>Room {station.room}</span>
                             </div>
                             <button className="text-muted-foreground hover:text-foreground">
                                 <MoreVertical size={16} />
                             </button>
                         </div>
 
-                        <h4 className="font-medium text-foreground truncate mb-1" title={station.case}>{station.case}</h4>
+                        <h4 className="font-medium truncate mb-1" style={isGlass ? { color: DASHBOARD_THEME.text } : {}} title={station.case}>{station.case}</h4>
                         <span className="text-xs text-muted-foreground uppercase tracking-wider font-semibold bg-muted/50 px-1.5 py-0.5 rounded">{station.mode}</span>
 
                         <div className="mt-4 flex items-center justify-between">
@@ -121,11 +136,17 @@ export function ActiveStations({ onViewAll }) {
                         </div>
 
                         {/* Hover Action Overlay */}
-                        <div className="absolute inset-0 bg-background/80 backdrop-blur-[1px] opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 rounded-2xl">
+                        <div className={cn(
+                            "absolute inset-0 backdrop-blur-[1px] opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 rounded-2xl",
+                            isGlass ? "bg-[#060909]/85" : "bg-background/80"
+                        )}>
                             <button className="p-2 bg-emerald-500 text-white rounded-full hover:scale-110 transition-transform shadow-lg">
                                 <Play size={20} fill="currentColor" />
                             </button>
-                            <button className="p-2 bg-muted text-foreground rounded-full hover:scale-110 transition-transform shadow-lg">
+                            <button className={cn(
+                                "p-2 rounded-full hover:scale-110 transition-transform shadow-lg",
+                                isGlass ? "bg-white/10 text-white" : "bg-muted text-foreground"
+                            )}>
                                 <Pause size={20} fill="currentColor" />
                             </button>
                         </div>

@@ -49,6 +49,16 @@ export function Cases() {
         fetchCases();
     }, [fetchCases]);
 
+    useEffect(() => {
+        if (!canManageCases) return;
+        try {
+            if (sessionStorage.getItem('medupal_open_create_case') === '1') {
+                sessionStorage.removeItem('medupal_open_create_case');
+                setIsCreating(true);
+            }
+        } catch (_) {}
+    }, [canManageCases]);
+
     const handleDelete = async (id, e) => {
         e.stopPropagation(); // Prevent card click
         if (window.confirm('Are you sure you want to delete this case?')) {

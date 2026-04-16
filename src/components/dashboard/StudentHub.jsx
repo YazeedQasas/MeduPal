@@ -238,12 +238,12 @@ function SessionItem({ session, idx, expanded, onToggle }) {
 /* ── AI assistant ── */
 const HELP_FAQS = [
   { k: /practice|start|begin/i,    a: "Click **Start Practice** on your dashboard or **Browse Cases** to pick a case. Filter by difficulty and specialty to target your weak areas." },
-  { k: /osce|exam|examination/i,   a: "**OSCE** (Objective Structured Clinical Examination) is a clinical skills assessment. Medupal lets you practise with AI patients to prepare." },
+  { k: /osce|exam|examination/i,   a: "**OSCE** (Objective Structured Clinical Examination) is a clinical skills assessment. Xpatient lets you practise with AI patients to prepare." },
   { k: /score|scoring|mark|grade/i,a: "Sessions are scored out of 10 across 5 domains: History Taking, Communication, Clinical Reasoning, Examination, and Management Plan." },
   { k: /voice|mic|speak|stt/i,     a: "Click the **microphone** during a practice session. It auto-detects when you stop talking — no need to click again." },
   { k: /case|cases|patient/i,      a: "Cases span cardiology, respiratory, gastro, and more. Browse them under **Cases** and filter by difficulty." },
   { k: /streak|progress|history/i, a: "Your streak tracks consecutive practice days. See full history under **My Sessions**." },
-  { k: /hello|hi|hey/i,            a: "Hey! 👋 Ask me about starting practice, scoring, OSCE, voice input, or anything else about Medupal." },
+  { k: /hello|hi|hey/i,            a: "Hey! 👋 Ask me about starting practice, scoring, OSCE, voice input, or anything else about Xpatient." },
 ];
 function faqAnswer(t) { return HELP_FAQS.find(f => f.k.test(t))?.a ?? null; }
 
@@ -504,7 +504,8 @@ export function StudentHub({ setActiveTab }) {
         (a, b) => new Date(a.exam_date || 0) - new Date(b.exam_date || 0)
       );
 
-      const scored = allCompleted.filter(s => s.score != null);
+      // Only include practice sessions in avg (students cannot see exam scores)
+      const scored = allCompleted.filter(s => s.score != null && (s.session_type === 'practice' || s.type === 'practice'));
       const avgScore = scored.length
         ? (scored.reduce((a, b) => a + b.score, 0) / scored.length).toFixed(1)
         : null;
@@ -572,12 +573,9 @@ export function StudentHub({ setActiveTab }) {
         <div>
           <h2 className="text-lg font-bold text-foreground">Upcoming Exam</h2>
           {nextExam ? (
-            <>
-              <p className="text-sm font-semibold text-foreground mt-0.5">{nextExam.case?.title || 'Exam'}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {fmt(nextExam.start_time)} · {examinerName}
-              </p>
-            </>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {fmt(nextExam.start_time)} · {examinerName}
+            </p>
           ) : (
             <p className="text-sm text-muted-foreground mt-0.5">No scheduled exam at this time.</p>
           )}
@@ -623,16 +621,16 @@ export function StudentHub({ setActiveTab }) {
 
   return (
     <div style={{ background: P.page, height: '100%' }} className="min-h-0">
-      <div className="px-6 lg:px-10 py-6 rounded-2xl h-full min-h-0">
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-8 items-stretch h-full min-h-0 overflow-hidden">
+      <div className="px-0 py-6 rounded-2xl h-full min-h-0">
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6 lg:gap-8 items-stretch h-full min-h-0 overflow-hidden">
 
         {/* ── Left: all main content ── */}
-        <div className="relative min-h-0 h-full overflow-hidden pr-2">
-          <div className="space-y-5 overflow-y-auto min-h-0 h-full no-scrollbar">
+        <div className="relative min-h-0 h-full overflow-hidden">
+          <div className="space-y-6 overflow-y-auto min-h-0 h-full no-scrollbar">
 
         {/* ── Header + Daily Tip ── */}
-        <div className="pb-1">
-          <p className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: P.accent }}>
+        <div className="border-b border-white/[0.07] pb-5">
+          <p className="text-xs font-semibold uppercase tracking-widest mb-1.5" style={{ color: P.accent }}>
             {new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}
           </p>
           <div className="flex items-baseline gap-4 flex-wrap">
@@ -993,7 +991,7 @@ export function StudentHub({ setActiveTab }) {
         </div>{/* end left main content */}
 
         {/* ── Right: AI assistant sidebar ── */}
-        <div className="relative min-h-0 h-full overflow-hidden pl-1">
+        <div className="relative min-h-0 h-full overflow-hidden">
           <div className={`${showFull ? 'pt-20' : 'pt-16'} space-y-8 overflow-y-auto min-h-0 h-full no-scrollbar`}>
 
           {/* Profile widget */}

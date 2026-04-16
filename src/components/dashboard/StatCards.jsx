@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { Users, Clock, Award, Activity, TrendingUp, Calendar } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { supabase } from '../../lib/supabase';
+import { glassCardStyle, DASHBOARD_THEME } from './DashboardShell';
 
-export function StatCards() {
+export function StatCards({ variant }) {
     const [stats, setStats] = useState({
         roomStatus: {
             status: "Idle",
@@ -125,17 +126,22 @@ export function StatCards() {
         return () => clearInterval(interval);
     }, []);
 
+    const isGlass = variant === 'glass';
+
     return (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
             {/* Topic Session Status Card */}
-            <div className="bg-card p-5 rounded-2xl border border-border shadow-[0_0_0_1px_rgba(0,0,0,0.4)] relative overflow-hidden group">
+            <div
+                className={cn('p-5 rounded-2xl relative overflow-hidden group', !isGlass && 'bg-card border border-border shadow-[0_0_0_1px_rgba(0,0,0,0.4)]')}
+                style={isGlass ? glassCardStyle : undefined}
+            >
                 <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
                     <Activity size={80} />
                 </div>
                 <div className="flex justify-between items-start mb-4">
                     <div>
-                        <p className="text-muted-foreground text-sm font-medium">Topic Session Status</p>
-                        <h3 className="text-2xl font-bold mt-1 text-foreground">{stats.roomStatus.status}</h3>
+                        <p className="text-sm font-medium" style={isGlass ? { color: DASHBOARD_THEME.muted } : {}}>Topic Session Status</p>
+                        <h3 className="text-2xl font-bold mt-1" style={isGlass ? { color: DASHBOARD_THEME.text } : {}}>{stats.roomStatus.status}</h3>
                     </div>
                     <div className="p-2 bg-emerald-500/10 text-emerald-500 rounded-lg">
                         <Clock size={20} />
@@ -144,8 +150,8 @@ export function StatCards() {
                 <div className="space-y-2">
                     {stats.roomStatus.currentSessions.map((session, idx) => (
                         <div key={idx} className="flex justify-between text-sm">
-                            <span className="text-muted-foreground">{session.room}</span>
-                            <span className="font-medium text-foreground">{session.case} ({session.timeLeft} left)</span>
+                            <span style={isGlass ? { color: DASHBOARD_THEME.muted } : {}}>{session.room}</span>
+                            <span className="font-medium" style={isGlass ? { color: DASHBOARD_THEME.text } : {}}>{session.case} ({session.timeLeft} left)</span>
                         </div>
                     ))}
                 </div>
@@ -157,14 +163,17 @@ export function StatCards() {
             </div>
 
             {/* Today's Sessions Card */}
-            <div className="bg-card p-5 rounded-2xl border border-border shadow-[0_0_0_1px_rgba(0,0,0,0.4)] relative overflow-hidden group">
+            <div
+                className={cn('p-5 rounded-2xl relative overflow-hidden group', !isGlass && 'bg-card border border-border shadow-[0_0_0_1px_rgba(0,0,0,0.4)]')}
+                style={isGlass ? glassCardStyle : undefined}
+            >
                 <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
                     <Award size={80} />
                 </div>
                 <div className="flex justify-between items-start mb-4">
                     <div>
-                        <p className="text-muted-foreground text-sm font-medium">Today's Sessions</p>
-                        <h3 className="text-2xl font-bold mt-1 text-foreground">{stats.todaySessions.count}</h3>
+                        <p className="text-sm font-medium" style={isGlass ? { color: DASHBOARD_THEME.muted } : {}}>Today's Sessions</p>
+                        <h3 className="text-2xl font-bold mt-1" style={isGlass ? { color: DASHBOARD_THEME.text } : {}}>{stats.todaySessions.count}</h3>
                     </div>
                     <div className="p-2 bg-blue-500/10 text-blue-500 rounded-lg">
                         <Users size={20} />
@@ -172,28 +181,31 @@ export function StatCards() {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                     <div>
-                        <p className="text-xs text-muted-foreground">Pass Rate</p>
+                        <p className="text-xs" style={isGlass ? { color: DASHBOARD_THEME.muted } : {}}>Pass Rate</p>
                         <div className="flex items-center gap-1">
-                            <span className="text-lg font-semibold text-foreground">{stats.todaySessions.passRate}</span>
+                            <span className="text-lg font-semibold" style={isGlass ? { color: DASHBOARD_THEME.text } : {}}>{stats.todaySessions.passRate}</span>
                             <TrendingUp size={12} className="text-emerald-500" />
                         </div>
                     </div>
                     <div>
-                        <p className="text-xs text-muted-foreground">Avg Score</p>
-                        <span className="text-lg font-semibold text-foreground">{stats.todaySessions.avgScore}</span>
+                        <p className="text-xs" style={isGlass ? { color: DASHBOARD_THEME.muted } : {}}>Avg Score</p>
+                        <span className="text-lg font-semibold" style={isGlass ? { color: DASHBOARD_THEME.text } : {}}>{stats.todaySessions.avgScore}</span>
                     </div>
                 </div>
             </div>
 
             {/* Upcoming Blocks Card */}
-            <div className="bg-card p-5 rounded-2xl border border-border shadow-[0_0_0_1px_rgba(0,0,0,0.4)] relative overflow-hidden group">
+            <div
+                className={cn('p-5 rounded-2xl relative overflow-hidden group', !isGlass && 'bg-card border border-border shadow-[0_0_0_1px_rgba(0,0,0,0.4)]')}
+                style={isGlass ? glassCardStyle : undefined}
+            >
                 <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
                     <Calendar size={80} />
                 </div>
                 <div className="flex justify-between items-start mb-4">
                     <div>
-                        <p className="text-muted-foreground text-sm font-medium">Upcoming Blocks</p>
-                        <h3 className="text-2xl font-bold mt-1 text-foreground">{stats.upcomingBlocks.count}</h3>
+                        <p className="text-sm font-medium" style={isGlass ? { color: DASHBOARD_THEME.muted } : {}}>Upcoming Blocks</p>
+                        <h3 className="text-2xl font-bold mt-1" style={isGlass ? { color: DASHBOARD_THEME.text } : {}}>{stats.upcomingBlocks.count}</h3>
                     </div>
                     <div className="p-2 bg-violet-500/10 text-violet-500 rounded-lg">
                         <Calendar size={20} />
@@ -204,8 +216,8 @@ export function StatCards() {
                         <div key={idx} className="flex items-center gap-3">
                             <div className={cn("w-1 h-8 rounded-full", block.color)}></div>
                             <div>
-                                <p className="text-sm font-medium text-foreground">{block.name}</p>
-                                <p className="text-xs text-muted-foreground">
+                                <p className="text-sm font-medium" style={isGlass ? { color: DASHBOARD_THEME.text } : {}}>{block.name}</p>
+                                <p className="text-xs" style={isGlass ? { color: DASHBOARD_THEME.muted } : {}}>
                                     {block.startsIn}{block.students ? ` • ${block.students} Students` : ''}
                                 </p>
                             </div>

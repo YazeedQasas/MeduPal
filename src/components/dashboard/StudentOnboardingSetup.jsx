@@ -8,7 +8,7 @@ const WIZARD_OPTIONS = [
   {
     id: 'practice',
     title: 'Practice with Manikin',
-    description: 'Use MeduPal hardware and sensors to practice clinical skills.',
+    description: 'Use Xpatient hardware and sensors to practice clinical skills.',
     icon: Stethoscope,
     has_hardware: true,
     can_exam: false,
@@ -36,7 +36,7 @@ const WIZARD_OPTIONS = [
   {
     id: 'both',
     title: 'Both Practice and Exam',
-    description: 'Use the MeduPal manikin and participate in OSCE exams.',
+    description: 'Use the Xpatient manikin and participate in OSCE exams.',
     icon: Layers,
     has_hardware: true,
     can_exam: true,
@@ -113,10 +113,10 @@ export function StudentOnboardingSetup({ setActiveTab }) {
         {/* Header */}
         <div className="text-center mb-10">
           <h1 className="text-3xl md:text-4xl font-semibold text-white/95 tracking-tight">
-            Setup Your MeduPal Profile
+            Setup Your Xpatient Profile
           </h1>
           <p className="mt-3 text-white/50 text-base">
-            How will you use MeduPal?
+            How will you use Xpatient?
           </p>
         </div>
 
