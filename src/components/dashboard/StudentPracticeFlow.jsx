@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { supabase } from '../../lib/supabase';
+import { selectPatientForCase } from '../../data/patients';
 import {
     getPatientReplyApiUrl,
     getSttApiUrl,
@@ -229,6 +230,7 @@ const PHYSICAL_RUBRIC_CRITERIA = [
 function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
     const [currentStep, setCurrentStep] = useState(standaloneHistoryOnly ? 1 : 0);
     const [selectedCase, setSelectedCase] = useState(null);
+    const [selectedPatient, setSelectedPatient] = useState(null);
     const [casesFromDb, setCasesFromDb] = useState([]);
     const [casesLoading, setCasesLoading] = useState(true);
     const [casesError, setCasesError] = useState(null);
@@ -244,8 +246,6 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
     const [selectedSystem, setSelectedSystem] = useState(null);
     const [caseSearch, setCaseSearch] = useState('');
     const [patientStatus, setPatientStatus] = useState(INITIAL_VITALS);
-    const [isDeteriorating, setIsDeteriorating] = useState(false);
-    const [hasDeteriorated, setHasDeteriorated] = useState(false);
     const [elapsedTime, setElapsedTime] = useState(0);
     const [showHint, setShowHint] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
@@ -254,7 +254,6 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
     const [lastTranscript, setLastTranscript] = useState('');
     
     // Evaluation step states
-    const [redFlagRecognized, setRedFlagRecognized] = useState(false);
     const [selectedDiagnosis, setSelectedDiagnosis] = useState('');
     const [diagnosisConfidence, setDiagnosisConfidence] = useState(50);
     const [diagnosisRationale, setDiagnosisRationale] = useState('');
@@ -280,7 +279,6 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
     const chatEndRef = useRef(null);
     const countdownRef = useRef(null);
     const timerRef = useRef(null);
-    const deteriorationTimeoutRef = useRef(null);
     const recognitionRef = useRef(null);
     const mockRecordingTimeoutRef = useRef(null);
     const fwRecordingRef = useRef(null);
@@ -338,29 +336,17 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
             timerRef.current = setInterval(() => {
                 setElapsedTime(prev => prev + 1);
             }, 1000);
-            
-            if (!hasDeteriorated) {
-                deteriorationTimeoutRef.current = setTimeout(() => {
-                    triggerAutoDeteriorationInternal();
-                }, 60000);
-            }
         } else {
             if (timerRef.current) {
                 clearInterval(timerRef.current);
-            }
-            if (deteriorationTimeoutRef.current) {
-                clearTimeout(deteriorationTimeoutRef.current);
             }
         }
         return () => {
             if (timerRef.current) {
                 clearInterval(timerRef.current);
             }
-            if (deteriorationTimeoutRef.current) {
-                clearTimeout(deteriorationTimeoutRef.current);
-            }
         };
-    }, [currentStep, hasDeteriorated]);
+    }, [currentStep]);
 
     const formatTime = (seconds) => {
         const mins = Math.floor(seconds / 60);
@@ -419,43 +405,33 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         window.speechSynthesis.speak(utterance);
     }, []);
 
-    const speakText = useCallback(async (text) => {
-        if (!voiceEnabled || typeof window === 'undefined') return;
-        if (!text || !text.trim()) return;
+    const getVoiceGender = useCallback((patient) => {
+        const gender = (patient?.gender || selectedPatient?.gender || '').toLowerCase();
+        return gender === 'male' ? 'male' : 'female';
+    }, [selectedPatient]);
 
-        window.speechSynthesis.cancel();
-        setIsSpeaking(true);
 
+    const fetchTTSBlob = useCallback(async (text, patient) => {
         const apiBase = getPatientReplyApiUrl();
-        if (apiBase) {
-            try {
-                const res = await fetch(`${apiBase}/tts`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: text.trim() })
-                });
-                if (res.ok && res.headers.get('content-type')?.includes('audio')) {
-                    const blob = await res.blob();
-                    const url = URL.createObjectURL(blob);
-                    const audio = new Audio(url);
-                    audio.onended = () => {
-                        URL.revokeObjectURL(url);
-                        setIsSpeaking(false);
-                    };
-                    audio.onerror = () => {
-                        URL.revokeObjectURL(url);
-                        fallbackSpeak(text);
-                    };
-                    await audio.play();
-                    return;
-                }
-            } catch {
-                // fall through to browser TTS
-            }
-        }
+        if (!apiBase) return null;
+        try {
+            const res = await fetch(`${apiBase}/tts`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: text.trim(), voice: getVoiceGender(patient) })
+            });
+            if (!res.ok) return null;
+            return await res.blob();
+        } catch { return null; }
+    }, [getVoiceGender]);
 
-        fallbackSpeak(text);
-    }, [voiceEnabled, fallbackSpeak]);
+    const playBlob = useCallback((blob, text) => {
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audio.onended = () => { URL.revokeObjectURL(url); setIsSpeaking(false); };
+        audio.onerror = () => { URL.revokeObjectURL(url); fallbackSpeak(text); };
+        audio.play();
+    }, [fallbackSpeak]);
 
     const handleSendMessage = useCallback(async () => {
         if (!inputValue.trim() || isTyping) return;
@@ -476,16 +452,39 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         const apiBase = getPatientReplyApiUrl();
         if (apiBase) {
             try {
+                const caseKey = getCaseMockKey(selectedCase);
                 const res = await fetch(`${apiBase}/patient-reply`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        case_id: selectedCase?.id || 'pneumonia',
+                        // Case context
+                        case_id: selectedCase?.id || '',
                         case_title: selectedCase?.title || '',
                         case_category: selectedCase?.category || '',
-                        symptoms: CASE_SYMPTOMS[selectedCase?.id] || [],
+                        symptoms: CASE_SYMPTOMS[caseKey] || [],
+                        chief_complaint: selectedCase?.chief_complaint || CHIEF_COMPLAINTS[caseKey] || '',
+
+                        // Patient identity — who the AI is playing
+                        patient_id: selectedPatient?.id || '',
+                        patient_name: selectedPatient?.name || 'Unknown Patient',
+                        patient_age: selectedPatient?.age || '',
+                        patient_gender: selectedPatient?.gender || '',
+                        patient_occupation: selectedPatient?.occupation || '',
+                        patient_personality: selectedPatient?.personality || '',
+
+                        // Medical background — grounding the AI's knowledge
+                        past_medical_history: selectedPatient?.past_medical_history || '',
+                        medications: selectedPatient?.medications || '',
+                        allergies: selectedPatient?.allergies || '',
+                        social_history: selectedPatient?.social_history || '',
+                        family_history: selectedPatient?.family_history || '',
+
+                        // LLM roleplay instruction
+                        system_prompt: selectedPatient?.system_prompt || '',
+
+                        // Conversation
                         student_question: transcript,
-                        conversation_history: messages.slice(-6)
+                        conversation_history: messages.slice(-4)
                     })
                 });
                 const data = await res.json();
@@ -497,14 +496,30 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
             patientResponse = getPatientReply();
         }
 
+        // Collect TTS audio before showing text so they appear in sync
+        let audioBlob = null;
+        if (voiceEnabled) {
+            audioBlob = await fetchTTSBlob(patientResponse, selectedPatient);
+        }
+
+        // Strip *expressions* from displayed text — they're for TTS only
+        const displayText = patientResponse.replace(/\*[^*]+\*/g, '').replace(/\s+/g, ' ').trim();
+
         setMessages(prev => [...prev, {
             role: 'patient',
-            content: patientResponse,
+            content: displayText,
             ts: Date.now()
         }]);
         setIsTyping(false);
-        speakText(patientResponse);
-    }, [inputValue, isTyping, getPatientReply, speakText, selectedCase, messages]);
+
+        if (audioBlob) {
+            window.speechSynthesis.cancel();
+            setIsSpeaking(true);
+            playBlob(audioBlob, patientResponse);
+        } else if (voiceEnabled) {
+            fallbackSpeak(patientResponse);
+        }
+    }, [inputValue, isTyping, getPatientReply, fetchTTSBlob, playBlob, fallbackSpeak, voiceEnabled, selectedCase, selectedPatient, messages, getCaseMockKey]);
 
     const handleKeyDown = (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -740,30 +755,6 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         }));
     }, []);
 
-    const triggerAutoDeteriorationInternal = () => {
-        if (hasDeteriorated) return;
-        
-        setHasDeteriorated(true);
-        setIsDeteriorating(true);
-        setPatientStatus(prev => ({
-            ...prev,
-            spO2: 88,
-            respiratoryRate: 28,
-            heartRate: '102 bpm'
-        }));
-        
-        const alertMessage = { 
-            role: 'alert', 
-            content: 'Patient condition worsening! SpO₂ dropping rapidly.' 
-        };
-        setMessages(prev => [...prev, alertMessage]);
-    };
-
-    const triggerDeterioration = () => {
-        if (hasDeteriorated) return;
-        triggerAutoDeteriorationInternal();
-    };
-
     const goNext = () => {
         if (currentStep < STEPS.length - 1) setCurrentStep(currentStep + 1);
     };
@@ -917,7 +908,19 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                                                 </span>
                                             </div>
                                             <button
-                                                onClick={() => setCurrentStep(1)}
+                                                onClick={() => {
+                                                    const patient = selectPatientForCase(selectedCase);
+                                                    setSelectedPatient(patient);
+                                                    setPatientStatus({
+                                                        age: `${patient.age} years`,
+                                                        weight: `${patient.weight_kg} kg`,
+                                                        temperature: `${patient.vitals.temp}°C`,
+                                                        heartRate: `${patient.vitals.hr} bpm`,
+                                                        spO2: patient.vitals.spo2,
+                                                        respiratoryRate: patient.vitals.rr,
+                                                    });
+                                                    setCurrentStep(1);
+                                                }}
                                                 className="w-full py-3.5 rounded-full text-sm font-semibold flex items-center justify-center gap-2 transition-all hover:opacity-90"
                                                 style={{ background: P.accent, color: '#0a0a0a', boxShadow: `0 4px 20px rgba(110,231,183,0.2)` }}
                                             >
@@ -1234,53 +1237,27 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                 {/* Step 1: History Taking */}
                 {currentStep === 1 && (
                     <div className="h-full flex flex-col">
-                        {/* Alert Banner */}
-                        {isDeteriorating && (
-                            <div className="bg-red-500/20 border-b border-red-500/30 px-6 py-3 flex items-center justify-center gap-3 animate-pulse flex-shrink-0">
-                                <AlertTriangle className="text-red-500" size={20} />
-                                <span className="text-red-500 font-semibold">
-                                    SpO₂ dropping — patient worsening!
-                                </span>
-                            </div>
-                        )}
-
-                        {/* Chief Complaint — Speech bubble from patient avatar */}
+                        {/* Chief Complaint bar */}
                         {selectedCase && (
-                            <div className="flex-shrink-0 px-4 pt-3">
-                                <div className="flex items-start gap-3">
-                                    {/* Patient avatar */}
-                                    <div
-                                        className="flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center border border-white/10"
-                                        style={{
-                                            background: 'linear-gradient(145deg, rgba(90, 125, 138, 0.4) 0%, rgba(61, 90, 106, 0.5) 100%)',
-                                            boxShadow: '0 2px 8px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.08)'
-                                        }}
-                                    >
-                                        <User size={22} className="text-slate-400" />
+                            <div className="flex-shrink-0 px-4 pt-3 pb-1">
+                                <div className="flex items-center gap-3 px-4 py-3 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                                    {/* Patient photo */}
+                                    <div className="w-9 h-9 rounded-full flex-shrink-0 overflow-hidden" style={{ border: '1.5px solid rgba(110,231,183,0.25)', background: 'rgba(110,231,183,0.08)' }}>
+                                        {selectedPatient?.photo
+                                            ? <img src={selectedPatient.photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: selectedPatient.photo_position || 'center' }} />
+                                            : <div className="w-full h-full flex items-center justify-center"><User size={16} style={{ color: '#6ee7b7' }} /></div>
+                                        }
                                     </div>
-                                    {/* Speech bubble */}
-                                    <div className="max-w-md relative">
-                                        <div
-                                            className="relative rounded-2xl rounded-tl-md border border-white/10 px-4 py-3"
-                                            style={{
-                                                background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.6) 100%)',
-                                                boxShadow: '0 2px 12px rgba(0,0,0,0.15), 0 0 20px rgba(59, 130, 246, 0.08)'
-                                            }}
-                                        >
-                                            {/* Bubble tail (points toward avatar) */}
-                                            <div
-                                                className="absolute -left-1.5 top-3 w-0 h-0"
-                                                style={{
-                                                    borderTop: '6px solid transparent',
-                                                    borderBottom: '6px solid transparent',
-                                                    borderRight: '8px solid rgba(30, 41, 59, 0.85)'
-                                                }}
-                                            />
-                                            <p className="text-sm font-medium text-foreground italic relative z-10">
-                                                &quot;{selectedCase.chief_complaint || CHIEF_COMPLAINTS[getCaseMockKey(selectedCase)] || CHIEF_COMPLAINTS['pneumonia']}&quot;
-                                            </p>
-                                        </div>
-                                        <p className="text-[10px] text-muted-foreground mt-1.5 ml-1 font-medium uppercase tracking-wider">Chief Complaint</p>
+                                    {/* Label + text */}
+                                    <div className="flex-1 min-w-0">
+                                        <span className="text-[10px] font-bold uppercase tracking-widest block mb-0.5" style={{ color: 'rgba(110,231,183,0.6)' }}>Chief Complaint</span>
+                                        <p className="text-sm italic leading-snug truncate" style={{ color: 'rgba(255,255,255,0.75)' }}>
+                                            "{selectedCase.chief_complaint || CHIEF_COMPLAINTS[getCaseMockKey(selectedCase)] || CHIEF_COMPLAINTS['pneumonia']}"
+                                        </p>
+                                    </div>
+                                    {/* Case tag */}
+                                    <div className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                                        <span className="text-[11px] font-medium" style={{ color: 'rgba(255,255,255,0.45)' }}>{selectedCase.title}</span>
                                     </div>
                                 </div>
                             </div>
@@ -1288,373 +1265,341 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
 
                         {/* Main Two-Column Layout */}
                         <div className="flex-1 flex overflow-hidden p-4 gap-4 min-h-0">
-                            {/* LEFT COLUMN: Patient Avatar + Conversation (60-65%) */}
-                            <div className="flex-[3] flex flex-col bg-card border border-white/5 rounded-xl overflow-hidden min-w-0">
+                            {/* LEFT COLUMN: Chat */}
+                            <div className="flex-1 flex flex-col min-w-0 overflow-hidden rounded-2xl" style={{ background: 'hsl(var(--card))', border: '1px solid rgba(255,255,255,0.07)' }}>
+
                                 {/* Header */}
-                                <div className="bg-muted/30 border-b border-white/5 px-4 py-3 flex items-center justify-between flex-shrink-0">
-                                    <div className="flex items-center gap-2">
-                                        <MessageCircle size={16} className="text-primary" />
-                                        <span className="font-semibold text-foreground text-sm">Patient Conversation</span>
+                                <div className="px-5 py-3.5 flex items-center justify-between flex-shrink-0" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                                    <div className="flex items-center gap-2.5">
+                                        <div className="w-2 h-2 rounded-full bg-emerald-400" style={{ boxShadow: '0 0 6px rgba(52,211,153,0.8)' }} />
+                                        <span className="text-sm font-semibold" style={{ color: '#f4f4f5' }}>Patient Conversation</span>
                                     </div>
                                     <button
                                         onClick={() => setVoiceEnabled(!voiceEnabled)}
-                                        className={cn(
-                                            "flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors",
-                                            voiceEnabled 
-                                                ? "bg-primary/10 text-primary" 
-                                                : "bg-muted/50 text-muted-foreground"
-                                        )}
-                                        title={voiceEnabled ? "Disable voice replies" : "Enable voice replies"}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all"
+                                        style={voiceEnabled
+                                            ? { background: 'rgba(110,231,183,0.1)', color: '#6ee7b7', border: '1px solid rgba(110,231,183,0.2)' }
+                                            : { background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.35)', border: '1px solid rgba(255,255,255,0.08)' }}
                                     >
-                                        {voiceEnabled ? <Volume2 size={12} /> : <VolumeX size={12} />}
-                                        Voice {voiceEnabled ? 'On' : 'Off'}
+                                        {voiceEnabled ? <Volume2 size={11} /> : <VolumeX size={11} />}
+                                        {voiceEnabled ? 'Voice On' : 'Voice Off'}
                                     </button>
                                 </div>
 
-                                {/* Content Area: Manikin + Chat */}
-                                <div className="flex-1 flex overflow-hidden">
-                                    {/* Static Manikin Avatar Panel */}
-                                    <div className="w-32 flex-shrink-0 border-r border-white/5 flex flex-col items-center justify-start p-4 bg-muted/20">
-                                        {/* Manikin Image */}
-                                        <div className="relative">
-                                            {/* Speaking indicator ring */}
-                                            {isSpeaking && (
-                                                <div 
-                                                    className="absolute -inset-2 rounded-2xl animate-pulse"
-                                                    style={{
-                                                        background: 'radial-gradient(circle, rgba(52, 211, 153, 0.3) 0%, transparent 70%)'
-                                                    }}
-                                                />
-                                            )}
-                                            <div
-                                                className={cn(
-                                                    "w-20 h-20 rounded-2xl border flex items-center justify-center mb-3 transition-all",
-                                                    isSpeaking ? "border-emerald-500/50" : "border-white/10"
-                                                )}
-                                                style={{
-                                                    background: `
-                                                        radial-gradient(circle at 30% 30%, rgba(255,255,255,0.1) 0%, transparent 40%),
-                                                        linear-gradient(145deg, #5a7d8a 0%, #3d5a6a 50%, #2a4050 100%)
-                                                    `,
-                                                    boxShadow: isSpeaking 
-                                                        ? '0 4px 20px rgba(52, 211, 153, 0.3), inset 0 -2px 10px rgba(0,0,0,0.2), inset 0 2px 10px rgba(255,255,255,0.05)'
-                                                        : '0 4px 20px rgba(0,0,0,0.3), inset 0 -2px 10px rgba(0,0,0,0.2), inset 0 2px 10px rgba(255,255,255,0.05)'
-                                                }}
-                                            >
-                                                {/* Simple Face */}
-                                                <div className="flex flex-col items-center">
-                                                    <div className="flex gap-4 mb-2">
-                                                        <div 
-                                                            className={cn(
-                                                                "w-2.5 h-2.5 rounded-full transition-colors",
-                                                                isSpeaking ? "bg-emerald-400/80" : "bg-slate-300/60"
-                                                            )} 
-                                                            style={{ boxShadow: isSpeaking ? '0 0 6px rgba(52, 211, 153, 0.5)' : 'inset 0 1px 2px rgba(0,0,0,0.3)' }} 
-                                                        />
-                                                        <div 
-                                                            className={cn(
-                                                                "w-2.5 h-2.5 rounded-full transition-colors",
-                                                                isSpeaking ? "bg-emerald-400/80" : "bg-slate-300/60"
-                                                            )} 
-                                                            style={{ boxShadow: isSpeaking ? '0 0 6px rgba(52, 211, 153, 0.5)' : 'inset 0 1px 2px rgba(0,0,0,0.3)' }} 
-                                                        />
-                                                    </div>
-                                                    {/* Mouth - animated when speaking */}
-                                                    <div 
-                                                        className={cn(
-                                                            "rounded-full bg-slate-400/50 transition-all",
-                                                            isSpeaking ? "w-4 h-3" : "w-5 h-1.5"
-                                                        )} 
-                                                        style={{ 
-                                                            boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.3)',
-                                                            animation: isSpeaking ? 'mouthMove 300ms ease-in-out infinite' : 'none'
-                                                        }} 
-                                                    />
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <span className="text-xs text-muted-foreground font-medium">Patient</span>
-                                        {isSpeaking ? (
-                                            <div className="flex items-center gap-1 mt-1">
-                                                <Volume2 size={10} className="text-emerald-500" />
-                                                <span className="text-[10px] text-emerald-500 font-medium">Speaking...</span>
-                                            </div>
-                                        ) : (
-                                            <span className="text-[10px] text-muted-foreground/60 mt-0.5">Virtual Manikin</span>
-                                        )}
-                                        
-                                        {/* Wave Animation when speaking */}
-                                        {isSpeaking && (
-                                            <div className="flex items-end gap-0.5 h-4 mt-2">
-                                                {[0, 1, 2, 3, 4].map((i) => (
-                                                    <div
-                                                        key={i}
-                                                        className="w-1 bg-emerald-500 rounded-full"
-                                                        style={{
-                                                            animation: 'waveBar 600ms ease-in-out infinite',
-                                                            animationDelay: `${i * 100}ms`,
-                                                            height: '6px'
-                                                        }}
-                                                    />
-                                                ))}
-                                            </div>
-                                        )}
-                                    </div>
-                                    
-                                    {/* CSS Animations for speaking */}
-                                    <style>{`
-                                        @keyframes waveBar {
-                                            0%, 100% { height: 6px; }
-                                            50% { height: 14px; }
-                                        }
-                                        @keyframes mouthMove {
-                                            0%, 100% { height: 6px; width: 16px; }
-                                            50% { height: 12px; width: 14px; }
-                                        }
-                                    `}</style>
+                                {/* Messages */}
+                                <div className="flex-1 overflow-y-auto px-4 py-5 space-y-4" style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.08) transparent' }}>
+                                    {messages.map((msg, idx) => (
+                                        <div key={idx} className={cn('flex gap-2.5', msg.role === 'student' ? 'justify-end' : 'justify-start', msg.role === 'alert' && 'justify-center', msg.role === 'system' && 'justify-center')}>
 
-                                    {/* Chat Messages */}
-                                    <div className="flex-1 flex flex-col min-w-0">
-                                        <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                                            {messages.map((msg, idx) => (
-                                                <div
-                                                    key={idx}
-                                                    className={cn(
-                                                        "flex",
-                                                        msg.role === 'student' ? "justify-end" : "justify-start",
-                                                        msg.role === 'alert' && "justify-center"
-                                                    )}
-                                                >
-                                                    <div
-                                                        className={cn(
-                                                            "max-w-[85%] px-4 py-2.5 rounded-2xl text-sm",
-                                                            msg.role === 'student' && "bg-primary text-primary-foreground rounded-br-md",
-                                                            msg.role === 'patient' && "bg-muted/50 text-foreground border border-white/5 rounded-bl-md",
-                                                            msg.role === 'system' && "bg-amber-500/10 text-amber-500 border border-amber-500/20 text-center mx-auto rounded-xl text-xs",
-                                                            msg.role === 'alert' && "bg-red-500/20 text-red-500 border border-red-500/30 text-center rounded-xl font-medium"
-                                                        )}
-                                                    >
-                                                        {msg.role === 'patient' && (
-                                                            <span className="text-xs text-muted-foreground font-medium block mb-1">Patient</span>
-                                                        )}
+                                            {/* Patient avatar dot */}
+                                            {msg.role === 'patient' && (
+                                                <div className="w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center mt-0.5" style={{ background: 'rgba(110,231,183,0.1)', border: '1px solid rgba(110,231,183,0.2)' }}>
+                                                    {selectedPatient?.photo
+                                                        ? <img src={selectedPatient.photo} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', objectPosition: selectedPatient.photo_position || 'center' }} />
+                                                        : <User size={12} style={{ color: '#6ee7b7' }} />
+                                                    }
+                                                </div>
+                                            )}
+
+                                            {msg.role === 'patient' && (
+                                                <div className="max-w-[78%] flex flex-col gap-1">
+                                                    <span className="text-[10px] font-semibold ml-1" style={{ color: 'rgba(255,255,255,0.3)', letterSpacing: '0.04em' }}>
+                                                        {selectedPatient?.name || 'Patient'}
+                                                    </span>
+                                                    <div className="px-4 py-2.5 rounded-2xl rounded-tl-sm text-sm leading-relaxed" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', color: '#e4e4e7' }}>
                                                         {msg.content}
                                                     </div>
                                                 </div>
-                                            ))}
-                                            {isTyping && (
-                                                <div className="flex justify-start">
-                                                    <div className="bg-muted/50 border border-white/5 px-4 py-2.5 rounded-2xl rounded-bl-md">
-                                                        <span className="text-xs text-muted-foreground font-medium block mb-1">Patient</span>
-                                                        <div className="flex gap-1">
-                                                            <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                                                            <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                                                            <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                                                        </div>
+                                            )}
+
+                                            {msg.role === 'student' && (
+                                                <div className="max-w-[78%] px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm leading-relaxed" style={{ background: 'linear-gradient(135deg, rgba(110,231,183,0.2) 0%, rgba(59,130,246,0.15) 100%)', border: '1px solid rgba(110,231,183,0.2)', color: '#f4f4f5' }}>
+                                                    {msg.content}
+                                                </div>
+                                            )}
+
+                                            {msg.role === 'system' && (
+                                                <div className="px-4 py-2 rounded-xl text-xs text-center" style={{ background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.15)', color: 'rgba(251,191,36,0.8)', maxWidth: '90%' }}>
+                                                    {msg.content}
+                                                </div>
+                                            )}
+
+                                            {msg.role === 'alert' && (
+                                                <div className="px-4 py-2 rounded-xl text-xs text-center font-medium" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#f87171', maxWidth: '90%' }}>
+                                                    {msg.content}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+
+                                    {/* Typing indicator */}
+                                    {isTyping && (
+                                        <div className="flex gap-2.5 justify-start">
+                                            <div className="w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center" style={{ background: 'rgba(110,231,183,0.1)', border: '1px solid rgba(110,231,183,0.2)' }}>
+                                                {selectedPatient?.photo
+                                                    ? <img src={selectedPatient.photo} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', objectPosition: selectedPatient.photo_position || 'center' }} />
+                                                    : <User size={12} style={{ color: '#6ee7b7' }} />
+                                                }
+                                            </div>
+                                            <div className="flex flex-col gap-1">
+                                                <span className="text-[10px] font-semibold ml-1" style={{ color: 'rgba(255,255,255,0.3)', letterSpacing: '0.04em' }}>{selectedPatient?.name || 'Patient'}</span>
+                                                <div className="px-4 py-3 rounded-2xl rounded-tl-sm" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                                                    <div className="flex gap-1.5 items-center">
+                                                        {[0, 1, 2].map(i => (
+                                                            <div key={i} className="w-1.5 h-1.5 rounded-full" style={{ background: 'rgba(110,231,183,0.7)', animation: 'typingDot 1.2s ease-in-out infinite', animationDelay: `${i * 0.18}s` }} />
+                                                        ))}
                                                     </div>
                                                 </div>
-                                            )}
-                                            <div ref={chatEndRef} />
+                                            </div>
                                         </div>
+                                    )}
+                                    <div ref={chatEndRef} />
+                                </div>
 
-                                        {/* Last Transcript Display */}
-                                        {lastTranscript && !isRecording && (
-                                            <div className="border-t border-white/5 px-3 py-2 bg-muted/20 flex-shrink-0">
-                                                <div className="text-[10px] text-muted-foreground mb-1 font-medium">Last transcript:</div>
-                                                <div className="text-xs text-foreground/80 italic">&quot;{lastTranscript}&quot;</div>
-                                            </div>
-                                        )}
+                                <style>{`
+                                    @keyframes typingDot {
+                                        0%, 100% { opacity: 0.3; transform: translateY(0); }
+                                        50% { opacity: 1; transform: translateY(-3px); }
+                                    }
+                                `}</style>
 
-                                        {/* Input Area */}
-                                        <div className="border-t border-white/5 p-3 flex-shrink-0">
-                                            {/* Recording indicator */}
-                                            {isRecording && (
-                                                <div className="flex items-center justify-center gap-2 text-red-500 text-sm mb-3 py-2 bg-red-500/10 rounded-lg border border-red-500/20">
-                                                    <div className="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse" />
-                                                    <span className="font-medium">Listening...</span>
-                                                    <span className="text-xs text-red-400/80">Speak now</span>
-                                                </div>
-                                            )}
-                                            
-                                            <div className="flex gap-2">
-                                                <div className={cn(
-                                                    "flex-1 flex gap-2 border rounded-xl px-3 transition-colors",
-                                                    isRecording 
-                                                        ? "bg-red-500/5 border-red-500/30" 
-                                                        : "bg-muted/50 border-white/5"
-                                                )}>
-                                                    <input
-                                                        type="text"
-                                                        placeholder={isRecording ? "Listening..." : "Ask the patient a question..."}
-                                                        className="flex-1 bg-transparent py-2.5 text-sm focus:outline-none"
-                                                        value={inputValue}
-                                                        onChange={(e) => setInputValue(e.target.value)}
-                                                        onKeyDown={handleKeyDown}
-                                                        disabled={isTyping || isRecording || isSpeaking}
-                                                    />
-                                                    <button
-                                                        onClick={toggleRecording}
-                                                        disabled={isTyping || isSpeaking}
-                                                        className={cn(
-                                                            "p-2 rounded-lg transition-colors",
-                                                            isRecording 
-                                                                ? "text-red-500 bg-red-500/10 animate-pulse" 
-                                                                : "text-muted-foreground hover:text-foreground hover:bg-white/5"
-                                                        )}
-                                                        title={isRecording ? "Stop recording" : "Start voice input"}
-                                                    >
-                                                        {isRecording ? <MicOff size={18} /> : <Mic size={18} />}
-                                                    </button>
-                                                </div>
-                                                <button
-                                                    onClick={handleSendMessage}
-                                                    disabled={!inputValue.trim() || isTyping || isSpeaking}
-                                                    className="px-4 py-2.5 bg-primary text-primary-foreground rounded-xl hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                                >
-                                                    <Send size={18} />
-                                                </button>
-                                            </div>
+                                {/* Last transcript pill */}
+                                {lastTranscript && !isRecording && (
+                                    <div className="px-4 pb-2 flex-shrink-0">
+                                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full w-fit" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                                            <Mic size={9} style={{ color: 'rgba(255,255,255,0.3)' }} />
+                                            <span className="text-[10px] italic truncate max-w-[220px]" style={{ color: 'rgba(255,255,255,0.4)' }}>&quot;{lastTranscript}&quot;</span>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Input area */}
+                                <div className="p-3 flex-shrink-0">
+                                    {isRecording && (
+                                        <div className="flex items-center justify-center gap-2 mb-2 py-1.5 px-4 rounded-full mx-auto w-fit" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.18)' }}>
+                                            <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                                            <span className="text-xs font-medium" style={{ color: '#f87171' }}>Listening — speak now</span>
+                                        </div>
+                                    )}
+                                    <div className="rounded-2xl overflow-hidden transition-all" style={{ background: 'rgba(255,255,255,0.04)', border: `1px solid ${isRecording ? 'rgba(239,68,68,0.3)' : 'rgba(255,255,255,0.09)'}` }}>
+                                        <textarea
+                                            rows={1}
+                                            placeholder={isRecording ? 'Listening...' : 'Ask the patient a question...'}
+                                            className="w-full bg-transparent px-4 pt-3.5 pb-2 text-sm focus:outline-none resize-none placeholder:text-white/20"
+                                            style={{ color: '#f4f4f5', minHeight: 48, maxHeight: 120, caretColor: '#6ee7b7', lineHeight: 1.5 }}
+                                            value={inputValue}
+                                            onChange={e => setInputValue(e.target.value)}
+                                            onKeyDown={handleKeyDown}
+                                            disabled={isTyping || isRecording || isSpeaking}
+                                        />
+                                        <div className="flex items-center justify-between px-3 pb-3 pt-1">
+                                            <button
+                                                onClick={toggleRecording}
+                                                disabled={isTyping || isSpeaking}
+                                                className="p-2 rounded-xl transition-all"
+                                                style={isRecording
+                                                    ? { background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.25)' }
+                                                    : { color: 'rgba(255,255,255,0.3)', background: 'transparent' }}
+                                                title={isRecording ? 'Stop recording' : 'Voice input'}
+                                            >
+                                                {isRecording ? <MicOff size={15} /> : <Mic size={15} />}
+                                            </button>
+                                            <button
+                                                onClick={handleSendMessage}
+                                                disabled={!inputValue.trim() || isTyping || isSpeaking}
+                                                className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all"
+                                                style={inputValue.trim()
+                                                    ? { background: 'linear-gradient(135deg, #6ee7b7, #3b82f6)', color: '#0a0a0a', boxShadow: '0 4px 14px rgba(110,231,183,0.25)' }
+                                                    : { background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.2)', cursor: 'not-allowed' }}
+                                            >
+                                                <Send size={13} />
+                                                Send
+                                            </button>
                                         </div>
                                     </div>
                                 </div>
                             </div>
 
-                            {/* RIGHT COLUMN: Patient Status + Timer + Hint (35-40%) */}
-                            <div className="hidden lg:flex flex-[3] flex-col justify-start gap-4 min-w-[260px] min-h-0 overflow-y-auto">
-                                {/* Patient Status Card - anchored at top */}
-                                <div className="flex-shrink-0 bg-card border border-white/5 rounded-xl p-4">
-                                    <h3 className="font-semibold text-foreground mb-2 flex items-center gap-2">
-                                        <Activity size={16} className="text-primary" />
-                                        Patient Status
-                                    </h3>
-                                    
-                                    {/* Vitals Grid */}
-                                    <div className="grid grid-cols-3 gap-1.5 mb-3">
-                                        <div className="p-2 bg-muted/30 rounded-lg text-center min-w-0">
-                                            <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
-                                                <Thermometer size={10} />
-                                                <span className="text-[10px]">Temp</span>
-                                            </div>
-                                            <span className="text-xs font-semibold text-amber-500">{patientStatus.temperature}</span>
-                                        </div>
-                                        <div className="p-2 bg-muted/30 rounded-lg text-center">
-                                            <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
-                                                <User size={10} />
-                                                <span className="text-[10px]">Age</span>
-                                            </div>
-                                            <span className="text-xs font-semibold text-foreground">{patientStatus.age}</span>
-                                        </div>
-                                        <div className="p-2 bg-muted/30 rounded-lg text-center">
-                                            <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
-                                                <Scale size={10} />
-                                                <span className="text-[10px]">Wt</span>
-                                            </div>
-                                            <span className="text-xs font-semibold text-foreground">{patientStatus.weight}</span>
-                                        </div>
-                                        <div className={cn(
-                                            "p-2 rounded-lg text-center transition-colors",
-                                            isDeteriorating ? "bg-red-500/20" : "bg-muted/30"
-                                        )}>
-                                            <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
-                                                <Heart size={10} />
-                                                <span className="text-[10px]">HR</span>
-                                            </div>
-                                            <span className={cn(
-                                                "text-xs font-semibold",
-                                                isDeteriorating ? "text-red-500" : "text-foreground"
-                                            )}>{patientStatus.heartRate}</span>
-                                        </div>
-                                        <div className={cn(
-                                            "p-2 rounded-lg text-center transition-colors",
-                                            isDeteriorating ? "bg-red-500/20 animate-pulse" : "bg-muted/30"
-                                        )}>
-                                            <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
-                                                <Activity size={10} />
-                                                <span className="text-[10px]">SpO₂</span>
-                                            </div>
-                                            <span className={cn(
-                                                "text-xs font-semibold",
-                                                isDeteriorating ? "text-red-500" : patientStatus.spO2 < 95 ? "text-amber-500" : "text-emerald-500"
-                                            )}>{patientStatus.spO2}%</span>
-                                        </div>
-                                        <div className={cn(
-                                            "p-2 rounded-lg text-center transition-colors",
-                                            isDeteriorating ? "bg-red-500/20 animate-pulse" : "bg-muted/30"
-                                        )}>
-                                            <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
-                                                <Wind size={10} />
-                                                <span className="text-[10px]">RR</span>
-                                            </div>
-                                            <span className={cn(
-                                                "text-xs font-semibold",
-                                                isDeteriorating ? "text-red-500" : "text-foreground"
-                                            )}>{patientStatus.respiratoryRate}/m</span>
-                                        </div>
-                                    </div>
+                            {/* RIGHT COLUMN: Manikin + overlaid widgets */}
+                            <div className="hidden lg:flex relative rounded-xl overflow-hidden min-h-0 flex-shrink-0" style={{ width: 620, marginLeft: 'auto', background: 'radial-gradient(ellipse at 50% 30%, rgba(110,231,183,0.04) 0%, transparent 70%), hsl(var(--card))', border: '1px solid rgba(255,255,255,0.06)' }}>
 
-                                    {/* Symptoms */}
-                                    <div>
-                                        <h4 className="text-xs font-medium text-muted-foreground mb-1.5">Reported Symptoms</h4>
-                                        <div className="flex flex-wrap gap-1.5">
-                                            {(selectedCase ? (CASE_SYMPTOMS[getCaseMockKey(selectedCase)] || []) : []).map((symptom, idx) => (
-                                                <span
-                                                    key={idx}
-                                                    className="px-2 py-0.5 bg-amber-500/10 text-amber-500 text-[10px] rounded-full font-medium"
-                                                >
-                                                    {symptom}
-                                                </span>
-                                            ))}
+                                {/* Top bar */}
+                                <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1.5 rounded-full pointer-events-none"
+                                    style={{ background: 'rgba(10,10,10,0.6)', border: `1px solid ${P.border}`, backdropFilter: 'blur(10px)' }}>
+                                    <div className="w-1.5 h-1.5 rounded-full" style={{ background: P.accent, boxShadow: `0 0 6px ${P.accent}` }} />
+                                    <span className="text-[11px] font-semibold" style={{ color: P.text }}>Anatomy Simulator</span>
+                                    <span style={{ color: P.muted, fontSize: 10 }}>· Drag to rotate</span>
+                                </div>
+
+                                {/* Left vitals */}
+                                <div className="absolute left-3 top-16 z-20 flex flex-col gap-2 pointer-events-none">
+                                    {/* Heart Rate */}
+                                    <div className="rounded-xl px-3 py-2" style={{ background: 'rgba(10,10,10,0.65)', border: '1px solid rgba(248,113,113,0.25)', backdropFilter: 'blur(10px)', minWidth: 105 }}>
+                                        <div className="flex items-center gap-1.5 mb-0.5">
+                                            <Heart size={10} style={{ color: '#f87171' }} />
+                                            <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: '#f87171' }}>Heart Rate</span>
                                         </div>
+                                        <p className="text-base font-bold leading-none" style={{ color: P.text }}>
+                                            {patientStatus.heartRate}
+                                        </p>
+                                        <svg width="72" height="16" viewBox="0 0 72 16" className="mt-1 opacity-60">
+                                            <polyline points="0,9 10,9 14,3 18,14 22,9 26,9 32,9 36,5 40,13 44,9 72,9"
+                                                fill="none" stroke='#f87171' strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                                        </svg>
+                                    </div>
+                                    {/* Temp */}
+                                    <div className="rounded-xl px-3 py-2" style={{ background: 'rgba(10,10,10,0.65)', border: '1px solid rgba(251,191,36,0.2)', backdropFilter: 'blur(10px)', minWidth: 105 }}>
+                                        <div className="flex items-center gap-1.5 mb-0.5">
+                                            <Thermometer size={10} style={{ color: '#fbbf24' }} />
+                                            <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: '#fbbf24' }}>Temp</span>
+                                        </div>
+                                        <p className="text-base font-bold leading-none" style={{ color: P.text }}>{patientStatus.temperature}</p>
+                                    </div>
+                                    {/* Weight */}
+                                    <div className="rounded-xl px-3 py-2" style={{ background: 'rgba(10,10,10,0.65)', border: `1px solid ${P.border}`, backdropFilter: 'blur(10px)', minWidth: 105 }}>
+                                        <div className="flex items-center gap-1.5 mb-0.5">
+                                            <Scale size={10} style={{ color: P.muted }} />
+                                            <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: P.muted }}>Weight</span>
+                                        </div>
+                                        <p className="text-base font-bold leading-none" style={{ color: P.text }}>{selectedPatient?.weight_kg ?? '—'} <span className="text-[10px] font-normal" style={{ color: P.muted }}>kg</span></p>
                                     </div>
                                 </div>
 
-                                {/* Timer + Hint */}
-                                <div className="flex gap-3 flex-shrink-0">
-                                    {/* Timer Card */}
-                                    <div className="flex-1 bg-card border border-white/5 rounded-xl p-2.5 text-center min-w-0">
-                                        <div className="flex items-center justify-center gap-1.5 text-muted-foreground mb-0.5">
-                                            <Clock size={12} />
-                                            <span className="text-[10px] font-medium">Timer</span>
+                                {/* Right vitals */}
+                                <div className="absolute right-3 top-16 z-20 flex flex-col gap-2 pointer-events-none">
+                                    {/* SpO2 */}
+                                    <div className="rounded-xl px-3 py-2" style={{ background: 'rgba(10,10,10,0.65)', border: `1px solid rgba(96,165,250,0.25)`, backdropFilter: 'blur(10px)', minWidth: 105 }}>
+                                        <div className="flex items-center gap-1.5 mb-0.5">
+                                            <Wind size={10} style={{ color: '#60a5fa' }} />
+                                            <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: '#60a5fa' }}>SpO₂</span>
                                         </div>
-                                        <span className="text-xl font-bold text-foreground font-mono">{formatTime(elapsedTime)}</span>
+                                        <p className="text-base font-bold leading-none" style={{ color: patientStatus.spO2 < 95 ? '#fbbf24' : P.text }}>
+                                            {patientStatus.spO2} <span className="text-[10px] font-normal" style={{ color: P.muted }}>%</span>
+                                        </p>
+                                        <div className="mt-1.5 h-1 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
+                                            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${patientStatus.spO2}%`, background: 'linear-gradient(90deg,#3b82f6,#60a5fa)' }} />
+                                        </div>
                                     </div>
+                                    {/* Resp Rate */}
+                                    <div className="rounded-xl px-3 py-2" style={{ background: 'rgba(10,10,10,0.65)', border: `1px solid rgba(110,231,183,0.2)`, backdropFilter: 'blur(10px)', minWidth: 105 }}>
+                                        <div className="flex items-center gap-1.5 mb-0.5">
+                                            <Activity size={10} style={{ color: P.accent }} />
+                                            <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: P.accent }}>Resp Rate</span>
+                                        </div>
+                                        <p className="text-base font-bold leading-none" style={{ color: P.text }}>
+                                            {patientStatus.respiratoryRate} <span className="text-[10px] font-normal" style={{ color: P.muted }}>/min</span>
+                                        </p>
+                                    </div>
+                                    {/* Age */}
+                                    <div className="rounded-xl px-3 py-2" style={{ background: 'rgba(10,10,10,0.65)', border: `1px solid ${P.border}`, backdropFilter: 'blur(10px)', minWidth: 105 }}>
+                                        <div className="flex items-center gap-1.5 mb-0.5">
+                                            <User size={10} style={{ color: P.muted }} />
+                                            <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: P.muted }}>Age</span>
+                                        </div>
+                                        <p className="text-base font-bold leading-none" style={{ color: P.text }}>{selectedPatient?.age ?? '—'} <span className="text-[10px] font-normal" style={{ color: P.muted }}>yrs</span></p>
+                                    </div>
+                                </div>
 
-                                    {/* Hint Toggle */}
-                                    <div className="flex-1 bg-card border border-white/5 rounded-xl p-2.5 flex flex-col min-w-0">
+                                {/* Patient Info widget — bottom left */}
+                                {selectedPatient && (
+                                    <div className="absolute bottom-10 left-3 z-20 rounded-2xl overflow-hidden pointer-events-none"
+                                        style={{ width: 210, background: 'rgba(8,8,8,0.75)', border: `1px solid ${P.border}`, backdropFilter: 'blur(14px)' }}>
+                                        <div className="flex items-center justify-between px-3 py-2" style={{ borderBottom: `1px solid ${P.border}` }}>
+                                            <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: P.muted }}>Patient Info</span>
+                                            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold" style={{ background: 'rgba(110,231,183,0.1)', color: P.accent }}>Active</span>
+                                        </div>
+                                        <div className="flex items-center gap-2.5 px-3 py-2.5" style={{ borderBottom: `1px solid ${P.border}` }}>
+                                            <div className="w-10 h-10 rounded-xl flex-shrink-0 overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+                                                <img src={selectedPatient.photo} alt={selectedPatient.name}
+                                                    style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: selectedPatient.photo_position || 'center' }}
+                                                    onError={e => { e.currentTarget.style.display = 'none'; }} />
+                                            </div>
+                                            <div>
+                                                <div className="flex items-center gap-1 mb-1">
+                                                    <span className="text-[10px] px-1.5 py-px rounded font-semibold" style={{ background: 'rgba(255,255,255,0.06)', color: P.tagText }}>{selectedPatient.weight_kg} kg</span>
+                                                    <span className="text-[10px] px-1.5 py-px rounded font-semibold" style={{ background: 'rgba(239,68,68,0.12)', color: '#f87171' }}>{selectedPatient.blood_type}</span>
+                                                </div>
+                                                <p className="text-xs font-bold" style={{ color: P.text }}>{selectedPatient.name}</p>
+                                                <p className="text-[10px]" style={{ color: P.muted }}>{selectedPatient.gender} · {selectedPatient.age} years old</p>
+                                            </div>
+                                        </div>
+                                        <div className="grid grid-cols-2" style={{ borderBottom: `1px solid ${P.border}` }}>
+                                            <div className="px-3 py-2" style={{ borderRight: `1px solid ${P.border}` }}>
+                                                <div className="flex items-center gap-1 mb-0.5">
+                                                    <Activity size={9} style={{ color: '#f87171' }} />
+                                                    <span className="text-[9px] uppercase tracking-wide font-semibold" style={{ color: P.muted }}>BP</span>
+                                                </div>
+                                                <p className="text-xs font-bold" style={{ color: P.text }}>{selectedPatient.vitals.bp} <span className="text-[9px] font-normal" style={{ color: P.muted }}>mmHg</span></p>
+                                            </div>
+                                            <div className="px-3 py-2">
+                                                <div className="flex items-center gap-1 mb-0.5">
+                                                    <Heart size={9} style={{ color: '#f87171' }} />
+                                                    <span className="text-[9px] uppercase tracking-wide font-semibold" style={{ color: P.muted }}>HR</span>
+                                                </div>
+                                                <p className="text-xs font-bold" style={{ color: P.text }}>{patientStatus.heartRate}</p>
+                                            </div>
+                                        </div>
+                                        <div className="px-3 py-2.5">
+                                            <div className="flex items-center justify-between mb-1.5">
+                                                <span className="text-[9px] uppercase tracking-wide font-semibold" style={{ color: P.muted }}>Body Condition</span>
+                                                <span className="text-[10px] font-bold" style={{ color: selectedPatient.body_condition >= 80 ? P.accent : selectedPatient.body_condition >= 60 ? '#fbbf24' : '#f87171' }}>
+                                                    {selectedPatient.body_condition}%
+                                                </span>
+                                            </div>
+                                            <div className="h-1 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.07)' }}>
+                                                <div className="h-full rounded-full" style={{
+                                                    width: `${selectedPatient.body_condition}%`,
+                                                    background: selectedPatient.body_condition >= 80 ? `linear-gradient(90deg,${P.accent}80,${P.accent})` : selectedPatient.body_condition >= 60 ? 'linear-gradient(90deg,#fbbf2480,#fbbf24)' : 'linear-gradient(90deg,#f8717180,#f87171)'
+                                                }} />
+                                            </div>
+                                            <p className="text-[9px] mt-1" style={{ color: P.muted }}>{selectedPatient.body_condition_label}</p>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Timer + hint — bottom right */}
+                                <div className="absolute bottom-10 right-3 z-20 flex flex-col gap-2 pointer-events-none" style={{ width: 120 }}>
+                                    <div className="rounded-xl px-3 py-2 text-center" style={{ background: 'rgba(10,10,10,0.65)', border: `1px solid ${P.border}`, backdropFilter: 'blur(10px)' }}>
+                                        <div className="flex items-center justify-center gap-1 mb-0.5" style={{ color: P.muted }}>
+                                            <Clock size={10} />
+                                            <span className="text-[9px] font-semibold uppercase tracking-wide">Timer</span>
+                                        </div>
+                                        <span className="text-base font-bold font-mono" style={{ color: P.text }}>{formatTime(elapsedTime)}</span>
+                                    </div>
+                                    <div className="rounded-xl px-3 py-2 pointer-events-auto" style={{ background: 'rgba(10,10,10,0.65)', border: `1px solid ${P.border}`, backdropFilter: 'blur(10px)' }}>
                                         {showHint ? (
                                             <>
-                                                <button
-                                                    onClick={() => setShowHint(false)}
-                                                    className="flex items-center gap-1.5 text-primary mb-1 hover:opacity-80 transition-opacity"
-                                                >
-                                                    <Brain size={12} />
-                                                    <span className="text-[10px] font-semibold">Hide Hint</span>
+                                                <button onClick={() => setShowHint(false)} className="flex items-center gap-1 mb-1 hover:opacity-80 transition-opacity" style={{ color: P.accent }}>
+                                                    <Brain size={10} /><span className="text-[9px] font-bold">Hide Hint</span>
                                                 </button>
-                                                <p className="text-[10px] text-muted-foreground leading-relaxed">
-                                                    Ask about duration, severity, triggers, and past history.
-                                                </p>
+                                                <p className="text-[9px] leading-relaxed" style={{ color: P.muted }}>Ask about duration, severity, triggers, past history.</p>
                                             </>
                                         ) : (
-                                            <button
-                                                onClick={() => setShowHint(true)}
-                                                className="flex-1 flex items-center justify-center gap-1.5 text-muted-foreground hover:text-primary transition-colors"
-                                            >
-                                                <Brain size={14} />
-                                                <span className="text-xs font-medium">Show Hint</span>
+                                            <button onClick={() => setShowHint(true)} className="w-full flex items-center justify-center gap-1 hover:opacity-80 transition-opacity" style={{ color: P.muted }}>
+                                                <Brain size={12} /><span className="text-[10px] font-medium">Hint</span>
                                             </button>
                                         )}
                                     </div>
                                 </div>
 
-                                {/* Demo Trigger */}
-                                {!hasDeteriorated && (
-                                    <button
-                                        onClick={triggerDeterioration}
-                                        className="flex-shrink-0 py-2 rounded-lg text-xs font-medium bg-orange-500/10 text-orange-500 hover:bg-orange-500/20 border border-orange-500/20 transition-colors flex items-center justify-center gap-2"
-                                    >
-                                        <AlertTriangle size={12} />
-                                        Trigger Deterioration (Demo)
-                                    </button>
-                                )}
+                                {/* 3D Manikin */}
+                                {/* eslint-disable-next-line react/no-unknown-property */}
+                                <model-viewer
+                                    src="/human_anatomy_male_torso.glb"
+                                    alt="Patient manikin"
+                                    auto-rotate
+                                    auto-rotate-delay="500"
+                                    rotation-per-second="10deg"
+                                    camera-controls
+                                    disable-zoom
+                                    camera-orbit="0deg 75deg 2.2m"
+                                    style={{
+                                        width: '100%', height: '100%',
+                                        background: 'transparent',
+                                        '--progress-bar-color': 'transparent',
+                                        '--progress-mask': 'transparent',
+                                    }}
+                                />
                             </div>
                         </div>
 
@@ -1769,19 +1714,13 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                             'asthma': ['Nocturnal symptoms', 'Wheeze on triggers (cold, dust)', 'Chest tightness', 'Known allergies (cats, pollen)'],
                             'copd': ['30-year smoking history', 'Chronic productive cough', 'Progressive dyspnea', 'Reduced exercise capacity']
                         };
-                        const base = findings[caseKey] || findings['pneumonia'];
-                        if (hasDeteriorated) {
-                            return [...base, 'SpO₂ deterioration observed (dropped to 88%)'];
-                        }
-                        return base;
+                        return findings[caseKey] || findings['pneumonia'];
                     };
 
                     const calculateScore = () => {
                         let score = 0;
                         // Checklist: 2.5 points max (0.5 per item)
                         score += checklistCompleted * 0.5;
-                        // Red flag: 1.5 points if deterioration happened and recognized
-                        if (hasDeteriorated && redFlagRecognized) score += 1.5;
                         // Diagnosis match: 1.5 points
                         if (selectedDiagnosis === selectedCase?.id) score += 1.5;
                         // Rubric: 4.5 points max (rubricTotal/10 * 4.5)
@@ -1791,9 +1730,6 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
 
                     const getFeedback = () => {
                         const score = calculateScore();
-                        if (hasDeteriorated && !redFlagRecognized) {
-                            return "Important: You missed the SpO₂ deterioration. Always monitor vitals closely!";
-                        }
                         if (score >= 8) return "Excellent history taking! You covered all key areas systematically.";
                         if (score >= 6) return "Good history structure. Consider being more thorough with social history.";
                         if (score >= 4) return "Adequate attempt. Remember to always check allergies and medications.";
@@ -1817,8 +1753,6 @@ CLINICAL CHECKLIST (AI Detected): ${checklistCompleted}/5 completed
 - Medications: ${aiChecklist.meds ? '✓' : '✗'}
 - Allergies: ${aiChecklist.allergies ? '✓' : '✗'}
 - Social History: ${aiChecklist.socialHistory ? '✓' : '✗'}
-
-RED FLAG RECOGNITION: ${hasDeteriorated ? (redFlagRecognized ? 'Yes - Recognized SpO₂ drop' : 'No - Missed SpO₂ drop!') : 'N/A (no deterioration)'}
 
 DIAGNOSIS:
 - Selected: ${diagnosisName}
@@ -1927,38 +1861,6 @@ FEEDBACK: ${getFeedback()}
                                                 </div>
                                             ))}
                                         </div>
-                                    </div>
-
-                                    {/* Red Flag Recognition */}
-                                    <div className="bg-card border border-white/5 rounded-xl p-4">
-                                        <h3 className="font-semibold text-foreground text-sm mb-3">Red Flag Recognition</h3>
-                                        <label className={cn(
-                                            "flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all",
-                                            redFlagRecognized
-                                                ? "bg-red-500/10 border-red-500/30"
-                                                : "bg-muted/30 border-white/5 hover:border-white/10"
-                                        )}>
-                                            <input
-                                                type="checkbox"
-                                                checked={redFlagRecognized}
-                                                onChange={(e) => setRedFlagRecognized(e.target.checked)}
-                                                className="w-4 h-4 rounded border-white/20 bg-muted/50 text-red-500 focus:ring-red-500/30"
-                                            />
-                                            <span className={cn(
-                                                "text-sm",
-                                                redFlagRecognized ? "text-red-400" : "text-foreground"
-                                            )}>
-                                                I noticed the patient deterioration (SpO₂ drop)
-                                            </span>
-                                        </label>
-                                        {hasDeteriorated && !redFlagRecognized && (
-                                            <div className="mt-3 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg flex items-start gap-2">
-                                                <AlertTriangle size={16} className="text-amber-500 flex-shrink-0 mt-0.5" />
-                                                <p className="text-xs text-amber-500">
-                                                    The patient's SpO₂ dropped during your session. Always watch for deterioration signs!
-                                                </p>
-                                            </div>
-                                        )}
                                     </div>
 
                                     {/* Key Findings */}
@@ -2198,39 +2100,20 @@ FEEDBACK: ${getFeedback()}
                                             </div>
                                             <div className="p-2 bg-muted/30 rounded-lg text-center">
                                                 <span className="text-[10px] text-muted-foreground block">HR</span>
-                                                <span className={cn(
-                                                    "text-xs font-semibold",
-                                                    isDeteriorating ? "text-red-500" : "text-foreground"
-                                                )}>{patientStatus.heartRate}</span>
+                                                <span className="text-xs font-semibold text-foreground">{patientStatus.heartRate}</span>
                                             </div>
-                                            <div className={cn(
-                                                "p-2 rounded-lg text-center",
-                                                isDeteriorating ? "bg-red-500/20" : "bg-muted/30"
-                                            )}>
+                                            <div className="p-2 bg-muted/30 rounded-lg text-center">
                                                 <span className="text-[10px] text-muted-foreground block">SpO₂</span>
                                                 <span className={cn(
                                                     "text-xs font-semibold",
-                                                    isDeteriorating ? "text-red-500" : patientStatus.spO2 < 95 ? "text-amber-500" : "text-emerald-500"
+                                                    patientStatus.spO2 < 95 ? "text-amber-500" : "text-emerald-500"
                                                 )}>{patientStatus.spO2}%</span>
                                             </div>
-                                            <div className={cn(
-                                                "p-2 rounded-lg text-center",
-                                                isDeteriorating ? "bg-red-500/20" : "bg-muted/30"
-                                            )}>
+                                            <div className="p-2 bg-muted/30 rounded-lg text-center">
                                                 <span className="text-[10px] text-muted-foreground block">RR</span>
-                                                <span className={cn(
-                                                    "text-xs font-semibold",
-                                                    isDeteriorating ? "text-red-500" : "text-foreground"
-                                                )}>{patientStatus.respiratoryRate}/m</span>
+                                                <span className="text-xs font-semibold text-foreground">{patientStatus.respiratoryRate}/m</span>
                                             </div>
                                         </div>
-                                        {isDeteriorating && (
-                                            <div className="mt-3 p-2 bg-red-500/10 border border-red-500/20 rounded-lg">
-                                                <p className="text-[10px] text-red-400 text-center font-medium">
-                                                    Patient deteriorated during session
-                                                </p>
-                                            </div>
-                                        )}
                                     </div>
                                 </div>
                             </div>

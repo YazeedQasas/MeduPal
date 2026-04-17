@@ -422,7 +422,7 @@ export default function LandingPage({ setActiveTab }) {
         overflow: 'hidden',
         border: '1px solid rgba(255,255,255,0.09)',
         boxShadow: '0 0 0 1px rgba(0,0,0,0.6), 0 50px 100px rgba(0,0,0,0.9)',
-        background: '#060909',
+        background: '#000',
       }}>
       <section
         ref={heroRef}

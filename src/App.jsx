@@ -29,6 +29,7 @@ import { AssignExamPage } from "./components/dashboard/AssignExamPage";
 import { StudentHistory } from "./components/dashboard/StudentHistory";
 import { StudentProgress } from "./components/dashboard/StudentProgress";
 import { StudentProfile } from "./components/dashboard/StudentProfile";
+import PatientTestingPage from "./components/testing/PatientTestingPage";
 
 function AppContent() {
   const [activeTab, setActiveTab] = useState("landing");
@@ -37,6 +38,11 @@ function AppContent() {
   // Dedicated URL: /practice-history — standalone History Taking (voice) page for AI work
   if (typeof window !== "undefined" && window.location.pathname === "/practice-history") {
     return <PracticeHistoryPage />;
+  }
+
+  // Dedicated URL: /patient-testing — patient roster and case matching tester
+  if (typeof window !== "undefined" && window.location.pathname === "/patient-testing") {
+    return <PatientTestingPage />;
   }
 
   // Test loading screen: open app with ?loading=1 in the URL (e.g. http://localhost:5173/?loading=1)

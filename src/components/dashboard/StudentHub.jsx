@@ -22,6 +22,15 @@ const P = {
   accentBg:'rgba(110,231,183,0.12)',
 };
 
+/* ── constants ── */
+const DEFAULT_DOMAINS = [
+  { label: 'History Taking' },
+  { label: 'Communication' },
+  { label: 'Clinical Reasoning' },
+  { label: 'Examination' },
+  { label: 'Management Plan' },
+];
+
 /* ── helpers ── */
 function timeAgo(iso) {
   if (!iso) return '';
@@ -493,23 +502,16 @@ export function StudentHub({ setActiveTab }) {
         }));
       }
 
-      // Legacy: also check exams table if used elsewhere
-      const { data: examsData } = await supabase
-        .from('exams')
-        .select('id, exam_date, case_name, status, station:stations(name, room_number), instructor:profiles!instructor_id(full_name)')
-        .eq('student_id', user.id).eq('status', 'scheduled')
-        .order('exam_date', { ascending: true });
-
-      const allExams = [...examsFromSessions, ...(examsData || [])].sort(
+      const allExams = [...examsFromSessions].sort(
         (a, b) => new Date(a.exam_date || 0) - new Date(b.exam_date || 0)
       );
 
-      const scored = allCompleted.filter(s => s.score != null);
+      const scored = all.filter(s => s.score != null);
       const avgScore = scored.length
         ? (scored.reduce((a, b) => a + b.score, 0) / scored.length).toFixed(1)
         : null;
 
-      const sessionDays = new Set(allCompleted.map(s => new Date(s.start_time).toDateString()));
+      const sessionDays = new Set(all.map(s => new Date(s.start_time).toDateString()));
       let streak = 0;
       const cur = new Date();
       while (sessionDays.has(cur.toDateString())) {
@@ -523,13 +525,12 @@ export function StudentHub({ setActiveTab }) {
       }));
 
       setStats({
-        total: allCompleted.length,
+        total: all.length,
         avgScore,
         streak,
-        upcoming: allExams.length + (upcoming || []).length,
+        upcoming: allExams.length,
       });
       setRecent(recent || []);
-      setUpcoming(upcoming || []);
       setUpcomingExams(allExams);
       setDomains(domainScores);
       setLoading(false);
