@@ -45,7 +45,7 @@ export function SessionWelcome({ sessionType = 'practice', setActiveTab, onStart
 
       {/* Title */}
       <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-8">
-        Welcome to your MeduPal Clinical Session
+        Welcome to your Xpatient Clinical Session
       </h1>
 
       {/* Instructions box */}

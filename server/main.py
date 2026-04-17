@@ -1,14 +1,16 @@
 """
 STT server: capture audio from browser (Web API) and transcribe with OpenAI Whisper.
-Patient replies via Ollama (Llama 3). Run: python -m uvicorn main:app --reload --port 8000
+Patient replies via Groq (OpenAI-compatible API), with Ollama fallback. Run: python -m uvicorn main:app --reload --port 8000
 """
 import asyncio
 import io
+import logging
 import os
 import random
 import shutil
 import tempfile
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 # Load .env from this directory before reading any env vars
 _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
@@ -25,6 +27,33 @@ from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
+
+
+def _get_env_from_file(filename: str, key: str) -> str:
+    """
+    Read a KEY=value pair from a dotenv-style file.
+    Supports optional surrounding single/double quotes.
+    """
+    try:
+        env_path = Path(__file__).resolve().parent.parent / filename
+        if not env_path.is_file():
+            return ""
+        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            if k.strip() != key:
+                continue
+            value = v.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+                value = value[1:-1]
+            return value.strip()
+    except Exception:
+        return ""
+    return ""
 
 # Case key resolution: display titles (and aliases) -> stable keys for persona/fallback lookup.
 # Align with TITLE_TO_MOCK_KEY in StudentPracticeFlow.jsx.
@@ -422,34 +451,36 @@ def _build_ollama_messages(
     return messages
 
 
-async def _groq_chat(
-    system: str,
-    current_question: str,
-    conversation_history: list[dict] | None = None,
-) -> str | None:
-    """Call Groq API (OpenAI-compatible). Returns reply or None on failure."""
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    messages = _build_ollama_messages(system, conversation_history, current_question)
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": GROQ_MODEL,
-        "messages": messages,
-        "max_tokens": 120,
-        "temperature": 0.7,
-    }
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            r = await client.post(url, json=payload, headers=headers)
-            r.raise_for_status()
-            return r.json()["choices"][0]["message"]["content"].strip()
-    except Exception as e:
-        print(f"[Groq error] {e}")
-        if hasattr(e, "response"):
-            print(f"[Groq response] {e.response.text}")  # type: ignore[union-attr]
-    return None
+GROQ_CHAT_URL = os.getenv(
+    "GROQ_CHAT_COMPLETIONS_URL",
+    "https://api.groq.com/openai/v1/chat/completions",
+).strip()
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_TIMEOUT = float(os.getenv("GROQ_TIMEOUT", "60"))
+
+
+async def _groq_chat(messages: list[dict]) -> str:
+    """Call Groq chat completions. Returns assistant text or empty string. Raises on auth/HTTP failure."""
+    api_key = (
+        os.getenv("GROQ_API_KEY", "").strip()
+        or _get_env_from_file(".env.local", "GROQ_API_KEY")
+        or _get_env_from_file(".env", "GROQ_API_KEY")
+    )
+    if not api_key:
+        raise ValueError("GROQ_API_KEY is not set. Set it to use Groq; Ollama will be used as fallback.")
+    async with httpx.AsyncClient(timeout=GROQ_TIMEOUT) as client:
+        r = await client.post(
+            GROQ_CHAT_URL,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={"model": GROQ_MODEL, "messages": messages},
+        )
+        r.raise_for_status()
+        data = r.json()
+    choices = data.get("choices") or []
+    if not choices:
+        return ""
+    content = (choices[0].get("message") or {}).get("content")
+    return content.strip() if isinstance(content, str) and content.strip() else ""
 
 
 async def _ollama_chat(
@@ -488,10 +519,15 @@ async def _chat(
     current_question: str,
     conversation_history: list[dict] | None = None,
 ) -> str | None:
-    """Use Groq if configured, otherwise fall back to local Ollama."""
-    if GROQ_API_KEY:
-        return await _groq_chat(system, current_question, conversation_history)
-    return await _ollama_chat(system, current_question, conversation_history)
+    """Try Groq first, fall back to local Ollama."""
+    messages = _build_ollama_messages(system, conversation_history, current_question)
+    try:
+        text = await _groq_chat(messages)
+        if text:
+            return text
+    except Exception as e:
+        logger.warning("Groq failed: %s; falling back to Ollama.", e)
+    return await _ollama_chat(system, current_question, conversation_history=conversation_history)
 
 
 @app.post("/tts")
@@ -566,20 +602,11 @@ async def tts(body: TTSRequest):
 
 @app.post("/patient-reply")
 async def patient_reply(body: PatientReplyRequest):
-    """
-    Generate a patient reply using Ollama (llama3.2).
-    - Uses the rich patient system_prompt from patients.js when provided.
-    - Retrieves relevant RAG context from Supabase (nomic-embed-text embeddings).
-    - Falls back to legacy PATIENT_PERSONAS if no patient system_prompt supplied.
-    """
+    """Generate a patient reply using Groq (falls back to Ollama, then canned replies)."""
     current_question = body.student_question.strip()
 
-    # 1. Determine base system prompt
+    # Build system prompt — prefer rich persona from patients.js, fall back to legacy dict
     if body.system_prompt.strip():
-        # Use the detailed patient persona from patients.js (preferred path)
-        base_system = body.system_prompt.strip()
-
-        # Append OSCE behavioural rules (the patients.js prompts don't include these)
         osce_rules = (
             "\n\nOSCE session rules: You are being interviewed by a medical student who is learning to diagnose. "
             "Your goal is to help them reach the correct diagnosis through your answers — but do NOT name the diagnosis yourself. "
@@ -593,29 +620,17 @@ async def patient_reply(body: PatientReplyRequest):
             "*coughs*, *sighs*, *laughs*, *gasps*, *clears throat*, *winces*, *groans*, *chuckles* — "
             "only when it genuinely fits. Use at most one per reply. Do not modify or expand them."
         )
-        base_system = base_system + osce_rules
+        system = body.system_prompt.strip() + osce_rules
     else:
-        # Legacy fallback: use old case-based PATIENT_PERSONAS dict
         case_key = resolve_case_key(body.case_id, body.case_title)
         persona = PATIENT_PERSONAS.get(case_key)
         title = body.case_title or body.case_id.replace("-", " ").title()
-        base_system = _build_system_prompt(
+        system = _build_system_prompt(
             case_key, persona, title, body.case_category or "", body.symptoms or []
         )
 
-    # RAG retrieval disabled at inference time — requires a dedicated embedding server
-    # (Ollama model-swapping between nomic-embed-text and llama3.2 causes timeouts).
-    # The patient system_prompt already contains full persona context.
-    system = base_system
+    text = await _chat(system, current_question, conversation_history=body.conversation_history)
 
-    # 3. Call LLM (Groq if configured, otherwise local Ollama)
-    text = await _chat(
-        system,
-        current_question,
-        conversation_history=body.conversation_history,
-    )
-
-    # 4. Fallback to canned reply if Ollama is unavailable
     if not text:
         case_key = resolve_case_key(body.case_id, body.case_title)
         text = _fallback_reply(case_key)

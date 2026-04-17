@@ -34,6 +34,7 @@ import {
 import { cn } from '../../lib/utils';
 import { supabase } from '../../lib/supabase';
 import { selectPatientForCase } from '../../data/patients';
+import { useAuth } from '../../context/AuthContext';
 import {
     getPatientReplyApiUrl,
     getSttApiUrl,
@@ -228,6 +229,8 @@ const PHYSICAL_RUBRIC_CRITERIA = [
 ];
 
 function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
+    const { user } = useAuth();
+
     const [currentStep, setCurrentStep] = useState(standaloneHistoryOnly ? 1 : 0);
     const [selectedCase, setSelectedCase] = useState(null);
     const [selectedPatient, setSelectedPatient] = useState(null);
@@ -275,6 +278,9 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
     // Completion screen states
     const [showCompletionScreen, setShowCompletionScreen] = useState(false);
     const [countdown, setCountdown] = useState(10);
+    const [isSavingSession, setIsSavingSession] = useState(false);
+    const [saveError, setSaveError] = useState(null);
+    const [sessionStartedAt] = useState(() => new Date().toISOString());
 
     const chatEndRef = useRef(null);
     const countdownRef = useRef(null);
@@ -283,6 +289,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
     const mockRecordingTimeoutRef = useRef(null);
     const fwRecordingRef = useRef(null);
     const preferredVoiceRef = useRef(null);
+    const sessionIdRef = useRef(null);
 
     useEffect(() => {
         const pickVoice = () => {
@@ -541,6 +548,24 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         return transcripts[Math.floor(Math.random() * transcripts.length)];
     }, [selectedCase, getCaseMockKey]);
 
+    const reportSttIssue = useCallback((message, error = null) => {
+        if (error) {
+            console.error('[STT] Error response:', error);
+        }
+        setMessages(prev => [...prev, { role: 'alert', content: message, ts: Date.now() }]);
+    }, []);
+
+    const applySttTranscript = useCallback((text) => {
+        const transcript = typeof text === 'string' ? text : '';
+        console.log('[STT] raw transcript:', transcript);
+        console.log('[STT] transcript length:', transcript.length);
+        setInputValue(transcript);
+        setLastTranscript(transcript);
+        if (!transcript.trim()) {
+            reportSttIssue('No speech was detected. Please try again and speak clearly.');
+        }
+    }, [reportSttIssue]);
+
     const toggleRecording = useCallback(() => {
         if (isRecording) {
             // Stopping: either Faster-Whisper recording or browser SpeechRecognition
@@ -550,15 +575,11 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                 controller.stop()
                     .then((blob) => sendAudioToSttApi(blob))
                     .then(({ text }) => {
-                        const transcript = text || getMockTranscript();
-                        setInputValue(transcript);
-                        setLastTranscript(transcript);
+                        applySttTranscript(text);
                         setIsRecording(false);
                     })
-                    .catch(() => {
-                        const mock = getMockTranscript();
-                        setInputValue(mock);
-                        setLastTranscript(mock);
+                    .catch((error) => {
+                        reportSttIssue('Speech transcription failed. Check your STT server and try again.', error);
                         setIsRecording(false);
                     });
                 return;
@@ -583,15 +604,11 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                 ctrl.stop()
                     .then((blob) => sendAudioToSttApi(blob))
                     .then(({ text }) => {
-                        const transcript = text || getMockTranscript();
-                        setInputValue(transcript);
-                        setLastTranscript(transcript);
+                        applySttTranscript(text);
                         setIsRecording(false);
                     })
-                    .catch(() => {
-                        const mock = getMockTranscript();
-                        setInputValue(mock);
-                        setLastTranscript(mock);
+                    .catch((error) => {
+                        reportSttIssue('Speech transcription failed. Check your STT server and try again.', error);
                         setIsRecording(false);
                     });
             };
@@ -600,11 +617,9 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                 .then(() => {
                     fwRecordingRef.current = controller;
                 })
-                .catch(() => {
+                .catch((error) => {
                     setIsRecording(false);
-                    const mockText = getMockTranscript();
-                    setInputValue(mockText);
-                    setLastTranscript(mockText);
+                    reportSttIssue('Microphone access failed. Please allow microphone permissions and retry.', error);
                 });
             return;
         }
@@ -655,7 +670,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                 setIsRecording(false);
             }, 1500);
         }
-    }, [isRecording, getMockTranscript]);
+    }, [isRecording, getMockTranscript, applySttTranscript, reportSttIssue]);
 
     // Cleanup speech recognition, Faster-Whisper recording, and synthesis on unmount
     useEffect(() => {
@@ -709,9 +724,208 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         };
     }, [showCompletionScreen, onExit]);
 
-    const handleFinishSession = useCallback(() => {
-        setShowCompletionScreen(true);
+    // Compute history score (same logic as step 2 evaluation UI)
+    const computeHistoryScore = useCallback(() => {
+        const aiChecklist = {
+            hpi: true,
+            pmh: true,
+            meds: true,
+            allergies: false,
+            socialHistory: true
+        };
+        const checklistCompleted = Object.values(aiChecklist).filter(Boolean).length;
+        const aiRubricScores = {
+            communication: 2,
+            structure: 2,
+            safety: 1,
+            clinicalReasoning: 2,
+            professionalism: 2
+        };
+        const rubricTotal = Object.values(aiRubricScores).reduce((a, b) => a + b, 0);
+        let score = 0;
+        score += checklistCompleted * 0.5;
+        if (hasDeteriorated && redFlagRecognized) score += 1.5;
+        if (selectedDiagnosis === selectedCase?.id) score += 1.5;
+        score += (rubricTotal / 10) * 4.5;
+        return Math.min(10, Math.round(score * 10) / 10);
+    }, [hasDeteriorated, redFlagRecognized, selectedDiagnosis, selectedCase?.id]);
+
+    // Compute physical score (same logic as step 4 evaluation UI)
+    const computePhysicalScore = useCallback(() => {
+        const caseKey = getCaseMockKey(selectedCase);
+        const requirements = REQUIRED_ZONES_BY_CASE[caseKey] || REQUIRED_ZONES_BY_CASE['pneumonia'];
+        const examinedZoneIds = examLog
+            .map((entry) => {
+                const zone = BODY_ZONES.find((z) => z.label === entry.zone);
+                return zone?.id;
+            })
+            .filter(Boolean);
+        const coveredRequiredZones = requirements.zones.filter((zoneId) => examinedZoneIds.includes(zoneId));
+        const coverageComplete = coveredRequiredZones.length >= requirements.minRequired;
+        const aiPhysicalRubric = {
+            technique: 2,
+            coverage: coverageComplete ? 2 : 1,
+            infectionControl: 2,
+            interpretation: 2,
+            communication: 1
+        };
+        const physicalRubricTotal = Object.values(aiPhysicalRubric).reduce((a, b) => a + b, 0);
+        const aiPhysicalChecklist = {
+            inspection: true,
+            palpation: true,
+            percussion: false,
+            auscultation: examinedZoneIds.length > 0
+        };
+        const physicalChecklistCompleted = Object.values(aiPhysicalChecklist).filter(Boolean).length;
+        let score = 0;
+        score += (coveredRequiredZones.length / requirements.zones.length) * 3;
+        score += (physicalRubricTotal / 10) * 4.5;
+        score += (physicalChecklistCompleted / 4) * 2.5;
+        return Math.min(10, Math.round(score * 10) / 10);
+    }, [selectedCase, getCaseMockKey, examLog]);
+
+    // Create session row if not yet created; returns session_id.
+    const ensureSessionCreated = useCallback(async () => {
+        if (sessionIdRef.current) return sessionIdRef.current;
+        if (!user?.id) return null;
+        const insertPayload = {
+            station_id: null,
+            case_id: selectedCase?.id || null,
+            student_id: user.id,
+            examiner_id: user.id,
+            start_time: sessionStartedAt,
+            end_time: null,
+            status: 'In Progress',
+            session_type: 'practice',
+            score: null,
+            feedback_notes: null
+        };
+        try {
+            const { data: created, error } = await supabase
+                .from('sessions')
+                .insert([insertPayload])
+                .select('id')
+                .single();
+            if (error) throw error;
+            if (created?.id) {
+                sessionIdRef.current = created.id;
+                return created.id;
+            }
+        } catch (err) {
+            const { session_type: _t, ...rest } = insertPayload;
+            const { data: created, error } = await supabase
+                .from('sessions')
+                .insert([{ ...rest, type: 'practice' }])
+                .select('id')
+                .single();
+            if (error) throw error;
+            if (created?.id) {
+                sessionIdRef.current = created.id;
+                return created.id;
+            }
+        }
+        return null;
+    }, [user?.id, selectedCase?.id, sessionStartedAt]);
+
+    // Insert/upsert skill score into session_scores. Uses upsert to avoid duplicates when re-submitting.
+    const insertSessionScore = useCallback(async (sessionId, skillType, score) => {
+        if (!sessionId || !skillType) return;
+        const row = { session_id: sessionId, skill_type: skillType, score: Math.round(score) };
+        await supabase
+            .from('session_scores')
+            .upsert(row, { onConflict: 'session_id,skill_type' });
     }, []);
+
+    const handleFinishSession = async () => {
+        if (isSavingSession) return;
+        setIsSavingSession(true);
+        setSaveError(null);
+
+        try {
+            // If we don't have an authenticated user (or can't identify one), we still allow the UX flow.
+            if (!user?.id) {
+                setShowCompletionScreen(true);
+                return;
+            }
+
+            const historyScore = computeHistoryScore();
+            const physicalScore = computePhysicalScore();
+
+            const caseKey = getCaseMockKey(selectedCase);
+            const requirements = REQUIRED_ZONES_BY_CASE[caseKey] || REQUIRED_ZONES_BY_CASE['pneumonia'];
+            const examinedZoneIds = examLog
+                .map((entry) => {
+                    const zone = BODY_ZONES.find((z) => z.label === entry.zone);
+                    return zone?.id;
+                })
+                .filter(Boolean);
+            const coveredRequiredZones = requirements.zones.filter((zoneId) => examinedZoneIds.includes(zoneId));
+            const coverageComplete = coveredRequiredZones.length >= requirements.minRequired;
+
+            const historyFeedback = (() => {
+                if (hasDeteriorated && !redFlagRecognized) {
+                    return 'Important: You missed the SpO₂ deterioration. Always monitor vitals closely!';
+                }
+                if (historyScore >= 8) return 'Excellent history taking! You covered all key areas systematically.';
+                if (historyScore >= 6) return 'Good history structure. Consider being more thorough with social history.';
+                if (historyScore >= 4) return 'Adequate attempt. Remember to always check allergies and medications.';
+                return 'Keep practicing. Try to cover all OSCE checklist items systematically.';
+            })();
+
+            const physicalFeedback = (() => {
+                if (examLog.length === 0) {
+                    return 'No physical examination was performed. Remember to examine relevant body zones.';
+                }
+                if (coverageComplete) {
+                    return `Good coverage of ${requirements.label}. Systematic approach demonstrated.`;
+                }
+                return `Partial coverage. Remember to examine ${requirements.label} for this case.`;
+            })();
+
+            const nowIso = new Date().toISOString();
+            const feedbackNotes = `History feedback: ${historyFeedback}\nPhysical feedback: ${physicalFeedback}`;
+
+            // 1) Ensure same session_id for all scores (do NOT create new session_id)
+            let sessionId = await ensureSessionCreated();
+            if (!sessionId) sessionId = sessionIdRef.current;
+            if (!sessionId) throw new Error('Failed to create or retrieve session row.');
+
+            // 2) Insert skill scores into session_scores (same session_id)
+            await insertSessionScore(sessionId, 'history_taking', historyScore);
+            await insertSessionScore(sessionId, 'physical_examination', physicalScore);
+
+            // 3) Fetch all scores for this session
+            const { data: scoreRows } = await supabase
+                .from('session_scores')
+                .select('score')
+                .eq('session_id', sessionId);
+
+            // 4) Calculate total/average score (only aggregate same session_id)
+            const scores = (scoreRows || []).map((r) => r.score).filter((n) => n != null);
+            const avgScore = scores.length > 0
+                ? scores.reduce((sum, s) => sum + s, 0) / scores.length
+                : ((historyScore + physicalScore) / 2); // fallback if fetch empty
+            // Scale 0–10 → 0–100 for sessions.score
+            const sessionScore = Math.round(avgScore * 10);
+
+            // 5) Update sessions table
+            await supabase
+                .from('sessions')
+                .update({
+                    end_time: nowIso,
+                    score: sessionScore,
+                    status: 'Completed',
+                    feedback_notes: feedbackNotes
+                })
+                .eq('id', sessionId);
+        } catch (err) {
+            console.error('Failed to persist session scores:', err);
+            setSaveError(err?.message || 'Failed to save session scores');
+        } finally {
+            setIsSavingSession(false);
+            setShowCompletionScreen(true);
+        }
+    };
 
     const handleReturnNow = useCallback(() => {
         if (countdownRef.current) {
@@ -755,7 +969,39 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         }));
     }, []);
 
-    const goNext = () => {
+    const triggerAutoDeteriorationInternal = () => {
+        if (hasDeteriorated) return;
+        setHasDeteriorated(true);
+        setIsDeteriorating(true);
+        setPatientStatus(prev => ({
+            ...prev,
+            spO2: 88,
+            respiratoryRate: 28,
+            heartRate: '102 bpm'
+        }));
+        setMessages(prev => [...prev, {
+            role: 'alert',
+            content: 'Patient condition worsening! SpO₂ dropping rapidly.'
+        }]);
+    };
+
+    const triggerDeterioration = () => {
+        if (hasDeteriorated) return;
+        triggerAutoDeteriorationInternal();
+    };
+
+    const goNext = async () => {
+        if (currentStep === 2 && user?.id) {
+            try {
+                const sid = await ensureSessionCreated();
+                if (sid) {
+                    const historyScore = computeHistoryScore();
+                    await insertSessionScore(sid, 'history_taking', historyScore);
+                }
+            } catch (err) {
+                console.error('Failed to save history score:', err);
+            }
+        }
         if (currentStep < STEPS.length - 1) setCurrentStep(currentStep + 1);
     };
 
@@ -2849,10 +3095,15 @@ FEEDBACK: ${getFeedback()}
                                 </button>
                                 <button
                                     onClick={handleFinishSession}
-                                    className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-all hover:scale-105 hover:shadow-lg hover:shadow-primary/20"
+                                    disabled={isSavingSession}
+                                    className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-all hover:scale-105 hover:shadow-lg hover:shadow-primary/20 disabled:opacity-70 disabled:cursor-not-allowed"
                                 >
+                                    {isSavingSession ? (
+                                        <Activity size={16} className="animate-spin" />
+                                    ) : (
+                                        <ChevronRight size={16} />
+                                    )}
                                     Finish Practice Session
-                                    <ChevronRight size={16} />
                                 </button>
                             </div>
                         </div>
@@ -2880,13 +3131,18 @@ FEEDBACK: ${getFeedback()}
                             
                             {/* Subtitle */}
                             <p className="text-lg text-primary mb-2">
-                                Thank you for using MeduPal
+                                Thank you for using Xpatient
                             </p>
                             
                             {/* Description */}
                             <p className="text-sm text-muted-foreground mb-8">
                                 Your practice session has been recorded successfully.
                             </p>
+                            {saveError && (
+                                <p className="text-sm text-destructive mb-4">
+                                    {saveError}
+                                </p>
+                            )}
                             
                             {/* Countdown */}
                             <div className="mb-6">

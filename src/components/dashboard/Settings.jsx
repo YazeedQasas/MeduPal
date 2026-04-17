@@ -30,7 +30,7 @@ export function Settings({ setActiveTab }) {
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-foreground">Settings</h1>
-                    <p className="text-muted-foreground mt-1">Configure your MeduPal experience and system preferences.</p>
+                    <p className="text-muted-foreground mt-1">Configure your Xpatient experience and system preferences.</p>
                 </div>
                 <div className="flex gap-2">
                     <button className="flex items-center gap-2 bg-muted hover:bg-muted/80 text-foreground px-4 py-2 rounded-lg font-medium transition-colors border border-border text-sm">

@@ -6,6 +6,7 @@ import student4 from '../../assets/Student_4.jpg';
 import dashboardImg from '../../assets/Dashboard.png';
 import DisplayCards from '../ui/DisplayCards';
 import { Footer } from '../ui/FooterSection';
+import { MedicalCrossIcon } from '../ui/MedicalCrossIcon';
 import { ContactFormSection } from '../ui/ContactFormSection';
 import { BentoGridBlock } from '../ui/BentoGridBlock';
 import { InteractiveGlobe } from '../ui/InteractiveGlobe';
@@ -351,17 +352,14 @@ export default function LandingPage({ setActiveTab }) {
         <div className="flex items-center justify-between">
 
           {/* ── FAR LEFT: logo ── */}
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <div className="w-[28px] h-[28px] rounded-full flex items-center justify-center" style={{
-              background: 'linear-gradient(135deg, rgba(100,170,145,0.35), rgba(60,120,100,0.15))',
-              boxShadow: '0 0 12px rgba(100,170,145,0.15)',
+          <div className="flex items-center gap-0.5 flex-shrink-0">
+            <div className="w-[28px] h-[28px] rounded-full flex items-center justify-center -mr-1" style={{
+              background: 'rgba(16,185,129,0.15)',
+              boxShadow: '0 0 12px rgba(16,185,129,0.2)',
             }}>
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-                <path d="M8 2.5 C5 2.5 2.5 5 2.5 8 C2.5 11 5 13.5 8 13.5 C10.2 13.5 12.1 12.2 13 10.3" stroke="rgba(200,235,220,0.9)" strokeWidth="1.5" strokeLinecap="round" fill="none"/>
-                <path d="M8 5.5 C6.3 5.5 5 6.8 5 8.5 C5 10.1 6.3 11.4 8 11.4 C9.1 11.4 10 10.8 10.5 9.9" stroke="rgba(200,235,220,0.9)" strokeWidth="1.5" strokeLinecap="round" fill="none"/>
-              </svg>
+              <MedicalCrossIcon size={14} color="#10b981" />
             </div>
-            <span className="text-[13px] font-semibold tracking-tight text-white/85">MeduPal</span>
+            <span className="text-[13px] font-semibold tracking-tight text-white/85">patient</span>
           </div>
 
           {/* ── CENTER: floating nav links ── */}
@@ -688,7 +686,7 @@ export default function LandingPage({ setActiveTab }) {
                   aspectRatio: '16/9',
                   position: 'relative',
                 }}>
-                  <img src={dashboardImg} alt="MeduPal Dashboard" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                  <img src={dashboardImg} alt="Xpatient Dashboard" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                   <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: 'linear-gradient(165deg, rgba(255,255,255,0.025) 0%, transparent 35%)' }} />
                 </div>
               </div>
@@ -778,7 +776,7 @@ export default function LandingPage({ setActiveTab }) {
               </span>
             </h2>
             <p className="text-white/50 leading-loose mb-8 max-w-lg">
-              Where you study shouldn&apos;t limit how well you prepare. MeduPal gives every student access to the same high-quality OSCE practice and AI feedback.
+              Where you study shouldn&apos;t limit how well you prepare. Xpatient gives every student access to the same high-quality OSCE practice and AI feedback.
             </p>
             <button
               type="button"
