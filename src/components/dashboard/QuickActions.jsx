@@ -38,6 +38,34 @@ function ActionCard({ icon: Icon, label, sub, onClick, disabled, highlight, isGl
   );
 }
 
+/** Compact tile for dashboard grid — not a full-width app strip */
+function GridActionTile({ icon: Icon, label, onClick, disabled, highlight }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        'group flex flex-col items-center justify-center gap-2 rounded-xl p-3 text-center transition-all duration-200',
+        'border bg-white/[0.03] hover:bg-white/[0.06] disabled:opacity-45 disabled:pointer-events-none',
+        highlight
+          ? 'border-emerald-500/35 shadow-[0_0_20px_rgba(16,185,129,0.12)]'
+          : 'border-white/10 hover:border-white/14'
+      )}
+    >
+      <div
+        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition-transform group-hover:scale-105"
+        style={{ background: DASHBOARD_THEME.accentBg, color: DASHBOARD_THEME.accent }}
+      >
+        <Icon size={20} strokeWidth={2} />
+      </div>
+      <span className="text-[11px] sm:text-xs font-medium leading-snug line-clamp-2" style={{ color: DASHBOARD_THEME.text }}>
+        {label}
+      </span>
+    </button>
+  );
+}
+
 function IconActionCard({ icon: Icon, label, onClick, disabled, highlight, chromeless, inlineLabel }) {
   return (
     <button
@@ -87,6 +115,10 @@ export function QuickActions({
   highlightAssign,
   iconOnly,
   oneRow,
+  /** Use a contained card grid instead of a list or horizontal icon strip */
+  layout,
+  /** Strip outer card chrome (e.g. inside a parent tab panel on the instructor rail) */
+  embedded,
 } = {}) {
   const isGlass = variant === 'glass';
 
@@ -107,6 +139,47 @@ export function QuickActions({
   const effectiveContainerClass = isTopStrip
     ? 'flex flex-col gap-2'
     : containerClass;
+
+  if (layout === 'grid') {
+    const gridWrap = (
+      <>
+        {!embedded && (
+          <div>
+            <h3 className="text-sm font-semibold tracking-tight" style={{ color: DASHBOARD_THEME.text }}>
+              Quick actions
+            </h3>
+            <p className="text-xs mt-1" style={{ color: DASHBOARD_THEME.muted }}>
+              Jump to common instructor tasks
+            </p>
+          </div>
+        )}
+        <div className={cn('grid gap-3', embedded ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-3')}>
+          <GridActionTile
+            icon={FileCheck}
+            label="Assign exam"
+            onClick={onAssignExam}
+            disabled={!onAssignExam}
+            highlight={highlightAssign}
+          />
+          <GridActionTile icon={Users} label="Students" onClick={onManageStudents} disabled={!onManageStudents} />
+          <GridActionTile icon={BarChart2} label="Cases & analytics" onClick={onViewAnalytics} disabled={!onViewAnalytics} />
+          <GridActionTile icon={Activity} label="Hardware" onClick={onRunDiagnostics} disabled={!onRunDiagnostics} />
+          <GridActionTile icon={Settings2} label="Settings" onClick={onOpenSettings} disabled={!onOpenSettings} />
+          <GridActionTile icon={UserCircle2} label="Profile" onClick={onOpenProfile} disabled={!onOpenProfile} />
+        </div>
+      </>
+    );
+
+    if (embedded) {
+      return <div className="flex flex-col gap-3">{gridWrap}</div>;
+    }
+
+    return (
+      <div className="rounded-2xl p-5 flex flex-col gap-4" style={{ ...glassCardGlowStyle }}>
+        {gridWrap}
+      </div>
+    );
+  }
 
   return (
     <div className={effectiveContainerClass} style={effectiveContainerStyle}>
