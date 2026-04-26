@@ -36,7 +36,6 @@ import {
   AlertCircle,
   Trophy,
   Loader2,
-  RefreshCw,
   Play,
   Plus,
   Maximize2,
@@ -46,9 +45,6 @@ import {
   Sparkles,
   MoreHorizontal,
   ClipboardCheck,
-  Square,
-  CheckSquare2,
-  Trash2,
   CheckCircle2,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
@@ -69,6 +65,18 @@ const P = {
 };
 
 const CHART_COLORS = ['#60a5fa', '#6ee7b7', '#a78bfa', '#f472b6', '#fb923c'];
+
+/** Rotating teaching-focus lines (aligned with StudentHub daily tips pattern) */
+const INSTRUCTOR_PLAN_TIPS = [
+  'Block time to review at-risk advisees before afternoon sessions.',
+  'Skim case notes for the next session so feedback is specific.',
+  'Check hardware diagnostics if you have exams running today.',
+  'Triage pending exam assignments before new requests pile up.',
+  'Scan the roster for a week of inactivity — a short message helps.',
+  'Balance new assignments with students who still need follow-up.',
+  'End the day by logging outcomes — trends are easier to spot early.',
+];
+
 const GLASS_STRONG = {
   background: '#060909',
   border: '1px solid rgba(255,255,255,0.1)',
@@ -78,11 +86,17 @@ const GLASS_STRONG = {
 };
 
 /** Profile card (right rail) — mirrors StudentHub `StudentProfileCard` for instructors */
-function InstructorProfileCard({ displayName, stats, loading, onGoToProfile, suggestions = [] }) {
+function InstructorProfileCard({ displayName, stats, loading, onGoToProfile }) {
   const initials = (displayName || '?').slice(0, 2).toUpperCase();
   const avgPct = stats.avgClassPct != null ? Math.min(100, Math.max(0, stats.avgClassPct)) : null;
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
+  const scorePct = avgPct != null ? avgPct / 100 : 0;
+
+  const R = 44;
+  const STROKE = 4;
+  const circ = 2 * Math.PI * R;
+  const dash = circ * scorePct;
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -94,14 +108,9 @@ function InstructorProfileCard({ displayName, stats, loading, onGoToProfile, sug
   }, [menuOpen]);
 
   return (
-    <div
-      className="rounded-2xl p-6 transition-all duration-300 hover:-translate-y-0.5"
-      style={{ ...GLASS_STRONG }}
-    >
-      <div className="flex items-center justify-between mb-4 pb-3" style={{ borderBottom: `1px solid ${P.border}` }}>
-        <span className="text-[11px] uppercase tracking-[0.16em] font-semibold" style={{ color: P.muted }}>
-          Instructor Profile
-        </span>
+    <div className="rounded-2xl p-5" style={{ background: P.card, border: `1px solid ${P.border}`, boxShadow: P.shadow }}>
+      <div className="flex items-center justify-between mb-4">
+        <span className="text-sm font-bold" style={{ color: P.text }}>Profile</span>
         <div className="relative" ref={menuRef}>
           <button
             type="button"
@@ -117,7 +126,7 @@ function InstructorProfileCard({ displayName, stats, loading, onGoToProfile, sug
             <div
               role="menu"
               className="absolute right-0 mt-2 w-40 rounded-xl overflow-hidden z-20"
-              style={{ background: 'rgba(10,14,20,0.92)', border: `1px solid ${P.border}`, boxShadow: P.shadow, backdropFilter: 'blur(10px)' }}
+              style={{ background: P.card, border: `1px solid ${P.border}`, boxShadow: P.shadow }}
             >
               <button
                 type="button"
@@ -136,105 +145,116 @@ function InstructorProfileCard({ displayName, stats, loading, onGoToProfile, sug
         </div>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-col items-center">
         <button
           type="button"
           onClick={() => onGoToProfile?.()}
-          className="w-14 h-14 rounded-xl flex items-center justify-center text-lg font-bold shrink-0"
+          className="relative w-24 h-24 mb-3 rounded-full"
           style={{ outline: 'none' }}
           aria-label="Go to profile"
         >
-          <div className="w-full h-full rounded-xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, rgba(59,130,246,0.22), rgba(110,231,183,0.2))', color: '#d1fae5', border: '1px solid rgba(110,231,183,0.28)' }}>
+          <svg className="absolute inset-0" width="96" height="96" viewBox="0 0 96 96">
+            <circle cx="48" cy="48" r={R} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth={STROKE} />
+            <circle
+              cx="48"
+              cy="48"
+              r={R}
+              fill="none"
+              stroke={P.accent}
+              strokeWidth={STROKE}
+              strokeDasharray={`${dash} ${circ}`}
+              strokeLinecap="round"
+              transform="rotate(-90 48 48)"
+            />
+          </svg>
+          <div className="absolute inset-[8px] rounded-full flex items-center justify-center text-xl font-bold" style={{ background: 'rgba(110,231,183,0.15)', color: P.accent }}>
             {initials}
           </div>
-        </button>
-        <div className="min-w-0">
-          <p className="font-semibold text-base leading-tight truncate" style={{ color: P.text }}>
-            {displayName}
-          </p>
-          <p className="text-xs mt-1" style={{ color: P.muted }}>
-            Clinical Instructor
-          </p>
-          <div className="mt-2 flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#22c55e' }} />
-            <p className="text-[11px]" style={{ color: P.muted }}>Online</p>
+          <div className="absolute bottom-0 right-0 w-6 h-6 rounded-full flex items-center justify-center" style={{ background: P.accent }}>
+            <span style={{ color: '#0a0a0a', fontSize: 11, fontWeight: 700 }}>★</span>
           </div>
-        </div>
-        <div className="ml-auto text-right">
-          <span
-            className="text-[10px] font-semibold px-2 py-1 rounded-md"
-            style={{ background: 'rgba(59,130,246,0.15)', border: '1px solid rgba(59,130,246,0.28)', color: '#93c5fd' }}
-          >
-            Instructor
-          </span>
-          <p className="text-[11px] mt-2" style={{ color: P.muted }}>
-            {loading ? '—' : `${stats.advisees ?? 0} advisees`}
-          </p>
-        </div>
+        </button>
+
+        <p className="font-bold text-base leading-tight text-center" style={{ color: P.text }}>{displayName}</p>
+        <p className="text-xs mt-0.5" style={{ color: P.muted }}>Instructor</p>
       </div>
 
-      <div className="mt-4 rounded-xl px-3 py-3" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', backdropFilter: 'blur(12px)' }}>
-        <p className="text-[10px] uppercase tracking-[0.18em] font-semibold mb-2.5" style={{ color: '#93c5fd' }}>
-          Suggestions
-        </p>
-        <div className="space-y-2">
-          {suggestions.slice(0, 2).map((item) => (
-            <button
-              key={item.title}
-              type="button"
-              onClick={item.onClick}
-              className="w-full text-left rounded-lg px-2.5 py-2.5 transition-colors hover:bg-white/5"
-              style={{ background: 'linear-gradient(135deg, rgba(59,130,246,0.12), rgba(168,85,247,0.1))', border: '1px solid rgba(255,255,255,0.1)', backdropFilter: 'blur(10px)' }}
-            >
-              <p className="text-xs font-semibold" style={{ color: P.text }}>{item.title}</p>
-              <p className="text-[11px] mt-0.5" style={{ color: P.muted }}>{item.note}</p>
-            </button>
-          ))}
-          {suggestions.length === 0 && (
-            <div className="rounded-lg px-2.5 py-2 text-xs" style={{ color: P.muted, background: 'rgba(255,255,255,0.03)' }}>
-              No suggestions available.
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div
-        className="mt-5 grid grid-cols-3 gap-2 pt-4"
-        style={{ borderTop: `1px solid ${P.border}` }}
-      >
-        <div className="rounded-lg px-2 py-2 text-center" style={{ background: 'rgba(79,142,247,0.08)', border: '1px solid rgba(79,142,247,0.2)' }}>
-          <div className="flex items-center justify-center gap-1">
+      <div className="mt-5 flex items-center justify-around pt-4" style={{ borderTop: `1px solid ${P.border}` }}>
+        <div className="flex flex-col items-center gap-1">
+          <div className="flex items-center gap-1">
             <Users size={13} style={{ color: '#4f8ef7' }} />
             <span className="text-sm font-bold" style={{ color: P.text }}>
               {loading ? '—' : stats.advisees ?? 0}
             </span>
           </div>
-          <span className="text-[9px] uppercase tracking-wider" style={{ color: '#93c5fd' }}>
+          <span className="text-[9px] uppercase tracking-wider" style={{ color: P.muted }}>
             Advisees
           </span>
         </div>
-        <div className="rounded-lg px-2 py-2 text-center" style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)' }}>
-          <div className="flex items-center justify-center gap-1">
+        <div className="w-px h-8" style={{ background: P.border }} />
+        <div className="flex flex-col items-center gap-1">
+          <div className="flex items-center gap-1">
             <ClipboardCheck size={13} style={{ color: P.accent }} />
             <span className="text-sm font-bold" style={{ color: P.text }}>
               {loading ? '—' : avgPct != null ? `${avgPct}%` : '—'}
             </span>
           </div>
-          <span className="text-[9px] uppercase tracking-wider" style={{ color: '#6ee7b7' }}>
+          <span className="text-[9px] uppercase tracking-wider" style={{ color: P.muted }}>
             Class avg
           </span>
         </div>
-        <div className="rounded-lg px-2 py-2 text-center" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }}>
-          <div className="flex items-center justify-center gap-1">
+        <div className="w-px h-8" style={{ background: P.border }} />
+        <div className="flex flex-col items-center gap-1">
+          <div className="flex items-center gap-1">
             <Calendar size={13} style={{ color: '#f59e0b' }} />
             <span className="text-sm font-bold" style={{ color: P.text }}>
               {loading ? '—' : stats.upcoming ?? 0}
             </span>
           </div>
-          <span className="text-[9px] uppercase tracking-wider" style={{ color: '#fcd34d' }}>
+          <span className="text-[9px] uppercase tracking-wider" style={{ color: P.muted }}>
             Upcoming
           </span>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** Compact “today’s plan” strip — replaces a large greeting (StudentHub-style date + tailored copy) */
+function InstructorTodaysPlanCard({ dateLine, firstName, summaryLine, focusTip, onAssignExam }) {
+  return (
+    <div
+      className="rounded-xl border px-3.5 py-2.5 sm:px-4 sm:py-3"
+      style={{ background: P.card, borderColor: P.border, boxShadow: P.shadow }}
+    >
+      <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+        <div className="min-w-0 space-y-1">
+          <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: P.accent }}>
+            {dateLine}
+          </p>
+          <p className="text-sm font-semibold leading-tight" style={{ color: P.text }}>
+            Today&apos;s plan{' '}
+            <span className="font-normal" style={{ color: P.muted }}>
+              · {firstName}
+            </span>
+          </p>
+          <p className="text-xs leading-snug line-clamp-2" style={{ color: P.muted }}>
+            {summaryLine}
+          </p>
+          <p className="text-[11px] leading-snug flex items-start gap-1.5 pt-1 mt-0.5 border-t" style={{ borderColor: P.border, color: P.tagText }}>
+            <Sparkles className="w-3.5 h-3.5 shrink-0 mt-0.5 opacity-80" style={{ color: P.accent }} />
+            <span>{focusTip}</span>
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onAssignExam}
+          className="shrink-0 inline-flex items-center justify-center gap-1.5 self-start rounded-lg px-3 py-1.5 text-xs font-semibold transition-opacity hover:opacity-90"
+          style={{ background: P.accent, color: '#0a0a0a' }}
+        >
+          <FileCheck size={13} strokeWidth={2.5} />
+          Assign exam
+        </button>
       </div>
     </div>
   );
@@ -306,12 +326,12 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
   const [caseSearch, setCaseSearch] = useState('');
   const [assignSubmitting, setAssignSubmitting] = useState(false);
   const [assignError, setAssignError] = useState('');
-  const [todoInput, setTodoInput] = useState('');
-  const [todoItems, setTodoItems] = useState([]);
   const [chartRange, setChartRange] = useState('14d');
   const [activityTab, setActivityTab] = useState('upcoming');
   const [opsTab, setOpsTab] = useState('ongoing');
   const [selectedSession, setSelectedSession] = useState(null);
+  /** Right rail: toggle quick actions vs student status (same slot below profile) */
+  const [instructorRailTab, setInstructorRailTab] = useState('actions');
 
   const formatTime = (iso) => {
     const d = new Date(iso);
@@ -609,23 +629,6 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
     }
   }, [upcomingSessions, selectedUpcomingId]);
 
-  useEffect(() => {
-    if (!user?.id) return;
-    try {
-      const raw = localStorage.getItem(`medupal_instructor_todos_${user.id}`);
-      if (raw) setTodoItems(JSON.parse(raw));
-    } catch (_) {
-      setTodoItems([]);
-    }
-  }, [user?.id]);
-
-  useEffect(() => {
-    if (!user?.id) return;
-    try {
-      localStorage.setItem(`medupal_instructor_todos_${user.id}`, JSON.stringify(todoItems));
-    } catch (_) {}
-  }, [todoItems, user?.id]);
-
   const filteredStudents = useMemo(() => {
     if (!studentSearch.trim()) return advisorStudents;
     const q = studentSearch.toLowerCase();
@@ -762,8 +765,6 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
   const hasNoActivity = assignmentsTrend.every((d) => d.count === 0) && leaderboard.length === 0;
   const shouldHighlightAssign = studentsWithoutExam.length > 0 && advisorStudents.length > 0;
 
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
   const instructorProfileStats = {
     advisees: advisorStudents.length,
     avgClassPct: avgPerformance > 0 ? avgPerformance : null,
@@ -804,42 +805,6 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
     name: s.full_name || s.email || 'Student',
     reason: s.daysInactive === 999 ? 'No recorded activity' : `${s.daysInactive} days inactive`,
   }));
-  const handleAddTodo = () => {
-    const text = todoInput.trim();
-    if (!text) return;
-    setTodoItems((prev) => [{ id: `${Date.now()}`, text, done: false }, ...prev]);
-    setTodoInput('');
-  };
-  const handleToggleTodo = (id) => {
-    setTodoItems((prev) => prev.map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
-  };
-  const handleDeleteTodo = (id) => {
-    setTodoItems((prev) => prev.filter((t) => t.id !== id));
-  };
-  const instructorSuggestions = [
-    studentsWithoutExam.length > 0
-      ? {
-          title: `Assign exams to ${studentsWithoutExam.length} student${studentsWithoutExam.length !== 1 ? 's' : ''}`,
-          note: 'Keep the weekly schedule complete and track readiness.',
-          onClick: () => setActiveTab('assign-exam'),
-        }
-      : {
-          title: 'Review next upcoming sessions',
-          note: 'Validate cases and timing before your next block.',
-          onClick: () => setActiveTab('sessions'),
-        },
-    inactiveStudents.length > 0
-      ? {
-          title: `Follow up ${inactiveStudents.length} inactive student${inactiveStudents.length !== 1 ? 's' : ''}`,
-          note: 'Reach out to prevent drop-off in performance.',
-          onClick: () => setActiveTab('students'),
-        }
-      : {
-          title: 'Open analytics for performance trends',
-          note: 'Check cohort progression and identify weak areas.',
-          onClick: () => setActiveTab('cases'),
-        },
-  ];
   const trackedHours = assignmentsTrend.reduce((sum, item) => sum + (item.count || 0), 0);
   const performanceChartData = assignmentsTrend.map((item) => {
     const completionPoint = completionTrend.find((c) => c.label === item.date);
@@ -875,555 +840,339 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
     transition: { duration: 0.4, ease: 'easeOut', delay },
   });
 
+  const studentStatusBuckets = (() => {
+    const now = Date.now();
+    let active = 0;
+    let warning = 0;
+    let inactive = 0;
+    advisorStudents.forEach((s) => {
+      const last = studentLastActivity[s.id];
+      if (!last) {
+        inactive += 1;
+        return;
+      }
+      const days = Math.floor((now - last) / (24 * 60 * 60 * 1000));
+      if (days <= 2) active += 1;
+      else if (days <= 7) warning += 1;
+      else inactive += 1;
+    });
+    return { active, warning, inactive };
+  })();
+
+  const sessionTypeData = [
+    {
+      name: 'Practice',
+      value: Math.max(0, (assignmentsTrend.reduce((sum, item) => sum + (item.count || 0), 0)) - scheduledSessions.length),
+      fill: '#60a5fa',
+    },
+    { name: 'Exam', value: Math.max(0, scheduledSessions.length), fill: '#6ee7b7' },
+    { name: 'Review', value: Math.max(0, recentAssignments.length), fill: '#f59e0b' },
+  ].filter((item) => item.value > 0);
+
+  const latestActivities = [
+    ...recentAssignments.slice(0, 4).map((entry) => ({
+      id: `assign-${entry.date}`,
+      title: `Assigned ${entry.title}`,
+      when: formatTime(entry.date),
+      action: 'Assignment',
+    })),
+    ...upcomingSessions.slice(0, 3).map((entry) => ({
+      id: `upcoming-${entry.id}`,
+      title: `Scheduled ${entry.title} for ${entry.student}`,
+      when: formatTime(entry.startTime),
+      action: 'Session',
+    })),
+  ].slice(0, 6);
+
+  const firstName = (displayName || 'Instructor').trim().split(/\s+/)[0];
+  const dateLine = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const todayEnd = new Date(todayStart);
+  todayEnd.setDate(todayEnd.getDate() + 1);
+  const sessionsScheduledToday = upcomingSessions.filter((s) => {
+    const t = new Date(s.startTime);
+    return t >= todayStart && t < todayEnd;
+  });
+  const sortedToday = [...sessionsScheduledToday].sort(
+    (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
+  );
+  const nextSessionToday = sortedToday[0];
+  const planSummaryLine = (() => {
+    const parts = [];
+    if (activeSessions.length > 0) parts.push(`${activeSessions.length} in progress`);
+    if (sessionsScheduledToday.length > 0) {
+      parts.push(`${sessionsScheduledToday.length} scheduled`);
+    } else {
+      parts.push('Clear schedule');
+    }
+    if (nextSessionToday) parts.push(`Next ${formatTime(nextSessionToday.startTime)}`);
+    if (studentsWithoutExam.length > 0) {
+      parts.push(`${studentsWithoutExam.length} need exam${studentsWithoutExam.length === 1 ? '' : 's'}`);
+    }
+    return parts.join(' · ');
+  })();
+  const focusTip = INSTRUCTOR_PLAN_TIPS[new Date().getDay() % INSTRUCTOR_PLAN_TIPS.length];
+
   return (
-    <div className="min-h-0 h-full w-full">
-      <div className="h-full min-h-0">
-        <div className="h-full min-h-0 space-y-5">
-          <QuickActions
-            onAssignExam={() => setActiveTab('assign-exam')}
-            onCreateCase={() => {
-              try { sessionStorage.setItem('medupal_open_create_case', '1'); } catch (_) {}
-              setActiveTab('cases');
-            }}
-            onManageStudents={() => setActiveTab('students')}
-            onViewAnalytics={() => setActiveTab('cases')}
-            onRunDiagnostics={() => setActiveTab('hardware')}
-            onOpenSettings={() => setActiveTab('settings')}
-            onOpenProfile={() => setActiveTab('profile')}
-            variant="glass"
-            highlightAssign={shouldHighlightAssign}
-            iconOnly
-            oneRow
-          />
+    <div className="w-full max-w-[min(100%,1800px)] mx-auto min-h-0 h-full">
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_min(380px,36vw)] gap-6 lg:gap-8 lg:items-start min-h-0">
+        <div className="space-y-6 min-h-0 min-w-0 max-lg:order-2">
+      <InstructorTodaysPlanCard
+        dateLine={dateLine}
+        firstName={firstName}
+        summaryLine={planSummaryLine}
+        focusTip={focusTip}
+        onAssignExam={() => setActiveTab('assign-exam')}
+      />
 
-        <div className="grid grid-cols-1 xl:grid-cols-[1.6fr_0.9fr] gap-6 h-[calc(100%-6rem)] min-h-0">
-          <div className="min-h-0 overflow-y-auto no-scrollbar space-y-5 pr-1">
-            <motion.section
-              className="rounded-2xl p-5 md:p-6"
-              style={{
-                ...GLASS_STRONG,
-              }}
-              {...entrance(0)}
-              whileHover={cardHover}
-              whileTap={{ scale: 0.998 }}
-              transition={cardTransition}
-              layout
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h1 className="text-2xl md:text-3xl font-bold tracking-tight" style={{ color: T.text }}>Today&apos;s Teaching Plan</h1>
-                  <p className="text-sm mt-1" style={{ color: T.muted }}>
-                    Upcoming sessions, readiness checks, and your next teaching actions.
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[11px] uppercase tracking-wider" style={{ color: T.muted }}>Readiness</p>
-                  <p className="text-xl font-semibold" style={{ color: readinessScore >= 67 ? T.accent : '#fcd34d' }}>{readinessScore}%</p>
-                  <button
-                    type="button"
-                    onClick={fetchAllData}
-                    className="mt-2 w-9 h-9 rounded-lg flex items-center justify-center ml-auto transition-colors hover:bg-white/5"
-                    style={{ border: '1px solid rgba(255,255,255,0.1)' }}
-                    title="Refresh plan"
-                  >
-                    <RefreshCw size={15} style={{ color: T.text }} />
-                  </button>
-                </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {[
+          { label: 'Total Assigned Students', value: advisorStudents.length, icon: Users, color: '#60a5fa', sub: 'Current advisees' },
+          { label: 'Upcoming Sessions', value: scheduledSessions.length, icon: Calendar, color: '#a78bfa', sub: 'Today and next' },
+          { label: 'Pending Requests', value: studentsWithoutExam.length, icon: AlertCircle, color: '#f59e0b', sub: 'Need exam assignment' },
+          { label: 'Instructor Performance', value: avgPerformance > 0 ? `${avgPerformance}%` : '—', icon: Award, color: '#6ee7b7', sub: 'Cohort average score' },
+        ].map((item) => (
+          <motion.div
+            key={item.label}
+            className="rounded-2xl p-5 border"
+            style={{ background: P.card, borderColor: P.border, boxShadow: P.shadow }}
+            whileHover={{ y: -3 }}
+            transition={{ duration: 0.2 }}
+          >
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-xs text-muted-foreground">{item.label}</p>
+                <p className="text-2xl font-bold mt-1" style={{ color: P.text }}>{item.value}</p>
+                <p className="text-xs mt-1" style={{ color: P.muted }}>{item.sub}</p>
               </div>
-
-              <div className="mt-5 grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <div
-                  className="rounded-xl p-4 transition-all duration-300 hover:border-emerald-400/30"
-                  style={{
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    background: 'rgba(255,255,255,0.06)',
-                    backdropFilter: 'blur(8px)',
-                  }}
-                >
-                  <p className="text-xs uppercase tracking-wider mb-3" style={{ color: T.muted }}>Upcoming timeline</p>
-                  <div className="space-y-2.5">
-                    <AnimatePresence mode="popLayout">
-                    {upcomingSessions.slice(0, 3).map((s, idx) => (
-                      <motion.button
-                        key={s.id}
-                        type="button"
-                        onClick={() => setSelectedUpcomingId(s.id)}
-                        className="w-full text-left flex items-start gap-3 transition-opacity"
-                        initial={{ opacity: 0, y: 6 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -6 }}
-                        transition={{ duration: 0.24 }}
-                        whileHover={{ x: 3, backgroundColor: 'rgba(255,255,255,0.03)' }}
-                      >
-                        <div className="mt-1 w-2 h-2 rounded-full shrink-0" style={{ background: idx === 0 ? T.accent : 'rgba(255,255,255,0.35)' }} />
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium truncate" style={{ color: T.text }}>{s.title}</p>
-                          <p className="text-xs mt-0.5" style={{ color: T.muted }}>{s.student} · {formatTime(s.startTime)}</p>
-                        </div>
-                      </motion.button>
-                    ))}
-                    </AnimatePresence>
-                    {upcomingSessions.length === 0 && (
-                      <p className="text-sm" style={{ color: T.muted }}>No upcoming sessions scheduled.</p>
-                    )}
-                  </div>
-                  {selectedUpcoming && (
-                    <div className="mt-3 rounded-lg p-2.5" style={{ border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)' }}>
-                      <p className="text-[11px] uppercase tracking-wider" style={{ color: T.muted }}>Session drilldown</p>
-                      <p className="text-sm font-semibold mt-1" style={{ color: T.text }}>{selectedUpcoming.title}</p>
-                      <p className="text-xs mt-0.5" style={{ color: T.muted }}>{selectedUpcoming.student} · {selectedUpcoming.status}</p>
-                      <div className="mt-2 flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setActiveTab('sessions')}
-                          className="text-[11px] px-2 py-1 rounded-md"
-                          style={{ color: T.text, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.04)' }}
-                        >
-                          Open session
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setActiveTab('assign-exam')}
-                          className="text-[11px] px-2 py-1 rounded-md"
-                          style={{ color: T.accent, border: '1px solid rgba(110,231,183,0.25)', background: 'rgba(110,231,183,0.08)' }}
-                        >
-                          Reassign
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div
-                  className="rounded-xl p-4 transition-all duration-300 hover:border-amber-400/30"
-                  style={{
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    background: 'rgba(255,255,255,0.06)',
-                    backdropFilter: 'blur(8px)',
-                  }}
-                >
-                  <p className="text-xs uppercase tracking-wider mb-3" style={{ color: T.muted }}>Readiness checklist</p>
-                  <div className="space-y-2.5">
-                    <AnimatePresence mode="popLayout">
-                    {readinessChecks.map((item) => (
-                      <motion.div
-                        key={item.label}
-                        className="flex items-center justify-between gap-2 px-2 py-1 rounded-lg"
-                        initial={{ opacity: 0, y: 6 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -6 }}
-                        transition={{ duration: 0.22 }}
-                        whileHover={{ x: 3, backgroundColor: 'rgba(255,255,255,0.04)' }}
-                        layout
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <motion.span
-                            initial={{ opacity: 0, scale: 0.7 }}
-                            animate={item.ready ? { opacity: 1, scale: 1 } : { opacity: 1, scale: [1, 1.08, 1] }}
-                            transition={item.ready ? { duration: 0.24 } : { duration: 1.2, repeat: Infinity, repeatType: 'loop' }}
-                          >
-                            {item.ready ? (
-                              <CheckCircle2 size={14} style={{ color: '#6ee7b7' }} />
-                            ) : (
-                              <AlertCircle size={14} style={{ color: '#fcd34d' }} />
-                            )}
-                          </motion.span>
-                          <p className="text-sm truncate" style={{ color: T.text }}>{item.label}</p>
-                        </div>
-                        <motion.button
-                          type="button"
-                          onClick={() => item.onReview()}
-                          className="text-xs px-2 py-0.5 rounded-full font-medium transition-all hover:opacity-90"
-                          style={{ background: item.ready ? 'rgba(16,185,129,0.14)' : 'rgba(245,158,11,0.14)', color: item.ready ? '#6ee7b7' : '#fcd34d' }}
-                          whileHover={{ scale: 1.06, filter: 'brightness(1.08)' }}
-                          whileTap={{ scale: 0.95 }}
-                          transition={{ duration: 0.2 }}
-                        >
-                          {item.ready ? 'Ready' : 'Review'}
-                        </motion.button>
-                      </motion.div>
-                    ))}
-                    </AnimatePresence>
-                  </div>
-                </div>
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: `${item.color}22` }}>
+                <item.icon size={18} style={{ color: item.color }} />
               </div>
+            </div>
+          </motion.div>
+        ))}
+      </div>
 
-              <div className="mt-4 flex flex-wrap gap-2">
-                <motion.button
-                  type="button"
-                  onClick={() => setActiveTab('sessions')}
-                  className="px-4 py-2 rounded-xl text-sm font-medium transition-transform hover:scale-[1.03]"
-                  style={{ background: T.gradientBtn, color: '#fff' }}
-                  whileHover={{ scale: 1.04, filter: 'brightness(1.08)' }}
-                  whileTap={{ scale: 0.96 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  Start
-                </motion.button>
-                <motion.button
-                  type="button"
-                  onClick={() => setActiveTab('students')}
-                  className="px-4 py-2 rounded-xl text-sm font-medium transition-transform hover:scale-[1.03]"
-                  style={{ border: '1px solid rgba(255,255,255,0.12)', color: T.text, background: 'rgba(255,255,255,0.03)' }}
-                  whileHover={{ scale: 1.04, backgroundColor: 'rgba(255,255,255,0.08)' }}
-                  whileTap={{ scale: 0.96 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  Review
-                </motion.button>
-              </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="rounded-2xl p-5 border lg:col-span-1" style={{ background: P.card, borderColor: P.border, boxShadow: P.shadow }}>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold" style={{ color: P.text }}>Sessions Over Time</h3>
+            <span className="text-xs" style={{ color: P.muted }}>Weekly</span>
+          </div>
+          <div className="h-52">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={assignmentsTrend}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                <XAxis dataKey="date" stroke="#71717a" />
+                <YAxis stroke="#71717a" />
+                <Tooltip contentStyle={{ background: '#111', border: `1px solid ${P.border}`, borderRadius: 10 }} />
+                <Line type="monotone" dataKey="count" stroke={P.accent} strokeWidth={2.5} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
 
-              <div className="mt-5 rounded-xl p-4" style={{ border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)' }}>
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <p className="text-xs uppercase tracking-wider" style={{ color: T.muted }}>To-Do List</p>
-                  <p className="text-xs" style={{ color: T.muted }}>
-                    {todoItems.filter((t) => t.done).length}/{todoItems.length} completed
-                  </p>
-                </div>
-                <div className="flex gap-2 mb-3">
-                  <input
-                    type="text"
-                    value={todoInput}
-                    onChange={(e) => setTodoInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleAddTodo();
-                    }}
-                    placeholder="Add a task for today..."
-                    className="flex-1 h-9 px-3 rounded-lg text-sm outline-none"
-                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: T.text }}
-                  />
-                  <button
-                    type="button"
-                    onClick={handleAddTodo}
-                    className="h-9 px-3 rounded-lg text-sm font-medium"
-                    style={{ background: T.gradientBtn, color: '#fff' }}
-                  >
-                    Add
-                  </button>
-                </div>
-                <div className="space-y-2 max-h-44 overflow-y-auto">
-                  <AnimatePresence mode="popLayout">
-                  {todoItems.map((item) => (
-                    <motion.div
-                      key={item.id}
-                      className="flex items-center gap-2 px-2.5 py-2 rounded-lg"
-                      style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}
-                      initial={{ opacity: 0, y: 6, scale: 0.98 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: -6, scale: 0.98 }}
-                      transition={{ duration: 0.2 }}
-                      whileHover={{ x: 2, backgroundColor: 'rgba(255,255,255,0.05)' }}
-                      layout
-                    >
-                      <button
-                        type="button"
-                        onClick={() => handleToggleTodo(item.id)}
-                        className="shrink-0"
-                        aria-label={item.done ? 'Mark as incomplete' : 'Mark as complete'}
-                      >
-                        {item.done ? (
-                          <CheckSquare2 size={16} style={{ color: T.accent }} />
-                        ) : (
-                          <Square size={16} style={{ color: T.muted }} />
-                        )}
-                      </button>
-                      <p
-                        className="text-sm flex-1"
-                        style={{
-                          color: item.done ? T.muted : T.text,
-                          textDecoration: item.done ? 'line-through' : 'none',
-                        }}
-                      >
-                        {item.text}
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteTodo(item.id)}
-                        className="shrink-0 opacity-75 hover:opacity-100"
-                        aria-label="Delete task"
-                      >
-                        <Trash2 size={14} style={{ color: '#f87171' }} />
-                      </button>
-                    </motion.div>
+        <div className="rounded-2xl p-5 border lg:col-span-1" style={{ background: P.card, borderColor: P.border, boxShadow: P.shadow }}>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold" style={{ color: P.text }}>Performance Distribution</h3>
+            <span className="text-xs" style={{ color: P.muted }}>Students</span>
+          </div>
+          <div className="h-52">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={performanceDistribution}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                <XAxis dataKey="range" stroke="#71717a" />
+                <YAxis stroke="#71717a" />
+                <Tooltip contentStyle={{ background: '#111', border: `1px solid ${P.border}`, borderRadius: 10 }} />
+                <Bar dataKey="count" radius={[6, 6, 0, 0]}>
+                  {performanceDistribution.map((entry, idx) => (
+                    <Cell key={`${entry.range}-${idx}`} fill={CHART_COLORS[idx % CHART_COLORS.length]} />
                   ))}
-                  </AnimatePresence>
-                  {todoItems.length === 0 && (
-                    <p className="text-sm px-1" style={{ color: T.muted }}>
-                      No tasks yet. Add your first teaching task above.
-                    </p>
-                  )}
-                </div>
-              </div>
-            </motion.section>
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
 
-            <motion.section
-              className="rounded-2xl p-5 md:p-6"
-              style={GLASS_STRONG}
-              {...entrance(0.1)}
-              whileHover={cardHover}
-              whileTap={{ scale: 0.998 }}
-              transition={cardTransition}
-              layout
-            >
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="rounded-xl p-4" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
-                  <h4 className="text-sm font-semibold mb-3" style={{ color: T.text }}>Competency Gap Heatmap</h4>
-                  <div className="space-y-2.5">
-                    {(competencyGaps.length > 0 ? competencyGaps : [
-                      { domain: 'History Taking', avg: 78, gap: 22 },
-                      { domain: 'Communication', avg: 82, gap: 18 },
-                      { domain: 'Examination', avg: 74, gap: 26 },
-                      { domain: 'Clinical Reasoning', avg: 70, gap: 30 },
-                    ]).map((g) => (
-                      <div key={g.domain}>
-                        <div className="flex items-center justify-between text-xs mb-1">
-                          <span style={{ color: T.text }}>{g.domain}</span>
-                          <span style={{ color: '#fcd34d' }}>Gap {g.gap}%</span>
-                        </div>
-                        <div className="h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
-                          <div className="h-full rounded-full" style={{ width: `${g.gap}%`, background: 'linear-gradient(90deg, rgba(245,158,11,0.9), rgba(239,68,68,0.9))' }} />
+        <div className="rounded-2xl p-5 border lg:col-span-1" style={{ background: P.card, borderColor: P.border, boxShadow: P.shadow }}>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold" style={{ color: P.text }}>Session Types</h3>
+            <span className="text-xs" style={{ color: P.muted }}>Mix</span>
+          </div>
+          <div className="h-52">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={sessionTypeData.length ? sessionTypeData : [{ name: 'No data', value: 1, fill: '#3f3f46' }]} dataKey="value" nameKey="name" innerRadius={45} outerRadius={74} paddingAngle={3}>
+                  {(sessionTypeData.length ? sessionTypeData : [{ name: 'No data', value: 1, fill: '#3f3f46' }]).map((entry, idx) => (
+                    <Cell key={`${entry.name}-${idx}`} fill={entry.fill} />
+                  ))}
+                </Pie>
+                <Tooltip contentStyle={{ background: '#111', border: `1px solid ${P.border}`, borderRadius: 10 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+          <div className="rounded-2xl border overflow-hidden" style={{ background: P.card, borderColor: P.border, boxShadow: P.shadow }}>
+            <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: P.border }}>
+              <h2 className="text-sm font-semibold" style={{ color: P.text }}>Assigned Students</h2>
+              <button className="text-xs" style={{ color: P.accent }} onClick={() => setActiveTab('students')}>Open students</button>
+            </div>
+            <div className="max-h-72 overflow-y-auto">
+              {advisorStudents.length === 0 ? (
+                <div className="p-5 text-sm" style={{ color: P.muted }}>No assigned students yet.</div>
+              ) : (
+                advisorStudents.map((student) => {
+                  const last = studentLastActivity[student.id];
+                  const days = last ? Math.floor((Date.now() - last) / (24 * 60 * 60 * 1000)) : null;
+                  const status = days == null ? 'Inactive' : days <= 2 ? 'Active' : days <= 7 ? 'At Risk' : 'Inactive';
+                  const statusColor = status === 'Active' ? '#6ee7b7' : status === 'At Risk' ? '#fcd34d' : '#f87171';
+                  const progress = leaderboard.find((l) => l.id === student.id)?.score ?? 0;
+                  return (
+                    <button
+                      key={student.id}
+                      className="w-full px-5 py-3 flex items-center gap-3 text-left transition-colors hover:bg-white/5"
+                      onClick={() => onViewStudentProfile?.(student)}
+                    >
+                      <div className="w-9 h-9 rounded-xl flex items-center justify-center text-xs font-semibold" style={{ background: 'rgba(255,255,255,0.08)', color: P.text }}>
+                        {(student.full_name || student.email || 'S').slice(0, 1).toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate" style={{ color: P.text }}>{student.full_name || student.email || 'Student'}</p>
+                        <p className="text-xs truncate" style={{ color: P.muted }}>
+                          Last activity: {last ? formatTime(new Date(last).toISOString()) : 'No record'}
+                        </p>
+                        <div className="h-1.5 mt-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
+                          <div className="h-full rounded-full" style={{ width: `${Math.min(100, progress)}%`, background: 'linear-gradient(90deg, #60a5fa, #6ee7b7)' }} />
                         </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="rounded-xl p-4" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
-                  <h4 className="text-sm font-semibold mb-3" style={{ color: T.text }}>Outcome Snapshot (Weekly)</h4>
-                  <div className="grid grid-cols-2 gap-2.5">
-                    {[
-                      { label: 'Pass rate', value: `${passRate}%`, delta: avgThisWeek >= avgLastWeek ? 'up' : 'down' },
-                      { label: 'Average score', value: `${avgPerformance || 0}%`, delta: avgThisWeek >= avgLastWeek ? 'up' : 'down' },
-                      { label: 'Completion rate', value: `${completionRate}%`, delta: completionDelta >= 0 ? 'up' : 'down' },
-                      { label: 'No-show rate', value: `${noShowRate}%`, delta: noShowRate <= 10 ? 'up' : 'down' },
-                    ].map((metric) => (
-                      <div key={metric.label} className="rounded-lg px-2.5 py-2" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}>
-                        <p className="text-[11px]" style={{ color: T.muted }}>{metric.label}</p>
-                        <div className="flex items-center justify-between mt-1">
-                          <p className="text-sm font-semibold" style={{ color: T.text }}>{metric.value}</p>
-                          <span style={{ color: metric.delta === 'up' ? '#6ee7b7' : '#f87171', fontSize: 12 }}>
-                            {metric.delta === 'up' ? '↑' : '↓'}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </motion.section>
-
-            <motion.section
-              className="p-0"
-              style={{ background: 'transparent', border: '1px solid transparent', boxShadow: 'none' }}
-              {...entrance(0.2)}
-              whileHover={cardHover}
-              transition={cardTransition}
-              layout
-            >
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-xl font-semibold" style={{ color: T.text }}>Performance Snapshot</h3>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div className="rounded-xl p-3.5" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-xs uppercase tracking-wider" style={{ color: T.muted }}>Assignments</p>
-                    <p className="text-xs font-semibold" style={{ color: '#60a5fa' }}>{trackedHours}</p>
-                  </div>
-                  <div className="h-24">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={performanceChartData}>
-                        <XAxis dataKey="date" hide />
-                        <YAxis hide />
-                        <Tooltip contentStyle={{ background: 'rgba(10,12,16,0.96)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10 }} />
-                        <Bar dataKey="assignments" fill="#60a5fa" radius={[4, 4, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-
-                <div className="rounded-xl p-3.5" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-xs uppercase tracking-wider" style={{ color: T.muted }}>Completion rate</p>
-                    <p className="text-xs font-semibold" style={{ color: '#f59e0b' }}>
-                      {completionTrend.length ? `${completionTrend[completionTrend.length - 1].value}%` : '0%'}
-                    </p>
-                  </div>
-                  <div className="h-24">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={completionTrend}>
-                        <defs>
-                          <linearGradient id="completionMini" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.35} />
-                            <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.05} />
-                          </linearGradient>
-                        </defs>
-                        <XAxis dataKey="label" hide />
-                        <YAxis hide />
-                        <Tooltip contentStyle={{ background: 'rgba(10,12,16,0.96)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10 }} />
-                        <Area type="monotone" dataKey="value" stroke="#f59e0b" fill="url(#completionMini)" strokeWidth={2} />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-
-                <div className="rounded-xl p-3.5" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-xs uppercase tracking-wider" style={{ color: T.muted }}>Class average</p>
-                    <p className="text-xs font-semibold" style={{ color: T.accent }}>
-                      {avgPerformance > 0 ? `${avgPerformance}%` : '—'}
-                    </p>
-                  </div>
-                  <div className="h-24">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={compactPerformance}>
-                        <XAxis dataKey="label" hide />
-                        <YAxis hide />
-                        <Tooltip contentStyle={{ background: 'rgba(10,12,16,0.96)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10 }} />
-                        <Line type="monotone" dataKey="value" stroke={T.accent} strokeWidth={2.2} dot={false} />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              </div>
-            </motion.section>
-
+                      <span className="text-[11px] px-2 py-1 rounded-full" style={{ color: statusColor, background: `${statusColor}22` }}>
+                        {status}
+                      </span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
           </div>
 
-          <aside className="min-h-0 overflow-y-auto no-scrollbar space-y-5">
-            <InstructorProfileCard
-              displayName={displayName}
-              stats={instructorProfileStats}
-              loading={false}
-              onGoToProfile={() => setActiveTab('profile')}
-                suggestions={instructorSuggestions}
-            />
-
-            <motion.section
-              className="p-0"
-              style={{ background: 'transparent', border: '1px solid transparent', boxShadow: 'none' }}
-              {...entrance(0.3)}
-              whileHover={cardHover}
-              transition={cardTransition}
-              layout
-            >
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-base font-semibold" style={{ color: T.text }}>Advisee Assignment Status</h3>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('assign-exam')}
-                  className="text-xs px-3 py-1 rounded-full"
-                  style={{ color: T.accent, border: '1px solid rgba(255,255,255,0.1)' }}
-                >
-                  Assign exams
-                </button>
-              </div>
-
-              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                <AnimatePresence mode="popLayout">
-                {advisorStudents.map((student) => {
-                  const hasAssignedExam = studentsWithExams.has(student.id);
-                  return (
-                    <motion.div
-                      key={student.id}
-                      className="rounded-xl p-3 flex items-center justify-between gap-3"
-                      style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)' }}
-                      initial={{ opacity: 0, y: 6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -6 }}
-                      transition={{ duration: 0.2 }}
-                      whileHover={{ x: 3, backgroundColor: 'rgba(255,255,255,0.05)' }}
-                      layout
-                    >
-                      <button
-                        type="button"
-                        onClick={() => onViewStudentProfile?.(student)}
-                        className="text-left min-w-0 flex-1"
-                      >
-                        <p className="text-sm font-semibold truncate" style={{ color: T.text }}>
-                          {student.full_name || student.email || 'Student'}
-                        </p>
-                        <p className="text-xs truncate mt-0.5" style={{ color: T.muted }}>
-                          {student.email || 'No email provided'}
-                        </p>
-                      </button>
-
-                      <div className="flex items-center gap-2 shrink-0">
-                        <motion.span
-                          initial={{ opacity: 0, scale: 0.7 }}
-                          animate={hasAssignedExam ? { opacity: 1, scale: 1 } : { opacity: 1, scale: [1, 1.08, 1] }}
-                          transition={hasAssignedExam ? { duration: 0.22 } : { duration: 1.2, repeat: Infinity, repeatType: 'loop' }}
-                        >
-                          {hasAssignedExam ? (
-                            <CheckCircle2 size={14} style={{ color: '#6ee7b7' }} />
-                          ) : (
-                            <AlertCircle size={14} style={{ color: '#fcd34d' }} />
-                          )}
-                        </motion.span>
-                        <span
-                          className="text-[11px] font-semibold px-2.5 py-1 rounded-full"
-                          style={{
-                            background: hasAssignedExam ? 'rgba(16,185,129,0.14)' : 'rgba(245,158,11,0.14)',
-                            color: hasAssignedExam ? '#6ee7b7' : '#fcd34d',
-                          }}
-                        >
-                          {hasAssignedExam ? 'Assigned' : 'Not Assigned'}
-                        </span>
-                        {!hasAssignedExam && (
-                          <button
-                            type="button"
-                            onClick={() => setActiveTab('assign-exam')}
-                            className="text-[11px] font-medium px-2 py-1 rounded-md"
-                            style={{ color: T.text, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.04)' }}
-                          >
-                            Assign
-                          </button>
-                        )}
-                      </div>
-                    </motion.div>
-                  );
-                })}
-                </AnimatePresence>
-                {advisorStudents.length === 0 && (
-                  <div className="rounded-xl p-4 text-sm" style={{ border: '1px solid rgba(255,255,255,0.08)', color: T.muted }}>
-                    No advisee students yet. Add students first, then assign exams.
+          <div className="rounded-2xl border overflow-hidden" style={{ background: P.card, borderColor: P.border, boxShadow: P.shadow }}>
+            <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: P.border }}>
+              <h2 className="text-sm font-semibold" style={{ color: P.text }}>Upcoming Sessions</h2>
+              <button className="text-xs" style={{ color: P.accent }} onClick={() => setActiveTab('sessions')}>View all</button>
+            </div>
+            <div className="divide-y" style={{ borderColor: P.border }}>
+              {upcomingSessions.length === 0 ? (
+                <div className="p-5 text-sm" style={{ color: P.muted }}>No upcoming sessions.</div>
+              ) : (
+                upcomingSessions.slice(0, 6).map((session) => (
+                  <div key={session.id} className="px-5 py-3 flex items-center justify-between gap-3 hover:bg-white/5 transition-colors">
+                    <div>
+                      <p className="text-sm font-medium" style={{ color: P.text }}>{session.title}</p>
+                      <p className="text-xs" style={{ color: P.muted }}>{formatTime(session.startTime)} · {session.student}</p>
+                    </div>
+                    <span className="text-[11px] px-2 py-1 rounded-full" style={{ background: session.status === 'In Progress' ? 'rgba(96,165,250,0.18)' : 'rgba(110,231,183,0.16)', color: session.status === 'In Progress' ? '#60a5fa' : '#6ee7b7' }}>
+                      {session.status}
+                    </span>
                   </div>
-                )}
-              </div>
+                ))
+              )}
+            </div>
+          </div>
 
-              <div className="mt-4 rounded-xl p-3.5" style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)' }}>
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-sm font-semibold" style={{ color: T.text }}>At-Risk Students</h4>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('students')}
-                    className="text-xs"
-                    style={{ color: T.accent }}
-                  >
-                    Open students
-                  </button>
-                </div>
-                <div className="space-y-2">
-                  {atRiskStudents.length > 0 ? (
-                    atRiskStudents.map((student) => (
-                      <div key={student.id} className="flex items-center justify-between gap-2">
-                        <p className="text-xs truncate" style={{ color: T.text }}>{student.name}</p>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: 'rgba(245,158,11,0.14)', color: '#fcd34d' }}>
-                          {student.reason}
-                        </span>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-xs" style={{ color: T.muted }}>
-                      No students are currently at risk. This is a placeholder for future risk signals.
-                    </p>
-                  )}
-                </div>
-              </div>
-            </motion.section>
-          </aside>
+          <div className="rounded-2xl border overflow-hidden" style={{ background: P.card, borderColor: P.border, boxShadow: P.shadow }}>
+            <div className="px-5 py-4 border-b" style={{ borderColor: P.border }}>
+              <h2 className="text-sm font-semibold" style={{ color: P.text }}>Recent Activity</h2>
+            </div>
+            <div className="divide-y" style={{ borderColor: P.border }}>
+              {latestActivities.length === 0 ? (
+                <div className="p-5 text-sm" style={{ color: P.muted }}>No recent activity yet.</div>
+              ) : (
+                latestActivities.map((activity) => (
+                  <div key={activity.id} className="px-5 py-3 flex items-center justify-between gap-3 hover:bg-white/5 transition-colors">
+                    <div className="min-w-0">
+                      <p className="text-sm truncate" style={{ color: P.text }}>{activity.title}</p>
+                      <p className="text-xs" style={{ color: P.muted }}>{activity.when}</p>
+                    </div>
+                    <span className="text-[11px] px-2 py-1 rounded-full" style={{ background: 'rgba(167,139,250,0.16)', color: '#c4b5fd' }}>
+                      {activity.action}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
-        </div>
+
+        <aside className="space-y-6 max-lg:order-1 lg:sticky lg:top-4 lg:self-start z-[1]">
+          <InstructorProfileCard
+            displayName={displayName}
+            stats={instructorProfileStats}
+            loading={false}
+            onGoToProfile={() => setActiveTab('profile')}
+          />
+
+          <div className="rounded-2xl border overflow-hidden" style={{ background: P.card, borderColor: P.border, boxShadow: P.shadow }}>
+            <div className="flex p-1 gap-0.5" style={{ borderBottom: `1px solid ${P.border}` }}>
+              <button
+                type="button"
+                onClick={() => setInstructorRailTab('actions')}
+                className={cn(
+                  'flex-1 rounded-lg py-2 px-2 text-xs font-semibold transition-colors',
+                  instructorRailTab === 'actions' ? 'bg-white/[0.08]' : 'hover:bg-white/[0.04]'
+                )}
+                style={{ color: instructorRailTab === 'actions' ? P.text : P.muted }}
+              >
+                Quick actions
+              </button>
+              <button
+                type="button"
+                onClick={() => setInstructorRailTab('status')}
+                className={cn(
+                  'flex-1 rounded-lg py-2 px-2 text-xs font-semibold transition-colors',
+                  instructorRailTab === 'status' ? 'bg-white/[0.08]' : 'hover:bg-white/[0.04]'
+                )}
+                style={{ color: instructorRailTab === 'status' ? P.text : P.muted }}
+              >
+                Student status
+              </button>
+            </div>
+            <div className="p-4">
+              {instructorRailTab === 'actions' ? (
+                <QuickActions
+                  onAssignExam={() => setActiveTab('assign-exam')}
+                  onManageStudents={() => setActiveTab('students')}
+                  onViewAnalytics={() => setActiveTab('cases')}
+                  onRunDiagnostics={() => setActiveTab('hardware')}
+                  onOpenSettings={() => setActiveTab('settings')}
+                  onOpenProfile={() => setActiveTab('profile')}
+                  variant="glass"
+                  layout="grid"
+                  embedded
+                  highlightAssign={shouldHighlightAssign}
+                />
+              ) : (
+                <div className="space-y-2.5 pt-0.5">
+                  <p className="text-[11px] uppercase tracking-wider mb-2" style={{ color: P.muted }}>
+                    Roster breakdown
+                  </p>
+                  {[
+                    { label: 'Active', value: studentStatusBuckets.active, color: '#6ee7b7' },
+                    { label: 'At Risk', value: studentStatusBuckets.warning, color: '#fcd34d' },
+                    { label: 'Inactive', value: studentStatusBuckets.inactive, color: '#f87171' },
+                  ].map((item) => (
+                    <div key={item.label} className="flex items-center justify-between gap-2">
+                      <span className="text-xs" style={{ color: P.muted }}>{item.label}</span>
+                      <span className="text-sm font-semibold tabular-nums" style={{ color: item.color }}>{item.value}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </aside>
       </div>
     </div>
   );

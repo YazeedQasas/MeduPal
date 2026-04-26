@@ -1,4 +1,5 @@
 import { Sidebar } from './Sidebar';
+import { Header } from './Header';
 import { useAuth } from '../../context/AuthContext';
 
 export function MainLayout({ children, activeTab, setActiveTab }) {
