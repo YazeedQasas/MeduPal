@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { LayoutDashboard, FileText, HardDrive, Settings, Activity, LogOut, GraduationCap, UserCog, Home, Play, TrendingUp, History, Cpu, FileCheck } from 'lucide-react';
-import { MedicalCrossIcon } from '../ui/MedicalCrossIcon';
+import logoFull from '../../assets/Logo/XPatient_LOGO_white.png';
 import { motion } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -39,51 +39,39 @@ function buildStudentNavItems(has_hardware, can_exam) {
   return items;
 }
 
-function Logo() {
+function SidebarLogo() {
+  const { open, animate } = useSidebar();
+  const TRANSITION = { duration: 0.3, ease: 'easeInOut' };
   return (
     <a
       href="#"
       onClick={(e) => e.preventDefault()}
-      className="font-normal flex items-center text-sm text-foreground py-1 relative z-20"
+      className="flex items-center relative z-20 overflow-hidden py-2 gap-2"
     >
-      <div className="h-5 w-6 flex-shrink-0 flex items-center justify-center -mr-0.5">
-        <MedicalCrossIcon size={18} color="#10b981" />
-      </div>
+      {/* Icon — visible when collapsed, fades out when open */}
+      <motion.img
+        src={logoFull}
+        alt="XPatient"
+        animate={{
+          opacity: animate ? (open ? 0 : 1) : 1,
+          width: animate ? (open ? 0 : 28) : 28,
+        }}
+        transition={TRANSITION}
+        style={{ height: 28, objectFit: 'contain', flexShrink: 0 }}
+      />
+      {/* Text — fades in when open */}
       <motion.span
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        className="font-medium text-foreground whitespace-nowrap"
+        animate={{
+          opacity: animate ? (open ? 1 : 0) : 1,
+          width: animate ? (open ? 'auto' : 0) : 'auto',
+        }}
+        transition={TRANSITION}
+        style={{ overflow: 'hidden', whiteSpace: 'nowrap' }}
+        className="text-white font-semibold text-base tracking-tight"
       >
-        patient
+        XPatient
       </motion.span>
     </a>
-  );
-}
-
-function LogoIcon() {
-  return (
-    <a
-      href="#"
-      onClick={(e) => e.preventDefault()}
-      className="font-normal flex items-center justify-center text-sm text-foreground py-1 relative z-20"
-    >
-      <MedicalCrossIcon size={18} color="#10b981" />
-    </a>
-  );
-}
-
-function SidebarLogo() {
-  const { open } = useSidebar();
-  // Logo icon is w-6 (24px). Inner collapsed width = 36px.
-  // To center: (36 - 24) / 2 = 6px extra paddingLeft.
-  // When open: 0px (logo has its own flex layout).
-  return (
-    <motion.div
-      animate={{ paddingLeft: open ? 0 : 6 }}
-      transition={{ duration: 0.3, ease: 'easeInOut' }}
-    >
-      {open ? <Logo /> : <LogoIcon />}
-    </motion.div>
   );
 }
 

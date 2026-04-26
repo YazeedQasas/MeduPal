@@ -57,7 +57,7 @@ export function DesktopSidebar({ className, children, ...props }) {
     <motion.div
       className={cn(
         // px-3 restored — this is the source of truth for horizontal padding
-        "h-full px-3 py-4 hidden md:flex md:flex-col bg-card border-r border-border flex-shrink-0 overflow-hidden",
+        "h-full px-3 py-4 hidden md:flex md:flex-col bg-card flex-shrink-0 overflow-hidden",
         className
       )}
       animate={{

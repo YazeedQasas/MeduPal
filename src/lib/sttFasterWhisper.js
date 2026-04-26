@@ -6,197 +6,152 @@
 const STT_API_URL = typeof import.meta !== 'undefined' ? (import.meta.env?.VITE_STT_API_URL || '') : '';
 const PATIENT_REPLY_API_URL = typeof import.meta !== 'undefined' ? (import.meta.env?.VITE_PATIENT_REPLY_URL || '') : '';
 
-/**
- * Check if Faster-Whisper STT is configured (env has STT API URL).
- * @returns {boolean}
- */
 export function isFasterWhisperSttEnabled() {
   return Boolean(STT_API_URL && STT_API_URL.trim());
 }
 
-/**
- * Get the STT API base URL (no trailing slash).
- * @returns {string}
- */
 export function getSttApiUrl() {
   return (STT_API_URL || '').replace(/\/+$/, '');
 }
 
-/**
- * Get the base URL for the patient-reply (Ollama/Llama) API.
- * Uses VITE_PATIENT_REPLY_URL if set, otherwise VITE_STT_API_URL (same server).
- * @returns {string}
- */
 export function getPatientReplyApiUrl() {
-  const url = (PATIENT_REPLY_API_URL || STT_API_URL || '').trim().replace(/\/+$/, '');
-  return url;
+  return (PATIENT_REPLY_API_URL || STT_API_URL || '').trim().replace(/\/+$/, '');
 }
 
 /**
- * Create a MediaRecorder that records to a Blob. Call start() then later
- * stop() and resolve with the blob via the returned promise.
- * @returns {{ start: () => void, stop: () => Promise<Blob>, stream: MediaStream }}
+ * @param {(() => void) | null} onAutoStop  Called when silence is detected after speech.
+ * @param {((level: number) => void) | null} onLevel  Called ~10×/sec with mic level 0–100.
  */
-function createRecorder(onAutoStop) {
+function createRecorder(onAutoStop, onLevel) {
   let mediaRecorder = null;
   let stream = null;
   let audioContext = null;
-  let silenceIntervalId = null;
+  let silenceTimer = null;
   const chunks = [];
   let resolveBlob = null;
-  const blobPromise = new Promise((resolve) => {
-    resolveBlob = resolve;
-  });
+  const blobPromise = new Promise((resolve) => { resolveBlob = resolve; });
 
-  const start = async () => {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const start = async (existingStream) => {
+    stream = existingStream || await navigator.mediaDevices.getUserMedia({ audio: true });
     const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
       ? 'audio/webm;codecs=opus'
       : MediaRecorder.isTypeSupported('audio/webm')
         ? 'audio/webm'
         : 'audio/mp4';
+
     mediaRecorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 128000 });
     chunks.length = 0;
-    mediaRecorder.ondataavailable = (e) => {
-      if (e.data && e.data.size > 0) chunks.push(e.data);
-    };
+    mediaRecorder.ondataavailable = (e) => { if (e.data?.size > 0) chunks.push(e.data); };
     mediaRecorder.onstop = () => {
       stream.getTracks().forEach((t) => t.stop());
-      if (silenceIntervalId) { clearInterval(silenceIntervalId); silenceIntervalId = null; }
+      if (silenceTimer) { clearInterval(silenceTimer); silenceTimer = null; }
       if (audioContext) { audioContext.close(); audioContext = null; }
-      const blob = new Blob(chunks, { type: mimeType });
-      resolveBlob(blob);
+      resolveBlob(new Blob(chunks, { type: mimeType }));
     };
     mediaRecorder.start(100);
 
-    // Silence detection: auto-stop after 1.5s of silence once speech has started.
-    // Uses voice-band energy (300–3000 Hz) to ignore broadband static/noise,
-    // and calibrates thresholds from the first 600ms of ambient sound.
-    if (onAutoStop) {
-      try {
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        audioContext.resume().catch(() => {});
-        const source = audioContext.createMediaStreamSource(stream);
-        const analyser = audioContext.createAnalyser();
-        analyser.fftSize = 1024;
-        source.connect(analyser);
-        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    if (!onAutoStop && !onLevel) return;
 
-        // Voice frequency band: 300–3000 Hz
-        const binHz = audioContext.sampleRate / analyser.fftSize;
-        const voiceLow = Math.floor(300 / binHz);
-        const voiceHigh = Math.ceil(3000 / binHz);
+    // --- Simple silence detection ---
+    // 1. Calibrate ambient noise for 500ms
+    // 2. Once speech starts (RMS > 3× ambient), watch for 1.5s of silence (RMS < 1.5× ambient)
+    try {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      audioContext.resume().catch(() => {});
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      const data = new Uint8Array(analyser.frequencyBinCount);
 
-        const getVoiceRms = () => {
-          analyser.getByteFrequencyData(dataArray);
-          let sum = 0;
-          for (let i = voiceLow; i < voiceHigh; i++) sum += dataArray[i] * dataArray[i];
-          return Math.sqrt(sum / (voiceHigh - voiceLow));
-        };
+      const getRms = () => {
+        analyser.getByteFrequencyData(data);
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+        return Math.sqrt(sum / data.length);
+      };
 
-        const SILENCE_MS = 1500;
-        const CALIBRATION_MS = 600;
-        const calibrationStart = Date.now();
-        let calibCount = 0, calibSum = 0, calibPeak = 0;
-        let speechThreshold = null;
-        let silenceThreshold = null;
-        let speechDetected = false;
-        let silenceStart = null;
-        let fired = false;
+      const CALIBRATION_MS = 500;
+      const SILENCE_MS = 700;
+      const calibStart = Date.now();
+      let calibSum = 0, calibCount = 0;
+      let speechThreshold = null;
+      let silenceThreshold = null;
+      let speechDetected = false;
+      let silenceStart = null;
+      let fired = false;
 
-        silenceIntervalId = setInterval(() => {
-          if (!mediaRecorder || mediaRecorder.state === 'inactive' || fired) {
-            clearInterval(silenceIntervalId);
-            silenceIntervalId = null;
-            return;
+      silenceTimer = setInterval(() => {
+        if (fired || !mediaRecorder || mediaRecorder.state === 'inactive') {
+          clearInterval(silenceTimer); silenceTimer = null; return;
+        }
+
+        const rms = getRms();
+        if (onLevel) onLevel(Math.min(100, (rms / 80) * 100));
+
+        // Phase 1: calibrate ambient noise
+        if (speechThreshold === null) {
+          calibSum += rms; calibCount++;
+          if (Date.now() - calibStart >= CALIBRATION_MS) {
+            const ambient = calibSum / calibCount;
+            speechThreshold = Math.max(ambient * 3, 8);
+            silenceThreshold = Math.max(ambient * 1.5, 5);
           }
+          return;
+        }
 
-          const rms = getVoiceRms();
-
-          // Calibration phase: track running sum/peak instead of accumulating an array
-          if (speechThreshold === null) {
-            calibCount++;
-            calibSum += rms;
-            if (rms > calibPeak) calibPeak = rms;
-            if (Date.now() - calibrationStart >= CALIBRATION_MS) {
-              const avg = calibSum / calibCount;
-              const noiseFloor = Math.max(avg * 1.2, calibPeak);
-              speechThreshold = noiseFloor * 3;
-              silenceThreshold = noiseFloor * 1.5;
+        // Phase 2: wait for speech, then detect silence
+        if (!speechDetected) {
+          if (rms > speechThreshold) speechDetected = true;
+        } else {
+          if (rms < silenceThreshold) {
+            if (!silenceStart) silenceStart = Date.now();
+            else if (Date.now() - silenceStart >= SILENCE_MS) {
+              fired = true;
+              clearInterval(silenceTimer); silenceTimer = null;
+              onAutoStop();
             }
-            return;
-          }
-
-          if (!speechDetected) {
-            if (rms > speechThreshold) speechDetected = true;
           } else {
-            if (rms < silenceThreshold) {
-              if (!silenceStart) silenceStart = Date.now();
-              else if (Date.now() - silenceStart >= SILENCE_MS) {
-                fired = true;
-                clearInterval(silenceIntervalId);
-                silenceIntervalId = null;
-                onAutoStop();
-              }
-            } else {
-              silenceStart = null;
-            }
+            silenceStart = null;
           }
-        }, 100);
-      } catch (e) {
-        console.warn('[STT] Silence detection unavailable:', e);
-      }
+        }
+      }, 100);
+    } catch (e) {
+      console.warn('[STT] Silence detection unavailable:', e);
     }
   };
 
   const stop = () => {
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-      mediaRecorder.stop();
-    }
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
     return blobPromise;
   };
 
   return { start, stop, get stream() { return stream; } };
 }
 
-/**
- * Record audio from the microphone and return the recorded Blob when stopped.
- * @returns {{ start: () => Promise<void>, stop: () => Promise<Blob> }}
- */
-export function recordAudioForStt(onAutoStop) {
-  const rec = createRecorder(onAutoStop);
+export function recordAudioForStt(onAutoStop, onLevel) {
+  const rec = createRecorder(onAutoStop ?? null, onLevel ?? null);
   return {
-    start: rec.start,
+    start: (existingStream) => rec.start(existingStream),
     stop: rec.stop,
+    get stream() { return rec.stream; },
   };
 }
 
-/**
- * Send an audio Blob to the Faster-Whisper STT API and return the transcript.
- * @param {Blob} audioBlob
- * @returns {Promise<{ text: string }>}
- */
 export async function sendAudioToSttApi(audioBlob) {
+  console.log('[STT] blob size:', audioBlob.size, 'bytes | type:', audioBlob.type);
   const base = getSttApiUrl();
-  if (!base) {
-    throw new Error('VITE_STT_API_URL is not set');
-  }
+  if (!base) throw new Error('VITE_STT_API_URL is not set');
   const url = base.replace(/\/+$/, '') + '/stt';
   const formData = new FormData();
   const ext = audioBlob.type.includes('webm') ? '.webm' : '.mp4';
   formData.append('file', audioBlob, `audio${ext}`);
 
-  const res = await fetch(url, {
-    method: 'POST',
-    body: formData,
-    headers: {},
-  });
-
+  const res = await fetch(url, { method: 'POST', body: formData, headers: {} });
   if (!res.ok) {
     const errText = await res.text();
     throw new Error(`STT failed: ${res.status} ${errText}`);
   }
-
   const data = await res.json();
-  return { text: (data && data.text) ? String(data.text).trim() : '' };
+  return { text: (data?.text) ? String(data.text).trim() : '' };
 }

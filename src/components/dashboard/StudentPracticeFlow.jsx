@@ -234,6 +234,9 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
     const [currentStep, setCurrentStep] = useState(standaloneHistoryOnly ? 1 : 0);
     const [selectedCase, setSelectedCase] = useState(null);
     const [selectedPatient, setSelectedPatient] = useState(null);
+    const [revealedSymptoms, setRevealedSymptoms] = useState([]);
+    const [conversationSummary, setConversationSummary] = useState('');
+    const patientTurnCount = useRef(0);
     const [casesFromDb, setCasesFromDb] = useState([]);
     const [casesLoading, setCasesLoading] = useState(true);
     const [casesError, setCasesError] = useState(null);
@@ -252,6 +255,9 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
     const [elapsedTime, setElapsedTime] = useState(0);
     const [showHint, setShowHint] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
+    const [isTranscribing, setIsTranscribing] = useState(false);
+    const micLevelBarRef = useRef(null);
+    const micLevelLabelRef = useRef(null);
     const [voiceEnabled, setVoiceEnabled] = useState(true);
     const [isSpeaking, setIsSpeaking] = useState(false);
     const [lastTranscript, setLastTranscript] = useState('');
@@ -274,6 +280,9 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         auscultation: false
     });
     const [playingSoundDemo, setPlayingSoundDemo] = useState(false);
+    const [hasDeteriorated, setHasDeteriorated] = useState(false);
+    const [isDeteriorating, setIsDeteriorating] = useState(false);
+    const [redFlagRecognized, setRedFlagRecognized] = useState(false);
     
     // Completion screen states
     const [showCompletionScreen, setShowCompletionScreen] = useState(false);
@@ -288,23 +297,11 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
     const recognitionRef = useRef(null);
     const mockRecordingTimeoutRef = useRef(null);
     const fwRecordingRef = useRef(null);
-    const preferredVoiceRef = useRef(null);
+    const chatInputRef = useRef(null);
+    const prewarmStreamRef = useRef(null);
     const sessionIdRef = useRef(null);
 
-    useEffect(() => {
-        const pickVoice = () => {
-            const voices = window.speechSynthesis.getVoices();
-            if (voices.length === 0) return;
-            const en = voices.filter((v) => v.lang.startsWith('en'));
-            const preferred = en.find((v) =>
-                /natural|neural|aria|zira|sabina|daniel|mark|samantha|karen|moira/i.test(v.name)
-            ) || en.find((v) => v.lang === 'en-US') || en[0] || voices[0];
-            if (preferred) preferredVoiceRef.current = preferred;
-        };
-        pickVoice();
-        window.speechSynthesis.onvoiceschanged = pickVoice;
-        return () => { window.speechSynthesis.onvoiceschanged = null; };
-    }, []);
+
 
     const fetchCases = useCallback(async () => {
         setCasesLoading(true);
@@ -337,6 +334,25 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
+
+    // Reset session state when the case changes
+    useEffect(() => {
+        setRevealedSymptoms([]);
+        setConversationSummary('');
+        patientTurnCount.current = 0;
+    }, [selectedCase]);
+
+    // Pre-warm mic when entering history-taking step so getUserMedia is instant on first click
+    useEffect(() => {
+        if (currentStep !== 1 || !isFasterWhisperSttEnabled()) return;
+        navigator.mediaDevices.getUserMedia({ audio: true })
+            .then(s => { prewarmStreamRef.current = s; })
+            .catch(() => {});
+        return () => {
+            prewarmStreamRef.current?.getTracks().forEach(t => t.stop());
+            prewarmStreamRef.current = null;
+        };
+    }, [currentStep]);
 
     useEffect(() => {
         if (currentStep === 1) {
@@ -387,26 +403,38 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         return replies[Math.floor(Math.random() * replies.length)];
     }, [selectedCase, getCaseMockKey]);
 
-    const fallbackSpeak = useCallback((text) => {
+    const fallbackSpeak = useCallback((text, gender) => {
         if (typeof window === 'undefined' || !window.speechSynthesis) {
             setIsSpeaking(false);
             return;
         }
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.rate = 0.85;
-        utterance.pitch = 1;
+        // Strip expressions like *coughs* before speaking
+        const clean = text.replace(/\*[^*]+\*/g, '').replace(/\s+/g, ' ').trim();
+        const utterance = new SpeechSynthesisUtterance(clean);
+        utterance.rate = 0.9;
+        utterance.pitch = gender === 'male' ? 0.85 : 1.05;
         utterance.volume = 1;
-        if (preferredVoiceRef.current) utterance.voice = preferredVoiceRef.current;
-        else {
-            const voices = window.speechSynthesis.getVoices();
-            if (voices.length > 0) {
-                const en = voices.filter((v) => v.lang.startsWith('en'));
-                const preferred = en.find((v) =>
-                    /natural|neural|aria|zira|sabina|daniel|mark|samantha|karen|moira/i.test(v.name)
-                ) || en.find((v) => v.lang === 'en-US') || en[0] || voices[0];
-                if (preferred) utterance.voice = preferred;
-            }
-        }
+
+        const voices = window.speechSynthesis.getVoices();
+        const en = voices.filter(v => v.lang.startsWith('en'));
+        const isMale = gender === 'male';
+
+        console.log('[TTS] available voices:', voices.map(v => v.name));
+
+        const MALE_NAMES   = /\b(guy|davis|mark|david|ryan|eric|brandon|christopher|jacob|james|tony|richard|george|reed|steffan|adam|liam|noah|oliver)\b/i;
+        const FEMALE_NAMES = /\b(aria|jenny|michelle|elizabeth|ana|zira|sabrina|sonia|neerja|leah|maisie|abbi|bella|hollie|libby|natasha|ava|emma|olivia)\b/i;
+
+        const preferred =
+            // 1. Named gender-specific match
+            en.find(v => isMale ? MALE_NAMES.test(v.name) : FEMALE_NAMES.test(v.name)) ||
+            // 2. Any "natural/neural/online" voice — still prefer gender via pitch
+            en.find(v => /(natural|neural|online)/i.test(v.name)) ||
+            // 3. en-US fallback
+            en.find(v => v.lang === 'en-US') ||
+            en[0] || voices[0];
+
+        console.log('[TTS] selected voice:', preferred?.name, '| gender:', gender);
+        if (preferred) utterance.voice = preferred;
         utterance.onend = () => setIsSpeaking(false);
         utterance.onerror = () => setIsSpeaking(false);
         window.speechSynthesis.speak(utterance);
@@ -418,27 +446,17 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
     }, [selectedPatient]);
 
 
-    const fetchTTSBlob = useCallback(async (text, patient) => {
+    const playTTS = useCallback((text, patient) => {
         const apiBase = getPatientReplyApiUrl();
-        if (!apiBase) return null;
-        try {
-            const res = await fetch(`${apiBase}/tts`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: text.trim(), voice: getVoiceGender(patient) })
-            });
-            if (!res.ok) return null;
-            return await res.blob();
-        } catch { return null; }
-    }, [getVoiceGender]);
-
-    const playBlob = useCallback((blob, text) => {
-        const url = URL.createObjectURL(blob);
+        if (!apiBase) { fallbackSpeak(text); return; }
+        const gender = getVoiceGender(patient);
+        const url = `${apiBase}/tts?text=${encodeURIComponent(text.trim())}&voice=${gender}`;
         const audio = new Audio(url);
-        audio.onended = () => { URL.revokeObjectURL(url); setIsSpeaking(false); };
-        audio.onerror = () => { URL.revokeObjectURL(url); fallbackSpeak(text); };
-        audio.play();
-    }, [fallbackSpeak]);
+        setIsSpeaking(true);
+        audio.onended = () => setIsSpeaking(false);
+        audio.onerror = () => { setIsSpeaking(false); fallbackSpeak(text); };
+        audio.play().catch(() => { setIsSpeaking(false); fallbackSpeak(text); });
+    }, [getVoiceGender, fallbackSpeak]);
 
     const handleSendMessage = useCallback(async () => {
         if (!inputValue.trim() || isTyping) return;
@@ -491,10 +509,15 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
 
                         // Conversation
                         student_question: transcript,
-                        conversation_history: messages.slice(-4)
+                        conversation_history: messages.slice(-10),
+                        revealed_symptoms: revealedSymptoms,
+                        conversation_summary: conversationSummary,
                     })
                 });
                 const data = await res.json();
+                if (res.ok && data?.revealed_symptoms) {
+                    setRevealedSymptoms(data.revealed_symptoms);
+                }
                 patientResponse = (res.ok && data?.text) ? data.text : getPatientReply();
             } catch {
                 patientResponse = getPatientReply();
@@ -503,37 +526,47 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
             patientResponse = getPatientReply();
         }
 
-        // Collect TTS audio before showing text so they appear in sync
-        let audioBlob = null;
-        if (voiceEnabled) {
-            audioBlob = await fetchTTSBlob(patientResponse, selectedPatient);
-        }
-
         // Strip *expressions* from displayed text — they're for TTS only
         const displayText = patientResponse.replace(/\*[^*]+\*/g, '').replace(/\s+/g, ' ').trim();
 
-        setMessages(prev => [...prev, {
-            role: 'patient',
-            content: displayText,
-            ts: Date.now()
-        }]);
+        // Show text immediately
+        const updatedMessages = [...messages, studentMessage, { role: 'patient', content: displayText, ts: Date.now() }];
+        setMessages(prev => [...prev, { role: 'patient', content: displayText, ts: Date.now() }]);
+
+        // Rolling summary — fire every 6 patient turns in the background
+        patientTurnCount.current += 1;
+        if (patientTurnCount.current % 6 === 0 && apiBase) {
+            const caseKey = getCaseMockKey(selectedCase);
+            fetch(`${apiBase}/summarise-session`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    conversation_history: updatedMessages,
+                    patient_name: selectedPatient?.name || '',
+                    case_title: selectedCase?.title || '',
+                    symptoms: CASE_SYMPTOMS[caseKey] || [],
+                    prior_summary: conversationSummary,
+                }),
+            })
+                .then(r => r.json())
+                .then(d => { if (d?.summary) setConversationSummary(d.summary); })
+                .catch(() => {});
+        }
         setIsTyping(false);
 
-        if (audioBlob) {
+        if (voiceEnabled) {
             window.speechSynthesis.cancel();
             setIsSpeaking(true);
-            playBlob(audioBlob, patientResponse);
-        } else if (voiceEnabled) {
-            fallbackSpeak(patientResponse);
+            fallbackSpeak(patientResponse, getVoiceGender(selectedPatient));
         }
-    }, [inputValue, isTyping, getPatientReply, fetchTTSBlob, playBlob, fallbackSpeak, voiceEnabled, selectedCase, selectedPatient, messages, getCaseMockKey]);
+    }, [inputValue, isTyping, getPatientReply, fallbackSpeak, voiceEnabled, selectedCase, selectedPatient, messages, getCaseMockKey, revealedSymptoms, conversationSummary]);
 
-    const handleKeyDown = (e) => {
+    const handleKeyDown = useCallback((e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             handleSendMessage();
         }
-    };
+    }, [handleSendMessage]);
 
     const getMockTranscript = useCallback(() => {
         const caseKey = getCaseMockKey(selectedCase);
@@ -555,10 +588,13 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         setMessages(prev => [...prev, { role: 'alert', content: message, ts: Date.now() }]);
     }, []);
 
+    const stopMicLevelMonitor = useCallback(() => {
+        if (micLevelBarRef.current) micLevelBarRef.current.style.width = '0%';
+        if (micLevelLabelRef.current) micLevelLabelRef.current.textContent = '';
+    }, []);
+
     const applySttTranscript = useCallback((text) => {
         const transcript = typeof text === 'string' ? text : '';
-        console.log('[STT] raw transcript:', transcript);
-        console.log('[STT] transcript length:', transcript.length);
         setInputValue(transcript);
         setLastTranscript(transcript);
         if (!transcript.trim()) {
@@ -566,21 +602,29 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         }
     }, [reportSttIssue]);
 
+    // Focus textarea after transcription completes (isTranscribing → false re-enables it)
+    useEffect(() => {
+        if (!isTranscribing) chatInputRef.current?.focus();
+    }, [isTranscribing]);
+
     const toggleRecording = useCallback(() => {
         if (isRecording) {
             // Stopping: either Faster-Whisper recording or browser SpeechRecognition
             if (fwRecordingRef.current) {
                 const controller = fwRecordingRef.current;
                 fwRecordingRef.current = null;
+                stopMicLevelMonitor();
+                setIsRecording(false);
+                setIsTranscribing(true);
                 controller.stop()
                     .then((blob) => sendAudioToSttApi(blob))
                     .then(({ text }) => {
                         applySttTranscript(text);
-                        setIsRecording(false);
+                        setIsTranscribing(false);
                     })
                     .catch((error) => {
                         reportSttIssue('Speech transcription failed. Check your STT server and try again.', error);
-                        setIsRecording(false);
+                        setIsTranscribing(false);
                     });
                 return;
             }
@@ -601,23 +645,39 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                 const ctrl = fwRecordingRef.current;
                 if (!ctrl) return;
                 fwRecordingRef.current = null;
+                stopMicLevelMonitor();
+                setIsRecording(false);
+                setIsTranscribing(true);
                 ctrl.stop()
                     .then((blob) => sendAudioToSttApi(blob))
                     .then(({ text }) => {
                         applySttTranscript(text);
-                        setIsRecording(false);
+                        setIsTranscribing(false);
                     })
                     .catch((error) => {
                         reportSttIssue('Speech transcription failed. Check your STT server and try again.', error);
-                        setIsRecording(false);
+                        setIsTranscribing(false);
                     });
             };
-            const controller = recordAudioForStt(handleAutoStop);
-            controller.start()
-                .then(() => {
-                    fwRecordingRef.current = controller;
-                })
+            const onLevel = (level) => {
+                if (micLevelBarRef.current) {
+                    micLevelBarRef.current.style.width = `${level}%`;
+                    micLevelBarRef.current.style.background =
+                        level > 60 ? 'linear-gradient(90deg,#6ee7b7,#3b82f6)' :
+                        level > 20 ? '#6ee7b7' : 'rgba(255,255,255,0.2)';
+                }
+                if (micLevelLabelRef.current) {
+                    micLevelLabelRef.current.textContent =
+                        level < 5 ? 'No signal' : level < 20 ? 'Low' : level < 60 ? 'Good' : 'Strong';
+                }
+            };
+            const controller = recordAudioForStt(handleAutoStop, onLevel);
+            const existingStream = prewarmStreamRef.current;
+            prewarmStreamRef.current = null;
+            controller.start(existingStream)
+                .then(() => { fwRecordingRef.current = controller; })
                 .catch((error) => {
+                    stopMicLevelMonitor();
                     setIsRecording(false);
                     reportSttIssue('Microphone access failed. Please allow microphone permissions and retry.', error);
                 });
@@ -670,7 +730,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                 setIsRecording(false);
             }, 1500);
         }
-    }, [isRecording, getMockTranscript, applySttTranscript, reportSttIssue]);
+    }, [isRecording, getMockTranscript, applySttTranscript, reportSttIssue, stopMicLevelMonitor]);
 
     // Cleanup speech recognition, Faster-Whisper recording, and synthesis on unmount
     useEffect(() => {
@@ -1622,13 +1682,34 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                                 {/* Input area */}
                                 <div className="p-3 flex-shrink-0">
                                     {isRecording && (
-                                        <div className="flex items-center justify-center gap-2 mb-2 py-1.5 px-4 rounded-full mx-auto w-fit" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.18)' }}>
-                                            <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-                                            <span className="text-xs font-medium" style={{ color: '#f87171' }}>Listening — speak now</span>
+                                        <div className="flex flex-col items-center gap-1.5 mb-2">
+                                            <div className="flex items-center gap-2 py-1.5 px-4 rounded-full w-fit" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.18)' }}>
+                                                <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                                                <span className="text-xs font-medium" style={{ color: '#f87171' }}>Listening — speak now</span>
+                                            </div>
+                                            {/* Live mic level bar — DOM-driven, no React re-renders */}
+                                            <div className="w-40 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.07)' }}>
+                                                <div
+                                                    ref={micLevelBarRef}
+                                                    className="h-full rounded-full"
+                                                    style={{ width: '0%', transition: 'width 80ms linear', background: 'rgba(255,255,255,0.2)' }}
+                                                />
+                                            </div>
+                                            <span ref={micLevelLabelRef} className="text-[9px]" style={{ color: 'rgba(255,255,255,0.25)' }} />
+                                        </div>
+                                    )}
+                                    {isTranscribing && (
+                                        <div className="flex items-center justify-center gap-2 mb-2 py-1.5 px-4 rounded-full mx-auto w-fit" style={{ background: 'rgba(110,231,183,0.08)', border: '1px solid rgba(110,231,183,0.2)' }}>
+                                            <svg className="animate-spin w-3 h-3 flex-shrink-0" style={{ color: '#6ee7b7' }} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                            </svg>
+                                            <span className="text-xs font-medium" style={{ color: '#6ee7b7' }}>Transcribing…</span>
                                         </div>
                                     )}
                                     <div className="rounded-2xl overflow-hidden transition-all" style={{ background: 'rgba(255,255,255,0.04)', border: `1px solid ${isRecording ? 'rgba(239,68,68,0.3)' : 'rgba(255,255,255,0.09)'}` }}>
                                         <textarea
+                                            ref={chatInputRef}
                                             rows={1}
                                             placeholder={isRecording ? 'Listening...' : 'Ask the patient a question...'}
                                             className="w-full bg-transparent px-4 pt-3.5 pb-2 text-sm focus:outline-none resize-none placeholder:text-white/20"
@@ -1636,17 +1717,19 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                                             value={inputValue}
                                             onChange={e => setInputValue(e.target.value)}
                                             onKeyDown={handleKeyDown}
-                                            disabled={isTyping || isRecording || isSpeaking}
+                                            disabled={isTyping || isRecording || isTranscribing || isSpeaking}
                                         />
                                         <div className="flex items-center justify-between px-3 pb-3 pt-1">
                                             <button
                                                 onClick={toggleRecording}
-                                                disabled={isTyping || isSpeaking}
+                                                disabled={isTyping || isSpeaking || isTranscribing}
                                                 className="p-2 rounded-xl transition-all"
                                                 style={isRecording
                                                     ? { background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.25)' }
-                                                    : { color: 'rgba(255,255,255,0.3)', background: 'transparent' }}
-                                                title={isRecording ? 'Stop recording' : 'Voice input'}
+                                                    : isTranscribing
+                                                        ? { color: '#6ee7b7', background: 'rgba(110,231,183,0.08)' }
+                                                        : { color: 'rgba(255,255,255,0.3)', background: 'transparent' }}
+                                                title={isRecording ? 'Stop recording' : isTranscribing ? 'Transcribing…' : 'Voice input'}
                                             >
                                                 {isRecording ? <MicOff size={15} /> : <Mic size={15} />}
                                             </button>

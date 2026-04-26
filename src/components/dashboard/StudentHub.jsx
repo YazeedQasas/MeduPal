@@ -506,7 +506,7 @@ export function StudentHub({ setActiveTab }) {
         (a, b) => new Date(a.exam_date || 0) - new Date(b.exam_date || 0)
       );
 
-      const scored = allCompleted.filter(s => s.score != null && (s.session_type === 'practice' || s.type === 'practice'));
+      const scored = all.filter(s => s.score != null && (s.session_type === 'practice'));
       const avgScore = scored.length
         ? (scored.reduce((a, b) => a + b.score, 0) / scored.length).toFixed(1)
         : null;

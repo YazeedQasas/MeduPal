@@ -22,7 +22,7 @@ export function StudentHistory() {
     (async () => {
       const { data } = await supabase
         .from('sessions')
-        .select('id, start_time, status, score, session_type, type, case:cases(title)')
+        .select('id, start_time, status, score, session_type, case:cases(title)')
         .eq('student_id', user.id)
         .eq('status', 'Completed')
         .order('start_time', { ascending: false });
@@ -46,7 +46,7 @@ export function StudentHistory() {
       ) : (
         <div className="space-y-3">
           {sessions.map((s) => {
-            const isPractice = s.session_type === 'practice' || s.type === 'practice';
+            const isPractice = s.session_type === 'practice';
             const canShowScore = isPractice && s.score != null;
             const displayScore = s.score <= 10 ? `${s.score.toFixed(1)}/10` : `${Math.round(s.score)}%`;
 

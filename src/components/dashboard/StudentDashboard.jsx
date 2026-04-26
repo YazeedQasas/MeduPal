@@ -97,7 +97,7 @@ export function StudentDashboard({ setActiveTab }) {
       /* ── all completed sessions for this student ── */
       const { data: completed } = await supabase
         .from('sessions')
-        .select(`id, start_time, end_time, score, status, session_type, type, case:cases(title, category, difficulty)`)
+        .select(`id, start_time, end_time, score, status, session_type, case:cases(title, category, difficulty)`)
         .eq('student_id', user.id)
         .eq('status', 'Completed')
         .order('start_time', { ascending: false });
@@ -107,7 +107,7 @@ export function StudentDashboard({ setActiveTab }) {
       /* ── recent 5 (any status) ── */
       const { data: recent } = await supabase
         .from('sessions')
-        .select(`id, start_time, status, score, session_type, type, case:cases(title, category, difficulty)`)
+        .select(`id, start_time, status, score, session_type, case:cases(title, category, difficulty)`)
         .eq('student_id', user.id)
         .order('start_time', { ascending: false })
         .limit(5);
@@ -122,7 +122,7 @@ export function StudentDashboard({ setActiveTab }) {
         .limit(4);
 
       /* ── compute avg score (only practice; students cannot see exam scores) ── */
-      const scored = allCompleted.filter(s => s.score != null && (s.session_type === 'practice' || s.type === 'practice'));
+      const scored = allCompleted.filter(s => s.score != null && (s.session_type === 'practice'));
       const avgScore = scored.length
         ? (scored.reduce((a, b) => a + b.score, 0) / scored.length).toFixed(1)
         : null;
@@ -289,7 +289,7 @@ export function StudentDashboard({ setActiveTab }) {
                         <span className={cn('text-[10px] font-semibold px-2 py-0.5 rounded-full border', statusCls)}>
                           {s.status}
                         </span>
-                        {s.score != null && (s.session_type === 'practice' || s.type === 'practice') && (
+                        {s.score != null && (s.session_type === 'practice') && (
                           <span className="text-sm font-bold text-foreground tabular-nums w-12 text-right">
                             {s.score <= 10 ? `${s.score.toFixed(1)}` : `${Math.round(s.score)}%`}
                             {s.score <= 10 && <span className="text-xs font-normal text-muted-foreground">/10</span>}

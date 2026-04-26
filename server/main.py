@@ -259,6 +259,8 @@ class PatientReplyRequest(BaseModel):
     social_history: str = ""
     family_history: str = ""
     system_prompt: str = ""  # LLM persona prompt from patients.js
+    revealed_symptoms: list[str] = []  # symptoms already disclosed to the student this session
+    conversation_summary: str = ""    # rolling summary of prior turns (injected when non-empty)
 
 
 class TTSRequest(BaseModel):
@@ -316,7 +318,7 @@ def get_model():
     global _model
     if _model is None:
         import whisper
-        name = os.environ.get("WHISPER_MODEL", "base")
+        name = os.environ.get("WHISPER_MODEL", "tiny.en")
         _model = whisper.load_model(name, device=os.environ.get("WHISPER_DEVICE", "cpu"))
     return _model
 
@@ -324,6 +326,9 @@ def get_model():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _check_ffmpeg()
+    # Pre-warm Kokoro in background so first TTS request is instant
+    import asyncio
+    asyncio.get_event_loop().run_in_executor(None, _get_kokoro)
     yield
     global _model
     _model = None
@@ -530,74 +535,141 @@ async def _chat(
     return await _ollama_chat(system, current_question, conversation_history=conversation_history)
 
 
+import re as _re
+
+_EXPRESSION_MAP = {
+    r'cough\w*':             '*coughs*',
+    r'laugh\w*':             '*laughs*',
+    r'sigh\w*':              '*sighs*',
+    r'gasp\w*':              '*gasps*',
+    r'clear\w* throat\w*':  '*clears throat*',
+    r'wince\w*':             '*winces*',
+    r'groan\w*':             '*groans*',
+    r'chuckle\w*':           '*chuckles*',
+}
+
+def _normalize_expressions(t: str) -> str:
+    def replace_expr(m):
+        inner = m.group(1).strip().lower()
+        for pattern, replacement in _EXPRESSION_MAP.items():
+            if _re.search(pattern, inner):
+                return replacement
+        return ''
+    return _re.sub(r'\*([^*]+)\*', replace_expr, t)
+
+
+_kokoro_pipeline = None
+
+def _get_kokoro():
+    global _kokoro_pipeline
+    if _kokoro_pipeline is None:
+        import warnings
+        from kokoro import KPipeline
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            _kokoro_pipeline = KPipeline(lang_code='a', repo_id='hexgrad/Kokoro-82M')
+    return _kokoro_pipeline
+
+
+def _kokoro_tts(text: str, voice: str) -> bytes:
+    """Generate audio with Kokoro locally, return WAV bytes."""
+    import io
+    import numpy as np
+    import soundfile as sf
+
+    clean = _re.sub(r'\*[^*]+\*', '', text).strip()
+    pipe = _get_kokoro()
+    chunks = []
+    for _, _, audio in pipe(clean, voice=voice, speed=1.0):
+        chunks.append(audio)
+    if not chunks:
+        return b''
+    combined = np.concatenate(chunks)
+    buf = io.BytesIO()
+    sf.write(buf, combined, 24000, format='WAV')
+    return buf.getvalue()
+
+
+async def _tts_stream(text: str, gender: str):
+    import asyncio
+    import io
+    import soundfile as sf
+    import numpy as np
+    from fastapi.responses import StreamingResponse
+
+    text = _re.sub(r'\*[^*]+\*', '', text.strip()[:4096]).strip()
+    gender = (gender or "female").strip().lower()
+    voice = 'af_heart' if gender == 'female' else 'am_adam'
+
+    # Split into sentences so we can stream chunk-by-chunk
+    sentences = [s.strip() for s in _re.split(r'(?<=[.!?])\s+', text) if s.strip()]
+    if not sentences:
+        sentences = [text]
+
+    loop = asyncio.get_event_loop()
+
+    def gen_sentence(sentence):
+        pipe = _get_kokoro()
+        chunks = [a for _, _, a in pipe(sentence, voice=voice, speed=1.0)]
+        if not chunks:
+            return b''
+        combined = np.concatenate(chunks)
+        buf = io.BytesIO()
+        sf.write(buf, combined, 24000, format='WAV', subtype='PCM_16')
+        return buf.getvalue()
+
+    async def generate():
+        for sentence in sentences:
+            try:
+                wav = await loop.run_in_executor(None, gen_sentence, sentence)
+                if wav:
+                    yield wav
+            except Exception as e:
+                print(f"[Kokoro sentence error] {e}")
+
+    return StreamingResponse(generate(), media_type="audio/wav")
+
+
 @app.post("/tts")
 async def tts(body: TTSRequest):
-    """Stream TTS audio via ElevenLabs."""
-    from fastapi.responses import StreamingResponse
-    from elevenlabs.client import ElevenLabs
-
-    text = body.text.strip()[:4096]
-    if not text:
+    if not body.text.strip():
         raise HTTPException(status_code=400, detail="Empty text")
-    if not ELEVENLABS_API_KEY:
-        raise HTTPException(status_code=503, detail="ElevenLabs API key not configured")
+    return await _tts_stream(body.text, body.voice)
 
-    # voice passed from frontend is the gender string ("male"/"female")
-    gender = body.voice.strip().lower()
-    voice_name = ELEVENLABS_VOICE_MALE if gender == "male" else ELEVENLABS_VOICE_FEMALE
 
-    import re
+@app.get("/tts")
+async def tts_get(text: str, voice: str = "female"):
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="Empty text")
+    return await _tts_stream(text, voice)
 
-    # Normalize verbose expressions to simple ones ElevenLabs recognises as sounds
-    EXPRESSION_MAP = {
-        r'cough\w*':         '*coughs*',
-        r'laugh\w*':         '*laughs*',
-        r'sigh\w*':          '*sighs*',
-        r'gasp\w*':          '*gasps*',
-        r'clear\w* throat\w*': '*clears throat*',
-        r'wince\w*':         '*winces*',
-        r'groan\w*':         '*groans*',
-        r'chuckle\w*':       '*chuckles*',
-    }
 
-    def normalize_expressions(t: str) -> str:
-        def replace_expr(m):
-            inner = m.group(1).strip().lower()
-            for pattern, replacement in EXPRESSION_MAP.items():
-                if re.search(pattern, inner):
-                    return replacement
-            return ''  # unknown expression — drop it
-        return re.sub(r'\*([^*]+)\*', replace_expr, t)
+def _extract_revealed_symptoms(
+    response_text: str,
+    all_symptoms: list[str],
+    already_revealed: list[str],
+) -> list[str]:
+    """
+    Keyword-match the LLM response against the case symptom list.
+    Returns the updated revealed list (already_revealed ∪ newly_found).
+    Over-detection is preferred over under-detection — it's better to
+    'unlock' a symptom early than to keep injecting a stale 'hide this' rule.
+    """
+    text = response_text.lower()
+    revealed = {s.lower() for s in already_revealed}
 
-    if gender == "female":
-        import edge_tts
-        # Strip all expressions — edge-tts reads them as text
-        clean = re.sub(r'\*[^*]+\*', '', text).strip()
-        async def generate_female():
-            try:
-                communicate = edge_tts.Communicate(clean, "en-US-AriaNeural")
-                async for chunk in communicate.stream():
-                    if chunk["type"] == "audio":
-                        yield chunk["data"]
-            except Exception as e:
-                print(f"[edge-tts error] {e}")
-        return StreamingResponse(generate_female(), media_type="audio/mpeg")
+    for symptom in all_symptoms:
+        s_lower = symptom.lower()
+        if s_lower in revealed:
+            continue
+        # Use words longer than 3 chars as keywords; fall back to all words
+        keywords = [w for w in s_lower.split() if len(w) > 3] or s_lower.split()
+        if any(kw in text for kw in keywords):
+            revealed.add(s_lower)
 
-    # ElevenLabs for male — normalize expressions so they produce sounds not speech
-    tts_text = normalize_expressions(text)
-
-    def generate():
-        client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
-        audio_stream = client.text_to_speech.stream(
-            voice_id=voice_name,
-            text=tts_text,
-            model_id="eleven_turbo_v2_5",
-        )
-        for chunk in audio_stream:
-            if chunk:
-                yield chunk
-
-    return StreamingResponse(generate(), media_type="audio/mpeg")
+    # Return in original casing
+    symptom_map = {s.lower(): s for s in all_symptoms}
+    return [symptom_map.get(s, s) for s in revealed]
 
 
 @app.post("/patient-reply")
@@ -629,18 +701,129 @@ async def patient_reply(body: PatientReplyRequest):
             case_key, persona, title, body.case_category or "", body.symptoms or []
         )
 
+    # Rolling summary — ground the patient in what they've already said in earlier turns
+    if body.conversation_summary.strip():
+        system = (
+            system
+            + "\n\nSummary of what you have already told this student in earlier turns "
+            "(treat this as your memory — do not contradict any of it):\n"
+            + body.conversation_summary.strip()
+        )
+
+    # Symptom disclosure state — tell the patient what it has/hasn't revealed yet
+    if body.symptoms:
+        revealed_set = {s.lower() for s in body.revealed_symptoms}
+        already = [s for s in body.symptoms if s.lower() in revealed_set]
+        not_yet = [s for s in body.symptoms if s.lower() not in revealed_set]
+        disclosure_block = "\n\nSymptom disclosure state for this session:"
+        if already:
+            disclosure_block += f"\n- Already discussed with the student (you may elaborate if asked again): {', '.join(already)}."
+        if not_yet:
+            disclosure_block += f"\n- NOT yet disclosed (do NOT mention these unless the student asks about them directly): {', '.join(not_yet)}."
+        system = system + disclosure_block
+
+    # RAG: retrieve relevant chunks for this specific patient-case combination
+    case_key = resolve_case_key(body.case_id, body.case_title)
+    compound_id = f"{body.patient_id}__{case_key}" if body.patient_id else ""
+    rag_chunks = await _retrieve_patient_context(current_question, compound_id)
+    if rag_chunks:
+        rag_block = (
+            "\n\nRelevant patient record details — use these facts to answer accurately. "
+            "Do NOT reveal them unprompted; only use them when the student's question is relevant:\n"
+            + "\n".join(f"- {c}" for c in rag_chunks)
+        )
+        system = system + rag_block
+
     text = await _chat(system, current_question, conversation_history=body.conversation_history)
 
     if not text:
         case_key = resolve_case_key(body.case_id, body.case_title)
         text = _fallback_reply(case_key)
 
-    return {"text": text}
+    updated_revealed = _extract_revealed_symptoms(text, body.symptoms, body.revealed_symptoms)
+    return {"text": text, "revealed_symptoms": updated_revealed}
+
+
+class SummariseRequest(BaseModel):
+    conversation_history: list[dict]      # full message list [{role, content}]
+    patient_name: str = ""
+    case_title: str = ""
+    symptoms: list[str] = []
+    prior_summary: str = ""               # existing summary to build on (may be empty)
+
+
+@app.post("/summarise-session")
+async def summarise_session(body: SummariseRequest):
+    """
+    Produce a compact factual summary of what the patient has disclosed so far.
+    Called by the frontend every 6 patient turns. Returns {"summary": "..."}.
+    """
+    # Build readable transcript from history (student + patient turns only)
+    lines = []
+    for msg in body.conversation_history:
+        role = (msg.get("role") or "").lower()
+        content = (msg.get("content") or "").strip()
+        if not content or role in ("system", "alert"):
+            continue
+        label = "Student" if role == "student" else "Patient"
+        lines.append(f"{label}: {content}")
+    transcript = "\n".join(lines)
+
+    if not transcript:
+        return {"summary": body.prior_summary}
+
+    prior_block = (
+        f"Prior summary (update and expand this — do not repeat it verbatim):\n{body.prior_summary}\n\n"
+        if body.prior_summary.strip() else ""
+    )
+    symptoms_block = (
+        f"Full symptom list for this case: {', '.join(body.symptoms)}.\n"
+        if body.symptoms else ""
+    )
+
+    prompt = (
+        f"You are a medical scribe. Based on the conversation below between a medical student and a "
+        f"patient named {body.patient_name or 'the patient'} (case: {body.case_title or 'unknown'}), "
+        f"write a single compact paragraph summarising exactly what the patient has disclosed so far.\n\n"
+        f"{symptoms_block}"
+        f"{prior_block}"
+        f"Conversation:\n{transcript}\n\n"
+        f"Rules:\n"
+        f"- Be factual and specific (include numbers, timing, severity scores where mentioned)\n"
+        f"- Write in third person ('The patient reported...')\n"
+        f"- Do not invent anything not said in the conversation\n"
+        f"- Keep it under 120 words\n"
+        f"- End with: 'Has not yet discussed: [list any symptoms from the case not mentioned]'\n"
+        f"Summary:"
+    )
+
+    summary = await _chat(prompt, "", conversation_history=None) or body.prior_summary
+    return {"summary": summary.strip()}
+
+
+async def _groq_stt(content: bytes, filename: str) -> str:
+    """Transcribe audio via Groq Whisper API. Raises on failure."""
+    api_key = (
+        os.getenv("GROQ_API_KEY", "").strip()
+        or _get_env_from_file(".env.local", "GROQ_API_KEY")
+        or _get_env_from_file(".env", "GROQ_API_KEY")
+    )
+    if not api_key:
+        raise ValueError("GROQ_API_KEY not set")
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(
+            "https://api.groq.com/openai/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files={"file": (filename, content, "audio/webm")},
+            data={"model": "whisper-large-v3-turbo", "language": "en", "response_format": "json"},
+        )
+        r.raise_for_status()
+        return (r.json().get("text") or "").strip()
 
 
 @app.post("/stt")
 async def stt(file: UploadFile = File(...)):
-    """Accept an audio file (e.g. webm from MediaRecorder), transcribe with Whisper, return text."""
+    """Transcribe audio — tries Groq Whisper first, falls back to local Whisper."""
     suffix = os.path.splitext(file.filename or "audio.webm")[1] or ".webm"
     if not suffix.startswith("."):
         suffix = "." + suffix
@@ -653,6 +836,16 @@ async def stt(file: UploadFile = File(...)):
     if not content:
         return {"text": ""}
 
+    # Try Groq cloud first (fast)
+    try:
+        text = await _groq_stt(content, f"audio{suffix}")
+        return {"text": text}
+    except ValueError:
+        pass  # no API key — fall through to local
+    except Exception as e:
+        print(f"[STT] Groq failed, falling back to local Whisper: {e}")
+
+    # Local Whisper fallback
     tmp = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -661,7 +854,7 @@ async def stt(file: UploadFile = File(...)):
         tmp = tmp_path
 
         model = get_model()
-        result = model.transcribe(tmp_path, language="en", fp16=False)
+        result = model.transcribe(tmp_path, language="en", task="transcribe", fp16=False, beam_size=1)
         text = (result.get("text") or "").strip()
         return {"text": text}
     except Exception as e:

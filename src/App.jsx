@@ -406,6 +406,11 @@ function AppContent() {
     }
   };
 
+  // Practice and exam pages are full-screen — no sidebar
+  if (activeTab === 'student-practice' || activeTab === 'student-exam') {
+    return renderContent();
+  }
+
   return (
     <MainLayout activeTab={activeTab} setActiveTab={setActiveTab}>
       {renderContent()}
