@@ -18,6 +18,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
 import { cn } from '../../lib/utils';
+import { assignExam } from '../../lib/assignExam';
 
 const P = {
   glass: 'rgba(255,255,255,0.03)',
@@ -36,12 +37,6 @@ const INPUT_CLASS =
   'w-full px-3 py-2.5 rounded-xl text-sm bg-white/5 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/50 transition-all duration-200';
 const SELECT_CLASS = `${INPUT_CLASS} [color-scheme:dark]`;
 
-const MOCK_EXAMINERS = [
-  { id: 'e1', label: 'Dr. Ibrahim' },
-  { id: 'e2', label: 'Dr. Salma' },
-  { id: 'e3', label: 'Dr. Carter' },
-];
-
 const STATION_TEMPLATES = [
   { id: 'quick-4', label: 'Quick OSCE (4 stations)', count: 4, duration: 8 },
   { id: 'standard-6', label: 'Standard OSCE (6 stations)', count: 6, duration: 10 },
@@ -53,7 +48,6 @@ function createStation(seed = Date.now()) {
     id: `station-${seed}-${Math.random().toString(16).slice(2, 6)}`,
     caseId: '',
     duration: '10',
-    examinerId: '',
   };
 }
 
@@ -129,21 +123,16 @@ function StudentSelector({
   setQuery,
   selectedIds,
   toggleStudent,
-  conflictIds,
-  showConflictOnly,
-  setShowConflictOnly,
   fieldError,
   onSelectAllVisible,
   onClearVisible,
 }) {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let base = q
+    return q
       ? students.filter((s) => s.name.toLowerCase().includes(q) || s.email.toLowerCase().includes(q))
       : students;
-    if (showConflictOnly) base = base.filter((s) => conflictIds.has(s.id));
-    return base;
-  }, [students, query, showConflictOnly, conflictIds]);
+  }, [students, query]);
 
   return (
     <GlassCard className="lg:sticky lg:top-4 lg:h-[80vh] flex flex-col min-h-0">
@@ -154,16 +143,6 @@ function StudentSelector({
             Step 1: Students
           </h3>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowConflictOnly((v) => !v)}
-          className={cn(
-            'text-[11px] px-2 py-1 rounded-lg border',
-            showConflictOnly ? 'border-amber-400/50 bg-amber-500/10 text-amber-300' : 'border-white/10 text-white/70'
-          )}
-        >
-          Conflicts only
-        </button>
       </div>
 
       <div className="relative mb-2">
@@ -204,25 +183,19 @@ function StudentSelector({
         ) : filtered.length === 0 ? (
           <div className="py-8 text-center">
             <p className="text-xs" style={{ color: P.muted }}>No advisees found.</p>
-            <p className="text-[11px] mt-1" style={{ color: P.muted }}>Go to Students and assign advisees first.</p>
+            <p className="text-[11px] mt-1" style={{ color: P.muted }}>
+              Only exam-enabled advisees appear here. Enable Exam Access from Settings if needed.
+            </p>
           </div>
         ) : (
           filtered.map((student) => {
             const selected = selectedIds.includes(student.id);
-            const hasConflict = conflictIds.has(student.id);
             return (
               <label key={student.id} className="flex items-start gap-2 px-3 py-2.5 border-b border-white/5 last:border-0 cursor-pointer transition-colors" style={{ background: selected ? 'rgba(52,211,153,0.08)' : 'transparent' }}>
                 <input type="checkbox" checked={selected} onChange={() => toggleStudent(student.id)} className="mt-1" style={{ accentColor: P.accent }} />
                 <div className="min-w-0">
                   <p className="text-xs font-semibold truncate" style={{ color: P.text }}>{student.name}</p>
                   <p className="text-[11px] truncate" style={{ color: P.muted }}>{student.email}</p>
-                  {hasConflict && (
-                    <div className="mt-1">
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-400/30">
-                        Time conflict
-                      </span>
-                    </div>
-                  )}
                 </div>
               </label>
             );
@@ -245,7 +218,6 @@ function StationCard({
   isFirst,
   isLast,
   caseOptions,
-  examinerOptions,
   errors,
 }) {
   return (
@@ -277,7 +249,7 @@ function StationCard({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
           <label className="block text-[11px] mb-1" style={{ color: P.muted }}>Case</label>
           <select value={station.caseId} onChange={(e) => onUpdate(station.id, { caseId: e.target.value })} className={cn(SELECT_CLASS, errors?.caseId && 'border-red-500/50')}>
@@ -293,14 +265,10 @@ function StationCard({
           {errors?.duration && <p className="text-xs mt-1 text-red-300">{errors.duration}</p>}
         </div>
 
-        <div>
-          <label className="block text-[11px] mb-1" style={{ color: P.muted }}>Examiner (optional)</label>
-          <select value={station.examinerId} onChange={(e) => onUpdate(station.id, { examinerId: e.target.value })} className={SELECT_CLASS}>
-            <option value="">Unassigned</option>
-            {examinerOptions.map((e) => <option key={e.id} value={e.id}>{e.label}</option>)}
-          </select>
-        </div>
       </div>
+      <p className="text-[11px] mt-2" style={{ color: P.muted }}>
+        Examiner is automatically set to the instructor assigning this exam.
+      </p>
 
       {errors?.duplicateCase && (
         <p className="text-xs mt-2 pl-2 border-l-2" style={{ color: P.warn, borderColor: 'rgba(245,158,11,0.45)' }}>
@@ -355,9 +323,6 @@ function validateSchedule(examDate, examTime, hasScheduleConflict) {
   if (selected <= new Date()) {
     return { date: 'Cannot select a past date', schedule: '', conflict: false };
   }
-  if (hasScheduleConflict) {
-    return { date: '', schedule: 'This time overlaps with another exam', conflict: true };
-  }
   return { date: '', schedule: '', conflict: false };
 }
 
@@ -394,11 +359,12 @@ export function AssignExamPage({ setActiveTab }) {
   const [submitting, setSubmitting] = useState(false);
   const [draftSaved, setDraftSaved] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
-  const [showConflictOnly, setShowConflictOnly] = useState(false);
-  const [conflictStudentIds, setConflictStudentIds] = useState(new Set());
   const [activeStep, setActiveStep] = useState(1);
   const [restoredDraft, setRestoredDraft] = useState(false);
   const [successPayload, setSuccessPayload] = useState(null);
+  const [submitWarnings, setSubmitWarnings] = useState([]);
+  const [submitError, setSubmitError] = useState('');
+  const [submitStage, setSubmitStage] = useState('');
 
   const sectionRefs = {
     students: useRef(null),
@@ -437,9 +403,10 @@ export function AssignExamPage({ setActiveTab }) {
       if (studentIds.length > 0) {
         const { data: profiles } = await supabase
           .from('profiles')
-          .select('id, full_name, email')
+          .select('id, full_name, email, can_exam')
           .in('id', studentIds)
-          .eq('role', 'student');
+          .eq('role', 'student')
+          .eq('can_exam', true);
         if (mounted) {
           const mapped = (profiles || []).map((p) => ({
             id: p.id,
@@ -494,46 +461,8 @@ export function AssignExamPage({ setActiveTab }) {
     return () => clearTimeout(t);
   }, [user?.id, storageKey, examDate, examTime, selectedStudents, stations]);
 
-  useEffect(() => {
-    const loadConflicts = async () => {
-      if (!user?.id || !examDate || !examTime || advisorStudents.length === 0) {
-        setConflictStudentIds(new Set());
-        return;
-      }
-      const iso = new Date(`${examDate}T${examTime}`).toISOString();
-      const ids = advisorStudents.map((s) => s.id);
-      let rows = [];
-      const { data, error } = await supabase
-        .from('sessions')
-        .select('student_id')
-        .eq('start_time', iso)
-        .in('student_id', ids)
-        .neq('status', 'Cancelled')
-        .eq('session_type', 'exam');
-      if (!error) {
-        rows = data || [];
-      } else {
-        const { data: legacy } = await supabase
-          .from('sessions')
-          .select('student_id')
-          .eq('start_time', iso)
-          .in('student_id', ids)
-          .neq('status', 'Cancelled')
-          .eq('type', 'exam');
-        rows = legacy || [];
-      }
-      setConflictStudentIds(new Set(rows.map((r) => r.student_id)));
-    };
-    loadConflicts();
-  }, [user?.id, examDate, examTime, advisorStudents]);
-
-  const scheduleConflict = useMemo(() => {
-    if (!selectedStudents.length) return false;
-    return selectedStudents.some((id) => conflictStudentIds.has(id));
-  }, [selectedStudents, conflictStudentIds]);
-
   const studentErrors = useMemo(() => validateStudents(selectedStudents), [selectedStudents]);
-  const scheduleErrors = useMemo(() => validateSchedule(examDate, examTime, scheduleConflict), [examDate, examTime, scheduleConflict]);
+  const scheduleErrors = useMemo(() => validateSchedule(examDate, examTime, false), [examDate, examTime]);
   const stationErrors = useMemo(() => validateStations(stations), [stations]);
 
   const issueMap = [
@@ -630,6 +559,7 @@ export function AssignExamPage({ setActiveTab }) {
   };
 
   const trySubmit = () => {
+    setSubmitError('');
     setSubmitAttempted(true);
     const firstError = issueMap.find((x) => x.error);
     if (firstError) {
@@ -643,46 +573,30 @@ export function AssignExamPage({ setActiveTab }) {
     if (submitting) return;
     setSubmitting(true);
     const run = async () => {
-      // Send in-app alerts to selected students.
-      if (selectedStudents.length > 0) {
-        const message = `You have a new OSCE exam scheduled for ${selectedDateTimeLabel}.`;
-        // Schema-aligned insert for alerts table in this repo.
-        const payload = selectedStudents.map((studentId) => ({
-          type: 'warning',
-          message,
-          source_id: `student:${studentId}`,
-          is_acknowledged: false,
-        }));
-        await supabase.from('alerts').insert(payload);
+      const result = await assignExam({
+        students: selectedStudents,
+        dateTime: `${examDate}T${examTime}`,
+        stations: stations.map((station) => ({ ...station, examinerId: user?.id || null })),
+        onProgress: (message) => setSubmitStage(message),
+      });
 
-        // Local fallback queue so notifications still appear when insert is blocked.
-        try {
-          const key = 'local_student_alerts_v1';
-          const existingRaw = localStorage.getItem(key);
-          const existing = existingRaw ? JSON.parse(existingRaw) : {};
-          selectedStudents.forEach((studentId) => {
-            if (!Array.isArray(existing[studentId])) existing[studentId] = [];
-            existing[studentId].unshift({
-              id: `local-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
-              type: 'warning',
-              message,
-              created_at: new Date().toISOString(),
-            });
-            existing[studentId] = existing[studentId].slice(0, 20);
-          });
-          localStorage.setItem(key, JSON.stringify(existing));
-        } catch {
-          // ignore local storage failures
-        }
+      if (!result.ok) {
+        setSubmitting(false);
+        setSubmitStage('');
+        setSubmitError(result.error || 'Failed to assign exams.');
+        return;
       }
 
       setSubmitting(false);
       setShowConfirm(false);
+      setSubmitStage('');
+      setSubmitError('');
+      setSubmitWarnings(result.warnings || []);
       setSuccessPayload({
         students: selectedStudents.length,
         stations: stations.length,
         schedule: selectedDateTimeLabel,
-        assignments: totalAssignments,
+        assignments: result.insertedCount || totalAssignments,
       });
       localStorage.removeItem(storageKey);
     };
@@ -701,6 +615,11 @@ export function AssignExamPage({ setActiveTab }) {
                 <p className="text-sm mt-1" style={{ color: P.muted }}>
                   {successPayload.assignments} sessions created for {successPayload.students} students.
                 </p>
+                {submitWarnings.length > 0 && (
+                  <div className="mt-3 rounded-lg border border-amber-400/35 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                    {submitWarnings[0]}
+                  </div>
+                )}
                 <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
                   <div className="rounded-lg p-2 border border-white/10 bg-white/[0.02] text-white/90">Schedule: {successPayload.schedule}</div>
                   <div className="rounded-lg p-2 border border-white/10 bg-white/[0.02] text-white/90">Stations: {successPayload.stations}</div>
@@ -727,7 +646,7 @@ export function AssignExamPage({ setActiveTab }) {
         <header className="pt-4 pb-1 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight" style={{ color: P.text }}>Assign Exam</h1>
-            <p className="text-sm mt-1" style={{ color: P.muted }}>Guided OSCE assignment flow with conflict prevention.</p>
+            <p className="text-sm mt-1" style={{ color: P.muted }}>Guided OSCE assignment flow.</p>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs px-2 py-1 rounded-lg border border-white/10 text-white/70">
@@ -755,6 +674,11 @@ export function AssignExamPage({ setActiveTab }) {
         )}
 
         {submitAttempted && <ValidationMap items={issueMap} onJump={jumpToSection} />}
+        {submitError && (
+          <div className="rounded-xl border border-red-400/35 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+            {submitError}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-[420px_minmax(0,1fr)] gap-5">
           <div ref={sectionRefs.students}>
@@ -765,9 +689,6 @@ export function AssignExamPage({ setActiveTab }) {
               setQuery={setStudentQuery}
               selectedIds={selectedStudents}
               toggleStudent={toggleStudent}
-              conflictIds={conflictStudentIds}
-              showConflictOnly={showConflictOnly}
-              setShowConflictOnly={setShowConflictOnly}
               fieldError={studentErrors.students}
               onSelectAllVisible={onSelectAllVisible}
               onClearVisible={onClearVisible}
@@ -779,7 +700,7 @@ export function AssignExamPage({ setActiveTab }) {
               <GlassCard>
                 <h3 className="text-sm font-semibold mb-2" style={{ color: P.text }}>Students</h3>
                 <p className="text-xs" style={{ color: P.muted }}>
-                  Select students from the sidebar. You can filter conflicts or select visible results in bulk.
+                  Select students from the sidebar or select visible results in bulk.
                 </p>
               </GlassCard>
             )}
@@ -804,17 +725,9 @@ export function AssignExamPage({ setActiveTab }) {
                   {scheduleErrors.schedule && (
                     <p className="text-xs mt-2 text-red-300 flex items-center gap-1"><AlertCircle size={12} /> {scheduleErrors.schedule}</p>
                   )}
-                  {scheduleErrors.conflict ? (
-                    <div className="mt-3 pl-3 py-1.5 border-l-2" style={{ borderColor: 'rgba(245,158,11,0.45)' }}>
-                      <p className="text-xs flex items-center gap-1" style={{ color: '#fcd34d' }}>
-                        <AlertCircle size={12} /> This time overlaps with another exam
-                      </p>
-                    </div>
-                  ) : (
-                    <p className="text-xs mt-2 flex items-center gap-1" style={{ color: P.muted }}>
-                      <Clock3 size={12} /> Schedule applies to all selected students and stations.
-                    </p>
-                  )}
+                  <p className="text-xs mt-2 flex items-center gap-1" style={{ color: P.muted }}>
+                    <Clock3 size={12} /> Schedule applies to all selected students and stations.
+                  </p>
                 </GlassCard>
               </div>
             )}
@@ -862,7 +775,6 @@ export function AssignExamPage({ setActiveTab }) {
                         isFirst={idx === 0}
                         isLast={idx === stations.length - 1}
                         caseOptions={cases.length > 0 ? cases : []}
-                        examinerOptions={MOCK_EXAMINERS}
                         errors={stationErrors.byId[station.id]}
                       />
                     ))}
@@ -887,18 +799,12 @@ export function AssignExamPage({ setActiveTab }) {
                   <h3 className="text-sm font-semibold mb-2" style={{ color: P.text }}>Availability checks</h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
                     <div className="rounded-lg p-2 border border-white/10 bg-white/[0.02]">
-                      <p style={{ color: P.muted }}>Student conflicts</p>
-                      <p className="font-semibold mt-1" style={{ color: conflictStudentIds.size > 0 ? '#fcd34d' : P.success }}>
-                        {selectedStudents.filter((id) => conflictStudentIds.has(id)).length}
-                      </p>
-                    </div>
-                    <div className="rounded-lg p-2 border border-white/10 bg-white/[0.02]">
                       <p style={{ color: P.muted }}>Stations complete</p>
                       <p className="font-semibold mt-1" style={{ color: stations.every(isStationComplete) ? P.success : '#fcd34d' }}>
                         {stations.filter(isStationComplete).length}/{stations.length}
                       </p>
                     </div>
-                    <div className="rounded-lg p-2 border border-white/10 bg-white/[0.02]">
+                    <div className="rounded-lg p-2 border border-white/10 bg-white/[0.02] md:col-span-2">
                       <p style={{ color: P.muted }}>Ready to assign</p>
                       <p className="font-semibold mt-1" style={{ color: canAssign ? P.success : '#fcd34d' }}>
                         {canAssign ? 'Yes' : 'No'}
@@ -957,6 +863,11 @@ export function AssignExamPage({ setActiveTab }) {
             <p className="text-sm mb-4" style={{ color: P.muted }}>
               {totalAssignments} sessions will be created for {selectedStudents.length} students at {selectedDateTimeLabel}.
             </p>
+            {submitting && (
+              <p className="text-xs mb-3 text-emerald-200">
+                {submitStage || 'Processing assignment...'}
+              </p>
+            )}
             <div className="flex gap-2">
               <button type="button" onClick={() => setShowConfirm(false)} className="flex-1 px-4 py-2.5 rounded-xl border border-white/15 text-sm" style={{ color: P.text }}>
                 Cancel

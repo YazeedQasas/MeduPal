@@ -12,9 +12,48 @@ export function Header() {
     const [localVersion, setLocalVersion] = useState(0);
     const dropdownRef = useRef(null);
 
+    const formatTime = (iso) => {
+        if (!iso) return '';
+        const d = new Date(iso);
+        return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    };
+
     useEffect(() => {
         let mounted = true;
-        let channel;
+        let alertsChannel;
+        let sessionsChannel;
+
+        const loadSessionNotifications = async (studentId) => {
+            // Try modern schema first.
+            let sessionsRes = await supabase
+                .from('sessions')
+                .select('id, start_time, created_at, status, session_type')
+                .eq('student_id', studentId)
+                .in('status', ['Scheduled', 'In Progress', 'scheduled', 'in_progress'])
+                .eq('session_type', 'exam')
+                .order('created_at', { ascending: false })
+                .limit(8);
+
+            // Legacy fallback when session_type doesn't exist and type is used.
+            if (sessionsRes.error) {
+                sessionsRes = await supabase
+                    .from('sessions')
+                    .select('id, start_time, created_at, status, type')
+                    .eq('student_id', studentId)
+                    .in('status', ['Scheduled', 'In Progress', 'scheduled', 'in_progress'])
+                    .eq('type', 'exam')
+                    .order('created_at', { ascending: false })
+                    .limit(8);
+            }
+
+            const rows = sessionsRes.data || [];
+            return rows.map((s) => ({
+                id: `session-${s.id}`,
+                type: 'warning',
+                message: `You have a new OSCE exam scheduled for ${formatTime(s.start_time)}.`,
+                created_at: s.created_at || s.start_time,
+            }));
+        };
 
         const loadNotifications = async () => {
             if (!user?.id) {
@@ -74,6 +113,11 @@ export function Header() {
                 merged = fallback || [];
             }
 
+            // Always merge exam-session notifications so students still get notices
+            // even when alerts insert is blocked by RLS/policy.
+            const sessionAlerts = await loadSessionNotifications(user.id);
+            merged = merged.concat(sessionAlerts);
+
             const deduped = Array.from(
                 new Map(merged.map((item) => [item.id, item])).values()
             )
@@ -88,16 +132,29 @@ export function Header() {
 
         loadNotifications();
 
-        channel = supabase
+        alertsChannel = supabase
             .channel(`header-alerts-${user?.id || 'anon'}`)
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'alerts' }, () => {
                 loadNotifications();
             })
             .subscribe();
 
+        sessionsChannel = supabase
+            .channel(`header-exam-sessions-${user?.id || 'anon'}`)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions' }, (payload) => {
+                const row = payload?.new || payload?.old;
+                if (!row) return;
+                if (row.student_id !== user?.id) return;
+                const kind = row.session_type || row.type;
+                if (kind !== 'exam') return;
+                loadNotifications();
+            })
+            .subscribe();
+
         return () => {
             mounted = false;
-            if (channel) supabase.removeChannel(channel);
+            if (alertsChannel) supabase.removeChannel(alertsChannel);
+            if (sessionsChannel) supabase.removeChannel(sessionsChannel);
         };
     }, [user?.id, localVersion]);
 
@@ -121,12 +178,6 @@ export function Header() {
         document.addEventListener('mousedown', onDocClick);
         return () => document.removeEventListener('mousedown', onDocClick);
     }, [open]);
-
-    const formatTime = (iso) => {
-        if (!iso) return '';
-        const d = new Date(iso);
-        return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-    };
 
     const getTypeColor = (type) => {
         if (type === 'critical') return 'text-red-300';

@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
+import { assignExam } from '../../lib/assignExam';
 import { ActiveStations } from './ActiveStations';
 import { QuickActions } from './QuickActions';
 import {
@@ -362,9 +363,10 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
     if (studentIds.length > 0) {
       const { data: profiles } = await supabase
         .from('profiles')
-        .select('id, full_name, email')
+        .select('id, full_name, email, can_exam')
         .in('id', studentIds)
-        .eq('role', 'student');
+        .eq('role', 'student')
+        .eq('can_exam', true);
       setAdvisorStudents(profiles || []);
     } else {
       setAdvisorStudents([]);
@@ -667,55 +669,22 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
     setAssignSubmitting(true);
     setAssignError('');
     try {
-      const scheduledAt = new Date(`${examDate}T${examTime}`);
-      const scheduledAtIso = scheduledAt.toISOString();
-
-      let existing = [];
-      try {
-        const { data } = await supabase
-          .from('sessions')
-          .select('student_id, case_id')
-          .eq('session_type', 'exam')
-          .eq('start_time', scheduledAtIso)
-          .in('student_id', selectedStudents)
-          .in('case_id', selectedCaseIds)
-          .neq('status', 'Cancelled');
-        existing = data || [];
-      } catch {
-        const { data } = await supabase
-          .from('sessions')
-          .select('student_id, case_id')
-          .eq('type', 'exam')
-          .eq('start_time', scheduledAtIso)
-          .in('student_id', selectedStudents)
-          .in('case_id', selectedCaseIds)
-          .neq('status', 'Cancelled');
-        existing = data || [];
-      }
-      const existingSet = new Set(existing.map((s) => `${s.student_id}:${s.case_id}`));
-      const inserts = [];
-      for (const sid of selectedStudents) {
-        for (const cid of selectedCaseIds) {
-          if (!existingSet.has(`${sid}:${cid}`)) {
-            inserts.push({
-              student_id: sid,
-              examiner_id: user.id,
-              case_id: cid,
-              start_time: scheduledAtIso,
-              status: 'Scheduled',
-            });
-          }
-        }
-      }
-      if (inserts.length === 0) {
-        setAssignError('All selected students already have these exams at this time.');
-        setAssignSubmitting(false);
+      const stations = selectedCaseIds.map((caseId) => ({
+        caseId,
+        duration: 10,
+        examinerId: user?.id || null,
+      }));
+      const result = await assignExam({
+        students: selectedStudents,
+        dateTime: `${examDate}T${examTime}`,
+        stations,
+      });
+      if (!result.ok) {
+        setAssignError(result.error || 'Failed to assign.');
         return;
       }
-      const { error } = await supabase.from('sessions').insert(inserts.map((r) => ({ ...r, session_type: 'exam' })));
-      if (error) {
-        const { error: e2 } = await supabase.from('sessions').insert(inserts.map((r) => ({ ...r, type: 'exam' })));
-        if (e2) throw e2;
+      if (result.warnings?.length) {
+        setAssignError(result.warnings[0]);
       }
       setSelectedCaseIds([]);
       setExamDate('');

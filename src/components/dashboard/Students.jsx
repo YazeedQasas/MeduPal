@@ -60,11 +60,18 @@ export function Students() {
     }, []);
 
     const fetchStudentsData = useCallback(async () => {
-        const { data: studentsData } = await supabase
+        let studentsQuery = supabase
             .from('profiles')
-            .select('id, full_name, email, created_at')
+            .select('id, full_name, email, created_at, can_exam')
             .eq('role', 'student')
             .order('created_at', { ascending: false });
+
+        // Instructor Students tab: show only exam-enabled students.
+        if (role === 'instructor') {
+            studentsQuery = studentsQuery.eq('can_exam', true);
+        }
+
+        const { data: studentsData } = await studentsQuery;
 
         const { data: profsData } = await supabase
             .from('profiles')
@@ -90,7 +97,7 @@ export function Students() {
         }
         if (profsData) setProfessors(profsData);
         if (manikinsData) setManikins(manikinsData);
-    }, []);
+    }, [role]);
 
     useEffect(() => {
         fetchStudentsData();

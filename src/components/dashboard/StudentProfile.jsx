@@ -7,7 +7,6 @@ export function StudentProfile({ student, onBack }) {
   const displayName = student.full_name || 'Student';
   const username = student.email?.replace(/@.*$/, '') || 'student';
   const initials = displayName.split(' ').map((n) => n[0]).join('').substring(0, 2).toUpperCase();
-
   return (
     <div className="space-y-0 animate-in fade-in slide-in-from-right-10 duration-300">
       {/* Back */}
