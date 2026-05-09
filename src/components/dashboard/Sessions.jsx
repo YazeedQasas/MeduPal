@@ -27,6 +27,7 @@ import StudentPracticeFlow from './StudentPracticeFlow';
 function Sessions() {
     const { user, role } = useAuth();
     const isInstructor = role === 'instructor' || role === 'admin';
+    const isInstructorOnly = role === 'instructor';
     const [advisedStudentIds, setAdvisedStudentIds] = useState([]);
 
     const [searchTerm, setSearchTerm] = useState('');
@@ -40,13 +41,17 @@ function Sessions() {
     const [showPractice, setShowPractice] = useState(false);
 
     const fetchMyAdvisees = useCallback(async () => {
-        if (!isInstructor || !user?.id) return;
+        if (!isInstructorOnly) {
+            setAdvisedStudentIds([]);
+            return;
+        }
+        if (!user?.id) return;
         const { data } = await supabase
             .from('advisor_assignments')
             .select('student_id')
             .eq('instructor_id', user.id);
         setAdvisedStudentIds((data || []).map((r) => r.student_id));
-    }, [isInstructor, user?.id]);
+    }, [isInstructorOnly, user?.id]);
 
     useEffect(() => {
         fetchMyAdvisees();
@@ -188,7 +193,7 @@ function Sessions() {
                 <CreateSessionForm
                     onClose={() => setIsCreating(false)}
                     onCreated={() => { fetchSessions(); fetchMyAdvisees(); }}
-                    advisedStudentIds={isInstructor ? advisedStudentIds : null}
+                    advisedStudentIds={isInstructorOnly ? advisedStudentIds : null}
                     sessionMode={selectedMode}
                 />
             )}

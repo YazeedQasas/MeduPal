@@ -1,6 +1,6 @@
 import { BarChart2, Activity, Settings2, Users, FileCheck, UserCircle2, ChevronRight } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { glassCardGlowStyle, DASHBOARD_THEME } from './DashboardShell';
+import { glassCardGlowStyle, DASHBOARD_THEME, instructorPanelCardStyle } from './DashboardShell';
 
 const ACCENT_RGB = DASHBOARD_THEME.accentRgb || '6, 95, 70';
 
@@ -119,18 +119,26 @@ export function QuickActions({
   layout,
   /** Strip outer card chrome (e.g. inside a parent tab panel on the instructor rail) */
   embedded,
+  /** Subtitle under "Quick actions" when using `layout="grid"` */
+  gridSubtitle,
 } = {}) {
   const isGlass = variant === 'glass';
+  const isPanel = variant === 'panel';
+  const isThemed = isGlass || isPanel;
 
   const containerStyle = isGlass
     ? { ...glassCardGlowStyle }
-    : {
-        background: 'linear-gradient(135deg, hsl(var(--primary) / 0.08), hsl(var(--primary) / 0.03))',
-      };
+    : isPanel
+      ? { ...instructorPanelCardStyle }
+      : {
+          background: 'linear-gradient(135deg, hsl(var(--primary) / 0.08), hsl(var(--primary) / 0.03))',
+        };
 
   const containerClass = isGlass
     ? 'rounded-2xl p-4 flex flex-col gap-3 backdrop-blur-xl'
-    : 'bg-card rounded-2xl border border-border p-4 flex flex-col gap-3';
+    : isPanel
+      ? 'rounded-2xl p-4 flex flex-col gap-3'
+      : 'bg-card rounded-2xl border border-border p-4 flex flex-col gap-3';
 
   const isTopStrip = !!(iconOnly && oneRow);
   const effectiveContainerStyle = isTopStrip
@@ -149,7 +157,7 @@ export function QuickActions({
               Quick actions
             </h3>
             <p className="text-xs mt-1" style={{ color: DASHBOARD_THEME.muted }}>
-              Jump to common instructor tasks
+              {gridSubtitle ?? 'Jump to common instructor tasks'}
             </p>
           </div>
         )}
@@ -175,7 +183,10 @@ export function QuickActions({
     }
 
     return (
-      <div className="rounded-2xl p-5 flex flex-col gap-4" style={{ ...glassCardGlowStyle }}>
+      <div
+        className="rounded-2xl p-5 flex flex-col gap-4"
+        style={isPanel ? { ...instructorPanelCardStyle } : { ...glassCardGlowStyle }}
+      >
         {gridWrap}
       </div>
     );
@@ -185,7 +196,7 @@ export function QuickActions({
     <div className={effectiveContainerClass} style={effectiveContainerStyle}>
       <h3
         className={cn('font-semibold mb-1', isTopStrip && 'hidden')}
-        style={isGlass ? { color: DASHBOARD_THEME.accent } : {}}
+        style={isThemed ? { color: DASHBOARD_THEME.accent } : {}}
       >
         Quick Actions
       </h3>
@@ -208,7 +219,7 @@ export function QuickActions({
             onClick={onAssignExam}
             disabled={!onAssignExam}
             highlight={highlightAssign}
-            isGlass={isGlass}
+            isGlass={isThemed}
           />
           <ActionCard
             icon={Users}
@@ -216,7 +227,7 @@ export function QuickActions({
             sub="View & assign advisees"
             onClick={onManageStudents}
             disabled={!onManageStudents}
-            isGlass={isGlass}
+            isGlass={isThemed}
           />
           <ActionCard
             icon={BarChart2}
@@ -224,7 +235,7 @@ export function QuickActions({
             sub="View cases & stats"
             onClick={onViewAnalytics}
             disabled={!onViewAnalytics}
-            isGlass={isGlass}
+            isGlass={isThemed}
           />
           <ActionCard
             icon={Activity}
@@ -232,7 +243,7 @@ export function QuickActions({
             sub="Run diagnostics"
             onClick={onRunDiagnostics}
             disabled={!onRunDiagnostics}
-            isGlass={isGlass}
+            isGlass={isThemed}
           />
           <ActionCard
             icon={Settings2}
@@ -240,7 +251,7 @@ export function QuickActions({
             sub="App configuration"
             onClick={onOpenSettings}
             disabled={!onOpenSettings}
-            isGlass={isGlass}
+            isGlass={isThemed}
           />
         </div>
       )}

@@ -26,6 +26,13 @@ export const glassCardGlowStyle = {
   boxShadow: `0 2px 8px rgba(0,0,0,0.35), 0 0 24px rgba(${ACCENT_RGB},0.05)`,
 };
 
+/** Solid card surface — matches InstructorDashboard `P.card` / `P.border` / `P.shadow` */
+export const instructorPanelCardStyle = {
+  background: 'hsl(var(--card))',
+  border: '1px solid rgba(255,255,255,0.07)',
+  boxShadow: '0 1px 3px rgba(0,0,0,0.35)',
+};
+
 export const DASHBOARD_THEME = {
   page: 'hsl(var(--background))',
   text: '#f4f4f5',

@@ -435,6 +435,27 @@ export function AssignExamPage({ setActiveTab }) {
     };
   }, [user?.id]);
 
+  useEffect(() => {
+    if (!cases.length) return;
+    try {
+      const raw = sessionStorage.getItem('medupal_selected_case_ids');
+      if (!raw) return;
+      const selectedCaseIds = JSON.parse(raw);
+      if (!Array.isArray(selectedCaseIds) || selectedCaseIds.length === 0) return;
+      const available = selectedCaseIds.filter((id) => cases.some((c) => c.id === id));
+      if (available.length === 0) return;
+      setStations(available.map((caseId, index) => ({
+        ...createStation(Date.now() + index),
+        caseId,
+        duration: '10',
+      })));
+      sessionStorage.removeItem('medupal_selected_case_ids');
+      setFeedback(`Loaded ${available.length} selected case${available.length === 1 ? '' : 's'} from library`);
+    } catch {
+      // ignore invalid payload
+    }
+  }, [cases]);
+
   const storageKey = `assign-exam-draft-${user?.id || 'anon'}`;
   useEffect(() => {
     if (!user?.id) return;

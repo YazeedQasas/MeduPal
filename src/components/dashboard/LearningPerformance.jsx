@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { supabase } from '../../lib/supabase';
 import { cn } from '../../lib/utils';
-import { glassCardStyle, DASHBOARD_THEME } from './DashboardShell';
+import { glassCardStyle, DASHBOARD_THEME, instructorPanelCardStyle } from './DashboardShell';
 
 const CHART_COLORS = ['#60a5fa', '#34d399', '#a78bfa', '#f472b6', '#fb923c'];
 
@@ -31,13 +31,16 @@ export function LearningPerformance({ variant }) {
     const avgScore = data.length > 0 ? (data.reduce((acc, curr) => acc + curr.score, 0) / data.length).toFixed(1) : 0;
     const avgFailRate = data.length > 0 ? (data.reduce((acc, curr) => acc + curr.failRate, 0) / data.length).toFixed(1) : 0;
     const isGlass = variant === 'glass';
+    const isPanel = variant === 'panel';
+    const useTheme = isGlass || isPanel;
+    const surface = isGlass ? glassCardStyle : isPanel ? instructorPanelCardStyle : undefined;
 
     return (
         <div
-            className={cn('rounded-2xl p-4 flex flex-col h-full', !isGlass && 'bg-card border border-border shadow-[0_0_0_1px_rgba(0,0,0,0.4)]')}
-            style={isGlass ? glassCardStyle : undefined}
+            className={cn('rounded-2xl p-4 flex flex-col h-full', !useTheme && 'bg-card border border-border shadow-[0_0_0_1px_rgba(0,0,0,0.4)]')}
+            style={surface}
         >
-            <h3 className="font-semibold mb-4" style={isGlass ? { color: DASHBOARD_THEME.text } : {}}>Performance Snapshot</h3>
+            <h3 className="font-semibold mb-4" style={useTheme ? { color: DASHBOARD_THEME.text } : {}}>Performance Snapshot</h3>
             <div className="flex-1 w-full min-h-[200px]">
                 <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={data} layout="vertical" margin={{ top: 5, right: 30, left: 40, bottom: 5 }}>
@@ -57,13 +60,13 @@ export function LearningPerformance({ variant }) {
                 </ResponsiveContainer>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-2 text-center">
-                <div className={cn('p-2 rounded', !isGlass && 'bg-muted/20')} style={isGlass ? { background: 'rgba(255,255,255,0.05)' } : undefined}>
-                    <span className="block text-2xl font-bold" style={isGlass ? { color: DASHBOARD_THEME.text } : {}}>{avgScore}</span>
-                    <span className="text-xs" style={isGlass ? { color: DASHBOARD_THEME.muted } : {}}>Avg Score</span>
+                <div className={cn('p-2 rounded', !useTheme && 'bg-muted/20')} style={useTheme ? { background: 'rgba(255,255,255,0.05)' } : undefined}>
+                    <span className="block text-2xl font-bold" style={useTheme ? { color: DASHBOARD_THEME.text } : {}}>{avgScore}</span>
+                    <span className="text-xs" style={useTheme ? { color: DASHBOARD_THEME.muted } : {}}>Avg Score</span>
                 </div>
-                <div className={cn('p-2 rounded', !isGlass && 'bg-destructive/10')} style={isGlass ? { background: 'rgba(239,68,68,0.1)' } : undefined}>
+                <div className={cn('p-2 rounded', !useTheme && 'bg-destructive/10')} style={useTheme ? { background: 'rgba(239,68,68,0.1)' } : undefined}>
                     <span className="block text-2xl font-bold text-destructive">{avgFailRate}%</span>
-                    <span className="text-xs" style={isGlass ? { color: DASHBOARD_THEME.muted } : {}}>Crit. Fail Rate</span>
+                    <span className="text-xs" style={useTheme ? { color: DASHBOARD_THEME.muted } : {}}>Crit. Fail Rate</span>
                 </div>
             </div>
         </div>

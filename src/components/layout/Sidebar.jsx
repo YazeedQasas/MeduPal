@@ -18,7 +18,7 @@ const ADMIN_NAV_ITEMS = [
   { icon: FileCheck, label: 'Assign Exam', id: 'assign-exam', roles: ['admin', 'instructor'] },
   { icon: HardDrive, label: 'Hardware & Sensors', id: 'hardware', roles: ['admin'] },
   { icon: Settings, label: 'Settings', id: 'settings', roles: ['admin'] },
-  { icon: UserCog, label: 'Users', id: 'users', roles: ['admin'] },
+  { icon: UserCog, label: 'Instructors', id: 'instructors', roles: ['admin'] },
 ];
 
 function buildStudentNavItems(has_hardware, can_exam) {
@@ -165,12 +165,20 @@ export function Sidebar({ activeTab, setActiveTab }) {
                     window.history.pushState(null, '', '/exam');
                   } else if (item.id === 'dashboard') {
                     window.history.pushState(null, '', '/dashboard');
+                  } else if (item.id === 'cases') {
+                    window.history.pushState(null, '', '/cases');
                   } else if (item.id === 'assign-exam') {
                     window.history.pushState(null, '', '/assign-exam');
                   } else if (item.id === 'students') {
                     window.history.pushState(null, '', '/students');
                   } else if (item.id === 'sessions') {
                     window.history.pushState(null, '', '/sessions');
+                  } else if (item.id === 'hardware') {
+                    window.history.pushState(null, '', '/hardware');
+                  } else if (item.id === 'settings') {
+                    window.history.pushState(null, '', '/settings');
+                  } else if (item.id === 'instructors') {
+                    window.history.pushState(null, '', '/instructors');
                   }
                 }}
               />
@@ -178,7 +186,19 @@ export function Sidebar({ activeTab, setActiveTab }) {
           </nav>
         </div>
         <div className="flex flex-col gap-2 pt-4 mt-auto pb-2">
-          <SidebarUserBlock displayName={displayName} roleLabel={roleLabel} roleBadgeClass={roleBadgeClass} onClick={() => setActiveTab(role === 'student' ? 'student-settings' : 'profile')} />
+          <SidebarUserBlock
+            displayName={displayName}
+            roleLabel={roleLabel}
+            roleBadgeClass={roleBadgeClass}
+            onClick={() => {
+              if (role === 'student') {
+                setActiveTab('student-settings');
+              } else {
+                setActiveTab('profile');
+                window.history.pushState(null, '', '/profile');
+              }
+            }}
+          />
           <SidebarLink
             link={{
               label: 'Log out',

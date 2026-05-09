@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { BadgeCheck, Wifi, WifiOff, Activity, Mic, Volume2, Heart, Wind } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { supabase } from '../../lib/supabase';
-import { glassCardStyle, DASHBOARD_THEME } from './DashboardShell';
+import { glassCardStyle, DASHBOARD_THEME, instructorPanelCardStyle } from './DashboardShell';
 
 export function SystemHealth({ variant }) {
     const [sensors, setSensors] = useState([]);
@@ -50,14 +50,17 @@ export function SystemHealth({ variant }) {
 
     const operationalRate = sensors.length > 0 ? Math.round((sensors.filter(s => s.status === 'online').length / sensors.length) * 100) : 100;
     const isGlass = variant === 'glass';
+    const isPanel = variant === 'panel';
+    const useTheme = isGlass || isPanel;
+    const surface = isGlass ? glassCardStyle : isPanel ? instructorPanelCardStyle : undefined;
 
     return (
         <div
-            className={cn('rounded-2xl overflow-hidden flex flex-col h-full', !isGlass && 'bg-card border border-border shadow-[0_0_0_1px_rgba(0,0,0,0.4)]')}
-            style={isGlass ? glassCardStyle : undefined}
+            className={cn('rounded-2xl overflow-hidden flex flex-col h-full', !useTheme && 'bg-card border border-border shadow-[0_0_0_1px_rgba(0,0,0,0.4)]')}
+            style={surface}
         >
-            <div className="p-4 border-b flex justify-between items-center" style={{ borderColor: isGlass ? 'rgba(255,255,255,0.08)' : undefined }}>
-                <h3 className="font-semibold flex items-center gap-2" style={isGlass ? { color: DASHBOARD_THEME.text } : {}}>
+            <div className="p-4 border-b flex justify-between items-center" style={{ borderColor: useTheme ? 'rgba(255,255,255,0.08)' : undefined }}>
+                <h3 className="font-semibold flex items-center gap-2" style={useTheme ? { color: DASHBOARD_THEME.text } : {}}>
                     <Activity className="text-primary" size={18} />
                     System Health
                 </h3>
@@ -69,17 +72,17 @@ export function SystemHealth({ variant }) {
                 </span>
             </div>
 
-            <div className="divide-y" style={{ borderColor: isGlass ? 'rgba(255,255,255,0.06)' : undefined }}>
+            <div className="divide-y" style={{ borderColor: useTheme ? 'rgba(255,255,255,0.06)' : undefined }}>
                 {sensors.map((item) => (
-                    <div key={item.id} className="p-3 flex items-center justify-between transition-colors" style={isGlass ? {} : {}}>
+                    <div key={item.id} className="p-3 flex items-center justify-between transition-colors" style={useTheme ? {} : {}}>
                         <div className="flex items-center gap-3">
                             <div className={cn("w-2 h-2 rounded-full",
                                 item.status === 'online' ? 'bg-emerald-500' :
                                     item.status === 'warning' ? 'bg-amber-500' : 'bg-destructive'
                             )} />
                             <div>
-                                <p className="text-sm font-medium" style={isGlass ? { color: DASHBOARD_THEME.text } : {}}>{item.name}</p>
-                                <p className="text-xs flex items-center gap-1" style={isGlass ? { color: DASHBOARD_THEME.muted } : {}}>
+                                <p className="text-sm font-medium" style={useTheme ? { color: DASHBOARD_THEME.text } : {}}>{item.name}</p>
+                                <p className="text-xs flex items-center gap-1" style={useTheme ? { color: DASHBOARD_THEME.muted } : {}}>
                                     {item.status === 'online' ? <Wifi size={10} /> : <WifiOff size={10} />}
                                     {item.ping}
                                 </p>

@@ -24,6 +24,7 @@ import { StudentProfile } from './StudentProfile';
 export function Students() {
     const { user, profile, role } = useAuth();
     const isInstructor = role === 'instructor' || role === 'admin';
+    const isInstructorRole = role === 'instructor';
 
     const [searchTerm, setSearchTerm] = useState('');
     const [manikins, setManikins] = useState([]);
@@ -40,9 +41,11 @@ export function Students() {
     const [showOnlyMyAdvisees, setShowOnlyMyAdvisees] = useState(false);
 
     const fetchAssignments = useCallback(async () => {
-        const { data } = await supabase
-            .from('advisor_assignments')
-            .select('id, instructor_id, student_id');
+        let q = supabase.from('advisor_assignments').select('id, instructor_id, student_id');
+        if (isInstructorRole && user?.id) {
+            q = q.eq('instructor_id', user.id);
+        }
+        const { data } = await q;
         if (data) setAssignments(data);
 
         if (data?.length) {
@@ -57,22 +60,9 @@ export function Students() {
         } else {
             setAdvisorNames({});
         }
-    }, []);
+    }, [isInstructorRole, user?.id]);
 
     const fetchStudentsData = useCallback(async () => {
-        let studentsQuery = supabase
-            .from('profiles')
-            .select('id, full_name, email, created_at, can_exam')
-            .eq('role', 'student')
-            .order('created_at', { ascending: false });
-
-        // Instructor Students tab: show only exam-enabled students.
-        if (role === 'instructor') {
-            studentsQuery = studentsQuery.eq('can_exam', true);
-        }
-
-        const { data: studentsData } = await studentsQuery;
-
         const { data: profsData } = await supabase
             .from('profiles')
             .select('*')
@@ -80,12 +70,64 @@ export function Students() {
 
         const { data: manikinsData } = await supabase.from('manikins').select('*');
 
+        if (isInstructorRole) {
+            if (!user?.id) {
+                setStudents([]);
+                if (profsData) setProfessors(profsData);
+                if (manikinsData) setManikins(manikinsData);
+                return;
+            }
+            const { data: mine } = await supabase
+                .from('advisor_assignments')
+                .select('student_id')
+                .eq('instructor_id', user.id);
+            const ids = (mine || []).map((a) => a.student_id);
+            if (ids.length === 0) {
+                setStudents([]);
+            } else {
+                const { data: studentsData } = await supabase
+                    .from('profiles')
+                    .select('id, full_name, email, created_at, can_exam')
+                    .eq('role', 'student')
+                    .in('id', ids)
+                    .order('created_at', { ascending: false });
+                if (studentsData) {
+                    const formatted = studentsData.map((p) => ({
+                        id: p.id,
+                        name: p.full_name || 'Unnamed',
+                        full_name: p.full_name || 'Unnamed',
+                        email: p.email || '',
+                        can_exam: p.can_exam,
+                        assignedProfessor: '—',
+                        avgScore: 0,
+                        totalSessions: 0,
+                        status: 'Offline',
+                        lastActivity: p.created_at ? new Date(p.created_at).toLocaleDateString() : '—',
+                        created_at: p.created_at,
+                    }));
+                    setStudents(formatted);
+                } else {
+                    setStudents([]);
+                }
+            }
+            if (profsData) setProfessors(profsData);
+            if (manikinsData) setManikins(manikinsData);
+            return;
+        }
+
+        const { data: studentsData } = await supabase
+            .from('profiles')
+            .select('id, full_name, email, created_at, can_exam')
+            .eq('role', 'student')
+            .order('created_at', { ascending: false });
+
         if (studentsData) {
             const formatted = studentsData.map((p) => ({
                 id: p.id,
                 name: p.full_name || 'Unnamed',
                 full_name: p.full_name || 'Unnamed',
                 email: p.email || '',
+                can_exam: p.can_exam,
                 assignedProfessor: '—',
                 avgScore: 0,
                 totalSessions: 0,
@@ -97,7 +139,7 @@ export function Students() {
         }
         if (profsData) setProfessors(profsData);
         if (manikinsData) setManikins(manikinsData);
-    }, [role]);
+    }, [isInstructorRole, user?.id]);
 
     useEffect(() => {
         fetchStudentsData();
@@ -140,17 +182,19 @@ export function Students() {
             else alert(error.message);
         } else {
             await fetchAssignments();
+            await fetchStudentsData();
         }
         setActionLoading(null);
     };
 
-    const handleUnadvise = async (studentId) => {
-        if (!user?.id) return;
-        setActionLoading(studentId);
-        const assignment = assignments.find((a) => a.student_id === studentId && a.instructor_id === user.id);
-        if (assignment) {
-            await supabase.from('advisor_assignments').delete().eq('id', assignment.id);
+    const handleUnadvise = async (assignmentId) => {
+        if (!assignmentId) return;
+        setActionLoading(assignmentId);
+        const { error } = await supabase.from('advisor_assignments').delete().eq('id', assignmentId);
+        if (error) alert(error.message);
+        else {
             await fetchAssignments();
+            await fetchStudentsData();
         }
         setActionLoading(null);
     };
@@ -167,7 +211,7 @@ export function Students() {
             (student.email && student.email.toLowerCase().includes(term)) ||
             (student.id && student.id.toLowerCase().includes(term))
         );
-        const matchesAdviseeFilter = !isInstructor || !showOnlyMyAdvisees || myAdviseeIds.includes(student.id);
+        const matchesAdviseeFilter = role !== 'admin' || !showOnlyMyAdvisees || myAdviseeIds.includes(student.id);
         return matchesSearch && matchesAdviseeFilter;
     });
 
@@ -192,7 +236,7 @@ export function Students() {
                 <CreateSessionForm
                     onClose={() => { setIsCreatingSession(false); setSessionPreSelectStudentId(null); }}
                     onCreated={() => { setIsCreatingSession(false); setSessionPreSelectStudentId(null); }}
-                    advisedStudentIds={isInstructor ? myAdviseeIds : null}
+                    advisedStudentIds={isInstructorRole ? myAdviseeIds : null}
                     defaultStudentId={sessionPreSelectStudentId}
                 />
             )}
@@ -201,8 +245,8 @@ export function Students() {
                 <div>
                     <h1 className="text-2xl font-bold text-foreground">Students</h1>
                     <p className="text-muted-foreground mt-1">
-                        {isInstructor
-                            ? 'Recent sign-ins. Advise students to assign sessions to them; only you can unadvise or assign sessions to your advisees.'
+                        {isInstructorRole
+                            ? 'Only students your administrator assigned to you appear here. Use Assign Exam for multi-station exams (exam-enabled students only).'
                             : 'Manage student assignments and track academic progress.'}
                     </p>
                 </div>
@@ -217,11 +261,36 @@ export function Students() {
                 </div>
             </div>
 
-            {isInstructor && (
+            {isInstructorRole && (
+                <div className="bg-primary/10 border border-primary/20 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
+                    <span className="text-sm font-medium text-foreground">
+                        {myAdviseeIds.length > 0 ? (
+                            <>
+                                <strong>{myAdviseeIds.length}</strong> student{myAdviseeIds.length !== 1 ? 's' : ''} assigned to you.
+                                You can schedule sessions only for this roster.
+                            </>
+                        ) : (
+                            <>No students are assigned to you yet. Ask an administrator to add you in Instructors.</>
+                        )}
+                    </span>
+                    {myAdviseeIds.length > 0 && (
+                        <button
+                            type="button"
+                            onClick={() => openAssignSession()}
+                            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90"
+                        >
+                            <Calendar size={16} />
+                            New session
+                        </button>
+                    )}
+                </div>
+            )}
+
+            {role === 'admin' && (
                 <div className="bg-primary/10 border border-primary/20 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
                     <span className="text-sm font-medium text-foreground">
                         {myAdviseeIds.length > 0
-                            ? <>You advise <strong>{myAdviseeIds.length}</strong> student{myAdviseeIds.length !== 1 ? 's' : ''}. You can assign sessions only to your advisees.</>
+                            ? <>You advise <strong>{myAdviseeIds.length}</strong> student{myAdviseeIds.length !== 1 ? 's' : ''} under your own account.</>
                             : 'View all students or filter to your advisees.'}
                     </span>
                     <div className="flex items-center gap-2">
@@ -306,7 +375,11 @@ export function Students() {
                     <div className="space-y-1">
                         <p className="text-lg font-bold text-foreground">{students.length} Students</p>
                         <p className="text-xs text-muted-foreground">
-                            {isInstructor && myAdviseeIds.length > 0 ? `${myAdviseeIds.length} your advisees` : 'Tracking instructor groups'}
+                            {isInstructorRole
+                                ? `${students.length} assigned to you`
+                                : isInstructor && myAdviseeIds.length > 0
+                                    ? `${myAdviseeIds.length} your advisees`
+                                    : 'Tracking instructor groups'}
                         </p>
                     </div>
                 </div>
@@ -325,7 +398,7 @@ export function Students() {
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 {filteredStudents.map((student) => {
-                    const loading = actionLoading === student.id;
+                    const loading = actionLoading === student.id || actionLoading === student.assignmentId;
                     return (
                         <div key={student.id} className="bg-card border border-white/5 rounded-xl p-5 hover:border-primary/40 hover:shadow-lg transition-all duration-200">
                             <div className="flex items-start justify-between mb-4">
@@ -359,7 +432,19 @@ export function Students() {
                                 </button>
                             </div>
 
-                            {isInstructor && (
+                            {isInstructorRole && (
+                                <div className="mb-4 p-3 bg-muted/30 rounded-lg">
+                                    <p className="text-[10px] uppercase font-bold text-muted-foreground mb-1 tracking-wider">Assignment</p>
+                                    <p className="text-xs font-semibold text-foreground">
+                                        On your exam roster (assigned by an administrator)
+                                    </p>
+                                    {student.can_exam === false && (
+                                        <p className="text-[11px] text-muted-foreground mt-1">Practice-only — not listed in Assign Exam until exam mode is enabled.</p>
+                                    )}
+                                </div>
+                            )}
+
+                            {role === 'admin' && (
                                 <div className="mb-4 p-3 bg-muted/30 rounded-lg">
                                     <p className="text-[10px] uppercase font-bold text-muted-foreground mb-1 tracking-wider">Advisor</p>
                                     <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -370,11 +455,11 @@ export function Students() {
                                                     ? `Advised by ${student.advisorName}`
                                                     : 'Not advised'}
                                         </p>
-                                        {student.isAdvisedByMe && (
+                                        {student.assignmentId && (
                                             <button
                                                 type="button"
                                                 disabled={loading}
-                                                onClick={() => handleUnadvise(student.id)}
+                                                onClick={() => handleUnadvise(student.assignmentId)}
                                                 className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-destructive/15 text-destructive hover:bg-destructive/25 border border-destructive/30"
                                             >
                                                 {loading ? <Loader2 size={12} className="animate-spin" /> : <UserMinus size={12} />}
@@ -397,9 +482,9 @@ export function Students() {
                             </div>
 
                             <div className="flex flex-wrap items-center justify-between gap-2 pt-4 border-t border-white/5">
-                                {isInstructor && (
+                                {(isInstructorRole || role === 'admin') && (
                                     <div className="flex flex-wrap items-center gap-2">
-                                        {!student.advisorId && (
+                                        {role === 'admin' && !student.advisorId && (
                                             <button
                                                 type="button"
                                                 disabled={loading}
@@ -410,17 +495,15 @@ export function Students() {
                                                 Advise
                                             </button>
                                         )}
-                                        {student.isAdvisedByMe && (
-                                            <>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => openAssignSession(student.id)}
-                                                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90"
-                                                >
-                                                    <Calendar size={14} />
-                                                    Assign session
-                                                </button>
-                                            </>
+                                        {(isInstructorRole || student.isAdvisedByMe) && (
+                                            <button
+                                                type="button"
+                                                onClick={() => openAssignSession(student.id)}
+                                                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90"
+                                            >
+                                                <Calendar size={14} />
+                                                Assign session
+                                            </button>
                                         )}
                                     </div>
                                 )}
@@ -436,6 +519,14 @@ export function Students() {
                     );
                 })}
             </div>
+
+            {filteredStudents.length === 0 && (
+                <p className="text-center text-muted-foreground py-12 text-sm">
+                    {isInstructorRole && students.length === 0
+                        ? 'No students are assigned to you yet. Your administrator can assign them from Instructors.'
+                        : 'No students match your search.'}
+                </p>
+            )}
         </div>
     );
 }

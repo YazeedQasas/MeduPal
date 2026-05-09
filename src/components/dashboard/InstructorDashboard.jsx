@@ -296,6 +296,28 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
   const [loading, setLoading] = useState(true);
   const displayName = profile?.full_name || user?.email?.split('@')[0] || 'Instructor';
 
+  /** Keep browser URL in sync with tab so App routing does not reset navigation back to dashboard. */
+  const navigateInstructorTab = useCallback(
+    (tabId) => {
+      const pathByTab = {
+        dashboard: '/dashboard',
+        'assign-exam': '/assign-exam',
+        students: '/students',
+        cases: '/cases',
+        sessions: '/sessions',
+        hardware: '/hardware',
+        settings: '/settings',
+        profile: '/profile',
+      };
+      setActiveTab(tabId);
+      const path = pathByTab[tabId];
+      if (path && typeof window !== 'undefined') {
+        window.history.pushState(null, '', path);
+      }
+    },
+    [setActiveTab]
+  );
+
   // Core data
   const [advisorStudents, setAdvisorStudents] = useState([]);
   const [cases, setCases] = useState([]);
@@ -365,8 +387,7 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
         .from('profiles')
         .select('id, full_name, email, can_exam')
         .in('id', studentIds)
-        .eq('role', 'student')
-        .eq('can_exam', true);
+        .eq('role', 'student');
       setAdvisorStudents(profiles || []);
     } else {
       setAdvisorStudents([]);
@@ -746,10 +767,10 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
     { label: 'Case management', enabled: true },
   ];
   const quickCommands = [
-    { label: 'Start session', onClick: () => setActiveTab('sessions'), icon: Play, helper: 'Launch or continue sessions' },
-    { label: 'Assign exam', onClick: () => setActiveTab('assign-exam'), icon: FileCheck, helper: 'Create student assessments' },
-    { label: 'Open students', onClick: () => setActiveTab('students'), icon: Users, helper: 'Review advisees and profiles' },
-    { label: 'Hardware diagnostics', onClick: () => setActiveTab('hardware'), icon: Activity, helper: 'Check station readiness' },
+    { label: 'Start session', onClick: () => navigateInstructorTab('sessions'), icon: Play, helper: 'Launch or continue sessions' },
+    { label: 'Assign exam', onClick: () => navigateInstructorTab('assign-exam'), icon: FileCheck, helper: 'Create student assessments' },
+    { label: 'Open students', onClick: () => navigateInstructorTab('students'), icon: Users, helper: 'Review advisees and profiles' },
+    { label: 'Hardware diagnostics', onClick: () => navigateInstructorTab('hardware'), icon: Activity, helper: 'Check station readiness' },
   ];
   const compactAssignments = assignmentsTrend.slice(-7).map((item) => ({ label: item.date, value: item.count }));
   const compactPerformance = performanceTrend.slice(-7).map((item) => ({ label: item.week, value: item.avg }));
@@ -787,17 +808,17 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
     {
       label: 'Students assigned exams',
       ready: studentsWithoutExam.length === 0 || advisorStudents.length === 0,
-      onReview: () => setActiveTab('assign-exam'),
+      onReview: () => navigateInstructorTab('assign-exam'),
     },
     {
       label: 'At least one upcoming session',
       ready: scheduledSessions.length > 0,
-      onReview: () => setActiveTab('sessions'),
+      onReview: () => navigateInstructorTab('sessions'),
     },
     {
       label: 'No high inactivity alerts',
       ready: inactiveStudents.length < 3,
-      onReview: () => setActiveTab('students'),
+      onReview: () => navigateInstructorTab('students'),
     },
   ];
   const readinessScore = Math.round((readinessChecks.filter((i) => i.ready).length / readinessChecks.length) * 100);
@@ -892,7 +913,7 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
         firstName={firstName}
         summaryLine={planSummaryLine}
         focusTip={focusTip}
-        onAssignExam={() => setActiveTab('assign-exam')}
+        onAssignExam={() => navigateInstructorTab('assign-exam')}
       />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -987,7 +1008,7 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
           <div className="rounded-2xl border overflow-hidden" style={{ background: P.card, borderColor: P.border, boxShadow: P.shadow }}>
             <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: P.border }}>
               <h2 className="text-sm font-semibold" style={{ color: P.text }}>Assigned Students</h2>
-              <button className="text-xs" style={{ color: P.accent }} onClick={() => setActiveTab('students')}>Open students</button>
+              <button className="text-xs" style={{ color: P.accent }} onClick={() => navigateInstructorTab('students')}>Open students</button>
             </div>
             <div className="max-h-72 overflow-y-auto">
               {advisorStudents.length === 0 ? (
@@ -1030,7 +1051,7 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
           <div className="rounded-2xl border overflow-hidden" style={{ background: P.card, borderColor: P.border, boxShadow: P.shadow }}>
             <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: P.border }}>
               <h2 className="text-sm font-semibold" style={{ color: P.text }}>Upcoming Sessions</h2>
-              <button className="text-xs" style={{ color: P.accent }} onClick={() => setActiveTab('sessions')}>View all</button>
+              <button className="text-xs" style={{ color: P.accent }} onClick={() => navigateInstructorTab('sessions')}>View all</button>
             </div>
             <div className="divide-y" style={{ borderColor: P.border }}>
               {upcomingSessions.length === 0 ? (
@@ -1080,7 +1101,7 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
             displayName={displayName}
             stats={instructorProfileStats}
             loading={false}
-            onGoToProfile={() => setActiveTab('profile')}
+            onGoToProfile={() => navigateInstructorTab('profile')}
           />
 
           <div className="rounded-2xl border overflow-hidden" style={{ background: P.card, borderColor: P.border, boxShadow: P.shadow }}>
@@ -1111,12 +1132,12 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
             <div className="p-4">
               {instructorRailTab === 'actions' ? (
                 <QuickActions
-                  onAssignExam={() => setActiveTab('assign-exam')}
-                  onManageStudents={() => setActiveTab('students')}
-                  onViewAnalytics={() => setActiveTab('cases')}
-                  onRunDiagnostics={() => setActiveTab('hardware')}
-                  onOpenSettings={() => setActiveTab('settings')}
-                  onOpenProfile={() => setActiveTab('profile')}
+                  onAssignExam={() => navigateInstructorTab('assign-exam')}
+                  onManageStudents={() => navigateInstructorTab('students')}
+                  onViewAnalytics={() => navigateInstructorTab('cases')}
+                  onRunDiagnostics={() => navigateInstructorTab('hardware')}
+                  onOpenSettings={() => navigateInstructorTab('settings')}
+                  onOpenProfile={() => navigateInstructorTab('profile')}
                   variant="glass"
                   layout="grid"
                   embedded

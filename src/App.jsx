@@ -25,6 +25,7 @@ import { DashboardShell } from "./components/dashboard/DashboardShell";
 import { StudentHistory } from "./components/dashboard/StudentHistory";
 import { StudentProgress } from "./components/dashboard/StudentProgress";
 import { StudentProfile } from "./components/dashboard/StudentProfile";
+import { AdminInstructorsPage } from "./components/dashboard/AdminInstructorsPage";
 import PatientTestingPage from "./components/testing/PatientTestingPage";
 
 function AppContent() {
@@ -66,6 +67,14 @@ function AppContent() {
         return;
       }
       if (role === "admin" || role === "instructor") {
+        if (
+          typeof window !== "undefined" &&
+          role === "admin" &&
+          window.location.pathname === "/instructors"
+        ) {
+          setActiveTab("instructors");
+          return;
+        }
         setActiveTab("dashboard");
       } else if (role === "student") {
         setActiveTab("student-dashboard");
@@ -96,7 +105,7 @@ function AppContent() {
     }
   }, [loading, user, role]);
 
-  // URL-based redirect: instructor — default to dashboard; /assign-exam, /students, /sessions when explicitly visited
+  // URL-based redirect: instructor/admin tabs
   useEffect(() => {
     if (loading || !user) return;
     const isInstructor = role === "instructor" || role === "admin";
@@ -108,6 +117,9 @@ function AppContent() {
       if (path === "/" || path === "/home") {
         window.history.replaceState(null, "", "/dashboard");
       }
+    } else if (path === "/cases") {
+      setActiveTab("cases");
+      window.history.replaceState(null, "", "/cases");
     } else if (path === "/assign-exam") {
       setActiveTab("assign-exam");
       window.history.replaceState(null, "", "/assign-exam");
@@ -117,6 +129,20 @@ function AppContent() {
     } else if (path === "/sessions") {
       setActiveTab("sessions");
       window.history.replaceState(null, "", "/sessions");
+    } else if (path === "/hardware") {
+      setActiveTab("hardware");
+      window.history.replaceState(null, "", "/hardware");
+    } else if (path === "/settings") {
+      setActiveTab("settings");
+      window.history.replaceState(null, "", "/settings");
+    } else if (path === "/profile") {
+      setActiveTab("profile");
+      window.history.replaceState(null, "", "/profile");
+    } else if (path === "/instructors") {
+      if (role === "admin") {
+        setActiveTab("instructors");
+        window.history.replaceState(null, "", "/instructors");
+      }
     }
   }, [loading, user, role, activeTab]);
 
@@ -238,7 +264,15 @@ function AppContent() {
         );
 
       case "cases":
-        return <Cases />;
+        return (
+          (role === "instructor" || role === "admin") ? (
+            <DashboardShell>
+              <Cases />
+            </DashboardShell>
+          ) : (
+            <Cases />
+          )
+        );
       case "sessions":
         return (
           (role === "instructor" || role === "admin") ? (
@@ -367,7 +401,7 @@ function AppContent() {
             backLabel="Back to Home"
           />
         );
-      case "users":
+      case "instructors":
         if (role !== "admin") {
           return (
             <div className="flex items-center justify-center h-[500px]">
@@ -376,19 +410,16 @@ function AppContent() {
                   Admin area
                 </h2>
                 <p className="text-muted-foreground mt-2">
-                  You don't have permission to manage users.
+                  You do not have permission to view instructors.
                 </p>
               </div>
             </div>
           );
         }
         return (
-          <div className="max-w-[1200px] mx-auto space-y-4">
-            <h1 className="text-2xl font-bold">Users</h1>
-            <p className="text-muted-foreground">
-              Admin user management (create users, assign roles) will go here.
-            </p>
-          </div>
+          <DashboardShell>
+            <AdminInstructorsPage />
+          </DashboardShell>
         );
       default:
         return (
