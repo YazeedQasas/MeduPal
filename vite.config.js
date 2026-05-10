@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from 'tailwindcss'
 import autoprefixer from 'autoprefixer'
+import path from 'path'
 
 // SPA fallback: serve index.html for /practice-history so the app can render that route
 function spaFallback() {
@@ -22,4 +23,9 @@ function spaFallback() {
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), spaFallback()],
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+    },
+  },
 })

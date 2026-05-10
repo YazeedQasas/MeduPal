@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { LayoutDashboard, FileText, HardDrive, Settings, Activity, LogOut, GraduationCap, UserCog, Home, Play, TrendingUp, History, Cpu, FileCheck } from 'lucide-react';
 import { motion } from 'framer-motion';
+import xpatientLogo from '../../assets/Logo/XPatient_LOGO_white.png';
 import { useAuth } from '../../context/AuthContext';
 import {
   Sidebar as SidebarUI,
@@ -40,38 +41,31 @@ function buildStudentNavItems(has_hardware, can_exam) {
 
 function SidebarLogo() {
   const { open, animate } = useSidebar();
-  const TRANSITION = { duration: 0.3, ease: 'easeInOut' };
+  const T = { duration: 0.3, ease: 'easeInOut' };
   return (
-    <a
-      href="#"
-      onClick={(e) => e.preventDefault()}
-      className="flex items-center relative z-20 overflow-hidden py-2 gap-2"
-    >
-      {/* Icon badge — visible when collapsed, fades out when open */}
-      <motion.div
-        aria-label="XPatient"
-        animate={{
-          opacity: animate ? (open ? 0 : 1) : 1,
-          width: animate ? (open ? 0 : 28) : 28,
-        }}
-        transition={TRANSITION}
-        className="h-7 w-7 rounded-md bg-primary/20 text-primary flex items-center justify-center text-[10px] font-bold flex-shrink-0"
-      >
-        XP
-      </motion.div>
-      {/* Text — fades in when open */}
+    <div className="relative h-9 my-1">
+      {/* Logo — fades out when sidebar opens */}
+      <motion.img
+        src={xpatientLogo}
+        alt=""
+        animate={{ opacity: animate ? (open ? 0 : 1) : 0 }}
+        transition={T}
+        className="absolute top-1/2 left-2 -translate-y-1/4"
+        style={{ height: 30, width: 'auto' }}
+      />
+      {/* Text — slides in from right when sidebar opens */}
       <motion.span
         animate={{
+          display: animate ? (open ? 'inline-block' : 'none') : 'inline-block',
           opacity: animate ? (open ? 1 : 0) : 1,
-          width: animate ? (open ? 'auto' : 0) : 'auto',
+          x: animate ? (open ? 0 : 18) : 0,
         }}
-        transition={TRANSITION}
-        style={{ overflow: 'hidden', whiteSpace: 'nowrap' }}
-        className="text-white font-semibold text-base tracking-tight"
+        transition={T}
+        className="absolute top-1/2 left-2 -translate-y-1/2 text-[15px] font-bold text-foreground whitespace-nowrap tracking-wide leading-none"
       >
         XPatient
       </motion.span>
-    </a>
+    </div>
   );
 }
 

@@ -1,0 +1,97 @@
+{
+  "title": "Cardiovascular History",
+  "total_items": 31,
+  "sections": [
+    {
+      "id": "introduction",
+      "label": "Introduction",
+      "items": [
+        { "num": 1, "text": "Wash hands and don PPE if appropriate" },
+        { "num": 2, "text": "Introduce yourself to the patient including your name and role" },
+        { "num": 3, "text": "Confirm the patient's name and date of birth" },
+        { "num": 4, "text": "Explain that you would like to take a history from the patient" },
+        { "num": 5, "text": "Gain consent to proceed with taking a history" }
+      ]
+    },
+    {
+      "id": "presenting_complaint",
+      "label": "Presenting Complaint",
+      "items": [
+        { "num": 6, "text": "Use open questions to explore the presenting complaint and facilitate the patient to expand" }
+      ]
+    },
+    {
+      "id": "history_of_presenting_complaint",
+      "label": "History of Presenting Complaint",
+      "items": [
+        { "num": 7, "text": "Explore the presenting complaint using SOCRATES (site, onset, character, radiation, associated symptoms, time course, exacerbating and relieving factors, severity)" },
+        { "num": 8, "text": "Screen for key cardiovascular symptoms (chest pain, dyspnoea, palpitations, syncope, oedema, intermittent claudication)" },
+        { "num": 9, "text": "Explore the patient's ideas, concerns and expectations (ICE)" },
+        { "num": 10, "text": "Summarise the presenting complaint and signpost what will be discussed next" }
+      ]
+    },
+    {
+      "id": "systemic_enquiry",
+      "label": "Systemic Enquiry",
+      "items": [
+        { "num": 11, "text": "Screen for relevant symptoms in other body systems" }
+      ]
+    },
+    {
+      "id": "past_medical_history",
+      "label": "Past Medical History",
+      "items": [
+        { "num": 12, "text": "Ask about medical conditions and cardiovascular risk factors (hypertension, hyperlipidaemia)" },
+        { "num": 13, "text": "Ask about previous surgeries or procedures (CABG, stenting, heart valve replacement)" }
+      ]
+    },
+    {
+      "id": "drug_history",
+      "label": "Drug History",
+      "items": [
+        { "num": 14, "text": "Ask about prescribed medications and over-the-counter remedies" },
+        { "num": 15, "text": "Ask about allergies and the type of reaction" }
+      ]
+    },
+    {
+      "id": "family_history",
+      "label": "Family History",
+      "items": [
+        { "num": 16, "text": "Ask about family history of cardiovascular disease and age of onset in relatives" }
+      ]
+    },
+    {
+      "id": "social_history",
+      "label": "Social History",
+      "items": [
+        { "num": 17, "text": "Explore general social context (accommodation, who lives with, ability to manage ADLs)" },
+        { "num": 18, "text": "Take a smoking history" },
+        { "num": 19, "text": "Take an alcohol history" },
+        { "num": 20, "text": "Ask about recreational drug use" },
+        { "num": 21, "text": "Ask about diet" },
+        { "num": 22, "text": "Ask about exercise" },
+        { "num": 23, "text": "Ask about occupation" },
+        { "num": 24, "text": "Ask about driving or operating heavy machinery" }
+      ]
+    },
+    {
+      "id": "closing",
+      "label": "Closing the Consultation",
+      "items": [
+        { "num": 25, "text": "Summarise the key points of the history" },
+        { "num": 26, "text": "Ask if the patient has any questions or concerns not yet addressed" },
+        { "num": 27, "text": "Thank the patient for their time" },
+        { "num": 28, "text": "Dispose of PPE appropriately and wash hands" }
+      ]
+    },
+    {
+      "id": "communication_skills",
+      "label": "Key Communication Skills",
+      "items": [
+        { "num": 29, "text": "Active listening (reflecting, not interrupting, showing empathy)" },
+        { "num": 30, "text": "Summarising (summarising back what the patient has told you)" },
+        { "num": 31, "text": "Signposting (informing the patient what you are about to discuss next)" }
+      ]
+    }
+  ]
+}

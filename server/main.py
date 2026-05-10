@@ -101,53 +101,58 @@ def resolve_case_key(case_id: str, case_title: str) -> str:
 PATIENT_PERSONAS = {
     "pneumonia": {
         "name_age": "Maria, 52-year-old school teacher",
+        "date_of_birth": "15/03/1973",
         "onset_story": "Started with a cold about a week ago; three days ago developed fever and a cough that got worse. No recent travel or sick contacts she can recall.",
         "emotional_state": "Worried and tired; a bit short-tempered because she can't sleep well.",
         "social_brief": "Lives with her husband; two adult children. Non-smoker, occasional wine.",
         "chief_complaint": "I have had fever and productive cough for the past 3 days.",
         "symptoms_known": "Fever, cough with yellow-green sputum, pain when breathing deeply, shortness of breath, tiredness.",
         "reveal_only_if_asked": "She might mention a tiny bit of blood in sputum only if asked about sputum appearance or blood.",
-        "do_not_know": "She does not know her diagnosis; avoid medical jargon. She has not had a chest X-ray yet.",
+        "do_not_know": "She does not know her diagnosis. If asked what condition she has, say 'I don't know, that's why I'm here.' No medical jargon. Has not had a chest X-ray yet.",
     },
     "aortic-stenosis": {
         "name_age": "James, 68-year-old retiree",
+        "date_of_birth": "22/08/1957",
         "onset_story": "Gradual worsening over months; more short of breath and dizzy with activity.",
         "emotional_state": "Anxious about falling; frustrated he can't do his usual walks.",
         "social_brief": "Lives alone; used to be very active.",
         "chief_complaint": "I feel dizzy and short of breath when I exert myself.",
         "symptoms_known": "Shortness of breath with exertion, chest squeezing with activity, dizziness, nearly passed out once recently, can barely climb one flight of stairs.",
-        "reveal_only_if_asked": "Syncope and severity of dyspnea—only describe if student asks directly.",
-        "do_not_know": "Does not know diagnosis; no medical jargon.",
+        "reveal_only_if_asked": "Syncope and severity of dyspnea — only describe if student asks directly.",
+        "do_not_know": "Does not know diagnosis. If asked what condition he has, say 'I'm not sure, I was hoping you'd tell me.' No medical jargon.",
     },
     "mitral-stenosis": {
-        "name_age": "Patient with mitral stenosis",
-        "onset_story": "Progressive fatigue and breathlessness.",
-        "emotional_state": "Tired and concerned.",
-        "social_brief": "Lives at home.",
+        "name_age": "Eleanor, 45-year-old office administrator",
+        "date_of_birth": "11/06/1980",
+        "onset_story": "Progressive fatigue and breathlessness over several months; recently started waking at night unable to breathe comfortably lying flat.",
+        "emotional_state": "Tired and quietly concerned; doesn't want to make a fuss.",
+        "social_brief": "Lives with partner; two school-age children.",
         "chief_complaint": "I get tired easily and feel breathless when lying down.",
-        "symptoms_known": "Tiredness, breathlessness when lying flat, palpitations, pink-tinged sputum when asked.",
-        "reveal_only_if_asked": None,
-        "do_not_know": "No diagnosis; no jargon.",
+        "symptoms_known": "Tiredness, breathlessness when lying flat, palpitations, occasional pink-tinged sputum if asked.",
+        "reveal_only_if_asked": "Pink-tinged sputum only if student asks about cough or sputum directly.",
+        "do_not_know": "Does not know diagnosis. If asked what condition she has, say 'I really don't know, I've just been feeling off.' No medical jargon.",
     },
     "asthma": {
-        "name_age": "Patient with asthma",
-        "onset_story": "Recurrent wheezing and chest tightness; worse at night and with triggers.",
-        "emotional_state": "Worried when symptoms flare.",
-        "social_brief": "Lives at home.",
+        "name_age": "Ryan, 24-year-old warehouse worker",
+        "date_of_birth": "03/09/2001",
+        "onset_story": "Chest tightness and wheezing started a few days ago; worse at night and after being near a dusty area at work.",
+        "emotional_state": "A bit anxious, especially at night when symptoms worsen.",
+        "social_brief": "Lives in a shared flat; non-smoker; cat at home.",
         "chief_complaint": "I feel chest tightness and wheezing, especially at night.",
-        "symptoms_known": "Wheezing, chest tightness, cough, waking at night; worse with cold air, dust, cats, pollen.",
-        "reveal_only_if_asked": None,
-        "do_not_know": "May know they have asthma; avoid jargon.",
+        "symptoms_known": "Wheezing, chest tightness, cough, waking at night; worse with cold air, dust, the cat.",
+        "reveal_only_if_asked": "Severity at night and triggers only if student asks.",
+        "do_not_know": "Does not know diagnosis. If asked what condition he has, say 'I'm not sure, that's what I'm hoping you can work out.' No medical jargon.",
     },
     "copd": {
-        "name_age": "Patient with COPD",
-        "onset_story": "Long-standing cough; worsening shortness of breath over years.",
-        "emotional_state": "Frustrated by limitation.",
-        "social_brief": "Smoked for many years; quit several years ago.",
+        "name_age": "Trevor, 65-year-old retired factory worker",
+        "date_of_birth": "17/04/1960",
+        "onset_story": "Long-standing cough that has been getting gradually worse over years; now struggling with simple tasks like walking to the shops.",
+        "emotional_state": "Frustrated and resigned; used to being independent.",
+        "social_brief": "Smoked 30 a day for 40 years; quit five years ago. Lives with wife.",
         "chief_complaint": "I have chronic cough and increasing shortness of breath.",
-        "symptoms_known": "Chronic cough, thick morning sputum, shortness of breath, limited walking distance.",
-        "reveal_only_if_asked": None,
-        "do_not_know": "May know COPD; avoid jargon.",
+        "symptoms_known": "Chronic cough, thick morning sputum, shortness of breath on minimal exertion, wheezing.",
+        "reveal_only_if_asked": "How far he can walk and sputum colour only if asked directly.",
+        "do_not_know": "Does not know diagnosis. If asked what condition he has, say 'Nobody's put a name on it yet, that's why I'm here.' No medical jargon.",
     },
 }
 
@@ -166,6 +171,11 @@ def _build_system_prompt(
     if persona:
         block = [
             f"Character: {persona.get('name_age', 'Patient')}.",
+        ]
+        dob = persona.get("date_of_birth")
+        if dob:
+            block.append(f"Date of birth: {dob}.")
+        block += [
             f"Chief complaint (in your words): {persona.get('chief_complaint', '')}",
             f"Onset / story: {persona.get('onset_story', '')}",
             f"Emotional state: {persona.get('emotional_state', '')}",
@@ -181,19 +191,22 @@ def _build_system_prompt(
         header = header + "\n\n" + "\n".join(block)
     else:
         header = (
-            f"{header} Condition: {title} ({category}). "
-            f"Reported symptoms: {symptoms_str}. "
+            f"{header} Reported symptoms: {symptoms_str}. "
             "You are being interviewed by a medical student."
         )
 
     rules = (
         "\n\nOSCE rules: You are being interviewed by a medical student who is learning to diagnose. "
-        "Your goal is to help them reach the correct diagnosis through your answers — but do NOT name the diagnosis yourself. "
-        "When describing any symptom, always include its most specific, characteristic quality "
-        "(type, timing, location, triggers, associated features) — "
-        "these details are what distinguish your condition from similar ones. "
-        "Do not be vague. Use first person only. Keep answers to 2–4 sentences in natural, lay language. "
-        "Reveal sensitive or red-flag information only when the student asks directly. "
+        "ABSOLUTE RULE — never say the name of your diagnosis, condition, or disease under any circumstance. "
+        "This applies even when expressing uncertainty — do NOT say 'I'm not sure if it's asthma' or 'maybe it's my heart' — "
+        "simply say 'I don't know, that's why I came' or 'I was hoping you could tell me.' "
+        "Never repeat back medical terms the student uses (e.g. if they ask 'is it COPD?', do not say 'I don't know if it's COPD'). "
+        "Your goal is to help them reach the correct diagnosis through your symptoms alone. "
+        "BREVITY RULE — keep every answer to 1–2 sentences maximum. "
+        "Give only what was asked. Do not volunteer extra information. Make the student ask follow-up questions. "
+        "When describing a symptom, give one specific detail (e.g. timing, character, severity) — not all at once. "
+        "Reveal red-flag or sensitive information only when the student asks directly. "
+        "Use first person only, in natural lay language. "
         "Where natural and fitting, insert ONE of these exact expressions (and nothing else inside the asterisks): "
         "*coughs*, *sighs*, *laughs*, *gasps*, *clears throat*, *winces*, *groans*, *chuckles* — "
         "only when it genuinely fits. Use at most one per reply. Do not modify or expand them."
@@ -681,7 +694,10 @@ async def patient_reply(body: PatientReplyRequest):
     if body.system_prompt.strip():
         osce_rules = (
             "\n\nOSCE session rules: You are being interviewed by a medical student who is learning to diagnose. "
-            "Your goal is to help them reach the correct diagnosis through your answers — but do NOT name the diagnosis yourself. "
+            "ABSOLUTE RULE — never name your diagnosis or medical condition, even if directly asked. "
+            "If the student asks 'what is wrong with you?', 'do you have [condition]?', or 'what did the doctor say?', "
+            "respond with something like 'I don't know, that's why I came' or 'I was hoping you could tell me.' "
+            "Your goal is to help the student reach the correct diagnosis through your symptoms — not to give it away. "
             "When describing any symptom, always include its most specific, characteristic quality "
             "(e.g. type, timing, location, what makes it better or worse, associated features) — "
             "these details are what distinguish your condition from similar ones. "
@@ -799,6 +815,243 @@ async def summarise_session(body: SummariseRequest):
 
     summary = await _chat(prompt, "", conversation_history=None) or body.prior_summary
     return {"summary": summary.strip()}
+
+
+# ── History-Taking Evaluation ─────────────────────────────────────────────────
+
+CASE_TYPE_MAP = {
+    "pneumonia": "respiratory",
+    "asthma": "respiratory",
+    "copd": "respiratory",
+    "aortic-stenosis": "cardiovascular",
+    "mitral-stenosis": "cardiovascular",
+}
+
+_CHECKLIST_CACHE: dict[str, dict] = {}
+
+def _load_checklist(case_type: str) -> dict:
+    if case_type in _CHECKLIST_CACHE:
+        return _CHECKLIST_CACHE[case_type]
+    import json
+    docs_dir = Path(__file__).resolve().parent / "case_docs"
+    path = docs_dir / f"{case_type}_history_checklist.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    _CHECKLIST_CACHE[case_type] = data
+    return data
+
+
+SCORING_MODEL = os.getenv("SCORING_MODEL", "llama-3.3-70b-versatile")
+
+
+async def _groq_chat_json(messages: list[dict]) -> str:
+    """Call Groq for scoring using a capable model; extract JSON from response."""
+    import re as _re2
+    api_key = (
+        os.getenv("GROQ_API_KEY", "").strip()
+        or _get_env_from_file(".env.local", "GROQ_API_KEY")
+        or _get_env_from_file(".env", "GROQ_API_KEY")
+    )
+    if not api_key:
+        raise ValueError("GROQ_API_KEY not set")
+    logger.info("[scoring] using model=%s", SCORING_MODEL)
+    async with httpx.AsyncClient(timeout=90) as client:
+        r = await client.post(
+            GROQ_CHAT_URL,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": SCORING_MODEL,
+                "messages": messages,
+                "temperature": 0.1,
+            },
+        )
+        r.raise_for_status()
+        data = r.json()
+    choices = data.get("choices") or []
+    if not choices:
+        return "{}"
+    content = ((choices[0].get("message") or {}).get("content") or "").strip()
+    # Strip markdown fences if the model wrapped the JSON
+    content = _re2.sub(r"^```(?:json)?\s*", "", content)
+    content = _re2.sub(r"\s*```$", "", content)
+    content = content.strip()
+    # Extract the outermost JSON object if there is surrounding prose
+    m = _re2.search(r"\{[\s\S]*\}", content)
+    if m:
+        content = m.group(0)
+    logger.info("[scoring] raw LLM response length=%d", len(content))
+    return content if content else "{}"
+
+
+class HistoryEvalRequest(BaseModel):
+    conversation: list[dict]
+    case_id: str = ""
+    case_title: str = ""
+    patient_name: str = ""
+
+
+@app.post("/evaluate-history-taking")
+async def evaluate_history_taking(body: HistoryEvalRequest):
+    """Score a history-taking conversation against the OSCE checklist."""
+    import json as _json
+
+    case_key = resolve_case_key(body.case_id, body.case_title)
+    case_type = CASE_TYPE_MAP.get(case_key, "respiratory")
+
+    try:
+        checklist = _load_checklist(case_type)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not load checklist: {e}")
+
+    student_turns = [
+        m.get("content", "").strip()
+        for m in body.conversation
+        if m.get("role") in ("student", "user") and m.get("content", "").strip()
+    ]
+    if not student_turns:
+        raise HTTPException(status_code=400, detail="No student messages found in conversation.")
+
+    student_transcript = "\n".join(f"{i+1}. {t}" for i, t in enumerate(student_turns))
+    logger.info("[scoring] case=%s type=%s turns=%d\n%s", case_key, case_type, len(student_turns), student_transcript)
+
+    # Build numbered checklist for the prompt
+    checklist_lines = []
+    all_items: dict[int, dict] = {}
+    for section in checklist["sections"]:
+        checklist_lines.append(f"\n[{section['label']}]")
+        for item in section["items"]:
+            checklist_lines.append(f"  {item['num']}. {item['text']}")
+            all_items[item["num"]] = item
+    checklist_text = "\n".join(checklist_lines)
+    total_items = checklist["total_items"]
+
+    # Ask the LLM only for covered item numbers — much simpler output, works on small models
+    system_prompt = (
+        "You are an OSCE examiner. Evaluate what checklist items the medical student covered. "
+        "Be generous: mark an item covered if there is any reasonable interpretation the student addressed it. "
+        "Return ONLY valid JSON with no markdown, no explanation."
+    )
+
+    user_prompt = (
+        f"CASE: {body.case_title or case_key} ({case_type} history)\n\n"
+        f"STUDENT SAID (in order):\n{student_transcript}\n\n"
+        f"OSCE CHECKLIST:\n{checklist_text}\n\n"
+        "Rules:\n"
+        "- Item 1: covered if student mentions washing hands or PPE (even 'I will wash my hands').\n"
+        "- Item 2: covered if student states their name OR role.\n"
+        "- Item 3: covered if student asks for patient's name, DOB, or any identifier.\n"
+        "- Item 4: covered if student says they want to ask some questions or take a history.\n"
+        "- Item 5: covered if student asks for consent or says 'is that okay?'.\n"
+        "- Item 6: covered if the first clinical question is open-ended.\n"
+        "- Item 7 (SOCRATES): covered if student asked about ≥5 of: site, onset, character, radiation, "
+        "associated symptoms, time course, exacerbating/relieving factors, severity.\n"
+        "- Item 8: covered if student screened for ≥3 relevant system symptoms.\n"
+        "- Item 9 (ICE): covered if student asked about ideas, concerns, OR expectations.\n"
+        "- Items 10, 27, 30, 32: covered if student summarised at any point.\n"
+        "- Items 31, 33: infer from overall conversation quality.\n\n"
+        "Return JSON in this exact format:\n"
+        "{\n"
+        '  "covered_items": [<list of item numbers the student covered>],\n'
+        '  "structure_followed": <true if student broadly followed Introduction→PC→HPC→PMH→DH→FH→SH→Closing order>,\n'
+        '  "structure_notes": "<one sentence>",\n'
+        '  "feedback": "<2-3 sentence overall feedback>",\n'
+        '  "strengths": ["<strength>"],\n'
+        '  "areas_for_improvement": ["<area>"]\n'
+        "}"
+    )
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+    raw_json = "{}"
+    scoring_error: str | None = None
+    try:
+        raw_json = await _groq_chat_json(messages)
+        logger.info("[scoring] raw response (500 chars): %s", raw_json[:500])
+    except Exception as e:
+        scoring_error = f"{type(e).__name__}: {e}"
+        logger.error("[scoring] Groq call failed: %s", scoring_error, exc_info=True)
+
+    def _zeroed_result(msg: str) -> dict:
+        return {
+            "sections": [
+                {"id": s["id"], "label": s["label"],
+                 "items": [{"num": i["num"], "text": i["text"], "covered": False, "notes": ""} for i in s["items"]]}
+                for s in checklist["sections"]
+            ],
+            "items_covered": 0,
+            "total_items": total_items,
+            "structure_followed": False,
+            "structure_notes": "Scoring unavailable.",
+            "feedback": msg,
+            "strengths": [],
+            "areas_for_improvement": [],
+            "_error": msg,
+        }
+
+    if scoring_error:
+        return _zeroed_result(scoring_error)
+
+    try:
+        result = _json.loads(raw_json)
+    except _json.JSONDecodeError as e:
+        import re as _re3
+        logger.warning("[scoring] JSON decode failed (%s), attempting regex fallback", e)
+        result = {}
+        # covered_items is always a clean int array — extract it first
+        m = _re3.search(r'"covered_items"\s*:\s*(\[[^\]]*\])', raw_json)
+        if m:
+            try:
+                result["covered_items"] = _json.loads(m.group(1))
+            except Exception:
+                pass
+        m2 = _re3.search(r'"structure_followed"\s*:\s*(true|false)', raw_json, _re3.IGNORECASE)
+        if m2:
+            result["structure_followed"] = m2.group(1).lower() == "true"
+        for _f in ("structure_notes", "feedback"):
+            m3 = _re3.search(rf'"{_f}"\s*:\s*"([^"]*)"', raw_json)
+            if m3:
+                result[_f] = m3.group(1)
+        for _f in ("strengths", "areas_for_improvement"):
+            m4 = _re3.search(rf'"{_f}"\s*:\s*(\[[^\]]*\])', raw_json)
+            if m4:
+                try:
+                    result[_f] = _json.loads(m4.group(1))
+                except Exception:
+                    pass
+        if not result.get("covered_items"):
+            logger.error("[scoring] regex fallback also failed. raw=%s", raw_json[:500])
+            return _zeroed_result(f"LLM returned invalid JSON: {e}. Raw: {raw_json[:200]}")
+        logger.info("[scoring] regex fallback recovered covered_items=%s", result.get("covered_items"))
+
+    covered_set: set[int] = set(int(n) for n in result.get("covered_items", []) if str(n).isdigit())
+    logger.info("[scoring] covered_items=%s", sorted(covered_set))
+
+    # Reconstruct full sections with covered flags from the covered_set
+    normalised_sections = []
+    for cs in checklist["sections"]:
+        items_out = [
+            {
+                "num": ci["num"],
+                "text": ci["text"],
+                "covered": ci["num"] in covered_set,
+                "notes": "",
+            }
+            for ci in cs["items"]
+        ]
+        normalised_sections.append({"id": cs["id"], "label": cs["label"], "items": items_out})
+
+    return {
+        "sections": normalised_sections,
+        "items_covered": len(covered_set),
+        "total_items": total_items,
+        "structure_followed": bool(result.get("structure_followed", False)),
+        "structure_notes": result.get("structure_notes", ""),
+        "feedback": result.get("feedback", ""),
+        "strengths": result.get("strengths", []),
+        "areas_for_improvement": result.get("areas_for_improvement", []),
+    }
 
 
 async def _groq_stt(content: bytes, filename: str) -> str:

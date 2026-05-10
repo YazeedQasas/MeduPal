@@ -172,6 +172,7 @@ export async function assignExam({ students, dateTime, stations, onProgress }) {
   const notificationRows = studentIds.map((studentId) => ({
     type: 'warning',
     message: `You have a new OSCE exam scheduled for ${label}.`,
+    recipient_id: studentId,
     source_id: `student:${studentId}`,
     is_acknowledged: false,
   }));

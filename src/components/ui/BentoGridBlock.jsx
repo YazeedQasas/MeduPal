@@ -1,35 +1,41 @@
 import { motion } from "framer-motion";
-import { ArrowUpRight, PlayCircle, Sparkles } from "lucide-react";
-
-const avatarProfiles = [
-  { src: "https://images.unsplash.com/photo-1544723795-3fb6469f5b39?w=200&h=200&fit=crop&q=80", alt: "Portrait of a motion designer smiling at the camera" },
-  { src: "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=200&h=200&fit=crop&q=80", alt: "Portrait of a product strategist in a studio" },
-  { src: "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=200&h=200&fit=crop&q=80", alt: "Portrait of a UX researcher wearing headphones" },
-];
+import { ArrowUpRight, Sparkles, Mic, MessageSquare, Brain, Activity, ClipboardList, CheckCircle2, Heart, User, Zap } from "lucide-react";
 
 const keyMetrics = [
-  { label: "Pass rate", value: "94%", caption: "Last cohort" },
-  { label: "Sessions completed", value: "12k+", caption: "This term" },
-  { label: "Student satisfaction", value: "96%", caption: "Post-exam survey" },
+  { label: "OSCE pass rate", value: "94%", caption: "↑ vs. previous cohort" },
+  { label: "Sessions run", value: "12k+", caption: "This academic term" },
+  { label: "Satisfaction", value: "4.8★", caption: "Post-exam survey" },
 ];
 
-const motionProcess = [
-  { label: "Ideate & storyboard", progress: 82 },
-  { label: "Motion exploration", progress: 64 },
-  { label: "Polish & delivery", progress: 91 },
+const skillProgress = [
+  { label: "History Taking", progress: 88 },
+  { label: "Physical Examination", progress: 74 },
+  { label: "Clinical Communication", progress: 91 },
+  { label: "Diagnostic Reasoning", progress: 65 },
 ];
 
-const inspirationGallery = [
-  { src: "https://images.unsplash.com/photo-1545239351-1141bd82e8a6?w=400&h=320&fit=crop&q=80", alt: "Collage of lighting references for motion design" },
-  { src: "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=400&h=320&fit=crop&q=80", alt: "Creative workspace with monitors and sketchbook" },
-  { src: "https://images.unsplash.com/photo-1515169067865-5387ec356754?w=400&h=320&fit=crop&q=80", alt: "Colorful motion design storyboard pinned to a wall" },
-  { src: "https://images.unsplash.com/photo-1521737604893-d14cc237f11d?w=400&h=320&fit=crop&q=80", alt: "Designer adjusting camera lighting in a studio" },
+const chatMessages = [
+  { role: "student", text: "Where exactly does the pain radiate to?" },
+  { role: "patient", text: "Down my left arm — and I feel short of breath when it comes on." },
+  { role: "student", text: "How long has this been happening?" },
+  { role: "patient", text: "About three days now. It's getting worse each time." },
 ];
 
-const reelStats = [
-  { label: "3:42 min" },
-  { label: "4.2K views" },
-  { label: "Dynamic timing curves" },
+const feedbackScores = [
+  { label: "History completeness", score: 9, max: 10 },
+  { label: "Communication style", score: 8, max: 10 },
+  { label: "Empathy & rapport", score: 7, max: 10 },
+];
+
+const specialties = [
+  { label: "Cardiology", icon: Heart },
+  { label: "Neurology", icon: Brain },
+  { label: "Respiratory", icon: Activity },
+  { label: "Gastroenterology", icon: ClipboardList },
+  { label: "Psychiatry", icon: MessageSquare },
+  { label: "Paediatrics", icon: User },
+  { label: "Musculoskeletal", icon: Zap },
+  { label: "8 specialties →", icon: ArrowUpRight },
 ];
 
 const cardVariants = {
@@ -37,9 +43,9 @@ const cardVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: "easeOut" } },
 };
 
-export function BentoGridBlock() {
+export function BentoGridBlock({ onCTA }) {
   return (
-    <section id="features" className="relative w-full overflow-hidden bg-[#000]">
+    <section id="features" className="relative w-full overflow-hidden" style={{ background: '#050505' }}>
       <div className="pointer-events-none absolute inset-0 -z-10">
         <div className="absolute left-1/2 top-0 h-[520px] w-[520px] -translate-x-1/2 rounded-full bg-[rgba(100,170,145,0.06)] blur-[140px]" />
         <div className="absolute bottom-0 right-0 h-[360px] w-[360px] rounded-full bg-[rgba(100,170,145,0.05)] blur-[120px]" />
@@ -58,7 +64,7 @@ export function BentoGridBlock() {
             <span className="font-normal">You focus on the exam.</span> We&apos;ll handle the rest.
           </h2>
           <p className="text-[#C8C8C8] text-base md:text-lg max-w-2xl mx-auto leading-loose">
-            Practice with our cases and stations. We&apos;ll run the session, give you feedback, and keep your progress in one place.
+            Practice with AI patients, get structured feedback, and track your progress — all in one place, built for OSCE preparation.
           </p>
         </motion.header>
 
@@ -72,71 +78,83 @@ export function BentoGridBlock() {
             visible: {
               opacity: 1,
               y: 0,
-              transition: {
-                duration: 0.6,
-                ease: "easeOut",
-                staggerChildren: 0.08,
-                delayChildren: 0.12,
-              },
+              transition: { duration: 0.6, ease: "easeOut", staggerChildren: 0.08, delayChildren: 0.12 },
             },
           }}
         >
+          {/* Card 1 — AI Patient Chat (2 cols × 2 rows) */}
           <motion.article
             variants={cardVariants}
             whileHover={{ y: -4 }}
             transition={{ duration: 0.2 }}
             className="group relative col-span-1 flex h-full flex-col justify-between overflow-hidden rounded-3xl border border-white/7 bg-white/[0.025] p-6 transition-all hover:bg-white/[0.05] sm:col-span-2 lg:row-span-2"
             role="article"
-            aria-label="Featured case study"
+            aria-label="AI patient chat"
           >
             <div className="absolute inset-0 bg-gradient-to-br from-white/[0.03] via-transparent to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
             <div className="relative flex h-full flex-col justify-between">
               <div className="space-y-4">
                 <span className="inline-flex w-fit items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.2em] text-white/50">
-                  Featured case study
+                  <span className="h-1.5 w-1.5 rounded-full bg-[rgba(100,170,145,0.9)] animate-pulse" />
+                  AI Patient Interaction
                 </span>
                 <h3 className="text-2xl font-semibold leading-snug text-white md:text-3xl">
-                  How one program improved OSCE pass rates.
+                  Speak with AI patients that respond like real people.
                 </h3>
-                <p className="text-sm text-white/40 md:text-base leading-loose">
-                  They moved practice onto Xpatient: same cases and stations, with structured feedback and progress tracking. Students came in better prepared.
-                </p>
               </div>
-              <div className="mt-8 flex items-center justify-between gap-4">
-                <div className="flex -space-x-3" role="list" aria-label="Project team avatars">
-                  {avatarProfiles.slice(0, 2).map((profile) => (
+
+              <div className="mt-6 space-y-3">
+                {chatMessages.map((msg, i) => (
+                  <motion.div
+                    key={i}
+                    initial={{ opacity: 0, x: msg.role === 'student' ? -8 : 8 }}
+                    whileInView={{ opacity: 1, x: 0 }}
+                    viewport={{ once: true }}
+                    transition={{ delay: 0.3 + i * 0.12, duration: 0.35 }}
+                    className={`flex ${msg.role === 'student' ? 'justify-start' : 'justify-end'}`}
+                  >
                     <div
-                      key={profile.src}
-                      role="listitem"
-                      className="relative h-11 w-11 overflow-hidden rounded-full border border-white/10 bg-white/5 transition-transform duration-300 group-hover:scale-[1.04]"
+                      className="max-w-[82%] rounded-2xl px-4 py-2.5 text-sm leading-snug"
+                      style={msg.role === 'student'
+                        ? { background: 'rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.65)' }
+                        : { background: 'rgba(100,170,145,0.16)', color: 'rgba(200,235,220,0.9)', border: '1px solid rgba(100,170,145,0.15)' }
+                      }
                     >
-                      <img src={profile.src} alt={profile.alt} className="h-full w-full object-cover" />
+                      {msg.text}
                     </div>
-                  ))}
+                  </motion.div>
+                ))}
+              </div>
+
+              <div className="mt-6 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-2 text-xs text-white/30">
+                  <Mic className="h-3.5 w-3.5" />
+                  Voice + text — your choice
                 </div>
                 <button
                   type="button"
                   className="group/cta inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/70 hover:bg-white/[0.08] hover:text-white transition-colors"
-                  aria-label="View the featured case study"
+                  onClick={onCTA}
                 >
-                  Read the story
+                  Try a session
                   <ArrowUpRight className="h-4 w-4 transition-transform group-hover/cta:translate-x-1" />
                 </button>
               </div>
             </div>
           </motion.article>
 
+          {/* Card 2 — Key Metrics (2 cols × 1 row) */}
           <motion.article
             variants={cardVariants}
             whileHover={{ y: -4 }}
             transition={{ duration: 0.2 }}
             className="group col-span-1 flex h-full flex-col rounded-3xl border border-white/7 bg-white/[0.025] p-6 transition-all hover:bg-white/[0.05] sm:col-span-2"
             role="article"
-            aria-label="Key performance metrics"
+            aria-label="Platform outcomes"
           >
             <div className="flex items-center justify-between">
               <span className="inline-flex w-fit items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.2em] text-[rgba(100,170,145,0.9)]">
-                Performance
+                Outcomes
               </span>
               <motion.div
                 animate={{ rotate: [0, -6, 0, 6, 0] }}
@@ -150,84 +168,94 @@ export function BentoGridBlock() {
                 <div key={metric.label}>
                   <p className="text-xs uppercase tracking-[0.18em] text-white/50">{metric.label}</p>
                   <p className="mt-2 text-2xl font-semibold tracking-tight text-white md:text-3xl">{metric.value}</p>
-                  <p className="mt-1 inline-flex items-center gap-2 px-2 py-1 text-xs font-semibold text-[rgba(100,170,145,0.9)]">{metric.caption}</p>
+                  <p className="mt-1 text-xs text-[rgba(100,170,145,0.9)]">{metric.caption}</p>
                 </div>
               ))}
             </div>
           </motion.article>
 
+          {/* Card 3 — Case Library (2 cols × 3 rows) */}
           <motion.article
             variants={cardVariants}
             whileHover={{ y: -4 }}
             transition={{ duration: 0.2 }}
             className="group relative col-span-1 overflow-hidden rounded-3xl border border-white/7 bg-white/[0.025] transition-all hover:bg-white/[0.05] sm:col-span-2 lg:row-span-3"
             role="article"
-            aria-label="Behind the scenes studio imagery"
+            aria-label="OSCE case library"
           >
-            <div className="absolute inset-0">
-              <img
-                src="https://images.unsplash.com/photo-1521737604893-d14cc237f11d?auto=format&fit=crop&w=1200&q=80"
-                alt="Designer workstation lit with cinematic lighting"
-                className="h-full w-full object-cover opacity-80"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-[#000] via-[#000]/60 to-transparent" />
+            <div className="pointer-events-none absolute inset-0">
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-[320px] w-[320px] rounded-full bg-[rgba(100,170,145,0.07)] blur-[100px]" />
             </div>
-            <div className="relative flex h-full flex-col justify-end space-y-4 p-6 md:p-8">
-              <span className="inline-flex w-fit items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.2em] text-white/50">
-                Behind the scenes
-              </span>
-              <h3 className="text-xl font-semibold tracking-tight text-white md:text-2xl">
-                Immersive motion prototypes with cinematic lighting
-              </h3>
-              <p className="max-w-sm text-sm text-white/40 md:text-base leading-loose">
-                Layered light, shadow, and depth cues help teams experience the
-                product as it will ship—well before the first line of production code.
-              </p>
-              <div className="flex flex-wrap gap-2 pt-2">
-                {["Micro-interactions", "Depth cues", "Narrative flow"].map((tag) => (
-                  <span
-                    key={tag}
-                    className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.18em] text-white/50"
+            <div className="relative flex h-full flex-col justify-between p-6 md:p-8">
+              <div className="space-y-4">
+                <span className="inline-flex w-fit items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.2em] text-white/50">
+                  Case Library
+                </span>
+                <div>
+                  <p className="text-[68px] font-bold tracking-tight leading-none text-white">50+</p>
+                  <h3 className="mt-2 text-xl font-semibold tracking-tight text-white md:text-2xl">
+                    OSCE stations.<br />All exam-standard.
+                  </h3>
+                </div>
+                <p className="text-sm text-white/40 md:text-base leading-loose">
+                  Every case ships with full mark sheets, learning objectives, and structured debrief notes — built to your curriculum.
+                </p>
+              </div>
+
+              <div className="mt-8 grid grid-cols-2 gap-2">
+                {specialties.map(({ label, icon: Icon }) => (
+                  <div
+                    key={label}
+                    className="flex items-center gap-2 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2.5 text-xs text-white/50 transition-colors group-hover:border-white/12 group-hover:text-white/65"
                   >
-                    {tag}
-                  </span>
+                    <Icon className="h-3.5 w-3.5 shrink-0 text-[rgba(100,170,145,0.7)]" />
+                    {label}
+                  </div>
                 ))}
               </div>
+
+              <button
+                type="button"
+                className="mt-6 inline-flex w-fit items-center gap-2 text-sm text-[rgba(100,170,145,0.9)] hover:text-[rgba(120,185,160,1)] transition-colors"
+                onClick={onCTA}
+              >
+                Browse stations
+                <ArrowUpRight className="h-4 w-4" />
+              </button>
             </div>
           </motion.article>
 
+          {/* Card 4 — Skill Progress (2 cols × 2 rows) */}
           <motion.article
             variants={cardVariants}
             whileHover={{ y: -4 }}
             transition={{ duration: 0.2 }}
             className="group col-span-1 flex h-full flex-col rounded-3xl border border-white/7 bg-white/[0.025] p-6 transition-all hover:bg-white/[0.05] sm:col-span-2 lg:row-span-2"
             role="article"
-            aria-label="Motion sprint process overview"
+            aria-label="Skill progress tracker"
           >
             <div className="space-y-4">
               <span className="inline-flex w-fit items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.2em] text-[rgba(100,170,145,0.9)]">
-                Motion sprint
+                Skill Tracking
               </span>
               <h3 className="text-xl font-semibold tracking-tight text-white md:text-2xl">
-                From first sketch to polished prototype in seven days
+                See exactly where you need to improve
               </h3>
-              <p className="text-sm text-white/40 md:text-base leading-loose">
-                We compress discovery, exploration, and refinement into a
-                focused week-long sprint so your team can feel the flow of the
-                final experience sooner.
+              <p className="text-sm text-white/40 leading-loose">
+                After each session, Xpatient maps your performance to OSCE competency domains so you always know what to work on next.
               </p>
             </div>
             <div className="mt-6 space-y-4">
-              {motionProcess.map((step, index) => (
-                <div key={step.label} className="space-y-2">
+              {skillProgress.map((skill, index) => (
+                <div key={skill.label} className="space-y-2">
                   <div className="flex items-center justify-between text-xs uppercase tracking-[0.18em] text-white/50">
-                    <span>{step.label}</span>
-                    <span aria-label={`${step.progress}% complete`}>{step.progress}%</span>
+                    <span>{skill.label}</span>
+                    <span>{skill.progress}%</span>
                   </div>
                   <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
                     <motion.div
                       initial={{ width: 0 }}
-                      whileInView={{ width: `${step.progress}%` }}
+                      whileInView={{ width: `${skill.progress}%` }}
                       viewport={{ once: true }}
                       transition={{ duration: 0.8, ease: "easeOut", delay: index * 0.1 }}
                       className="h-full rounded-full bg-[rgba(100,170,145,0.8)]"
@@ -238,114 +266,77 @@ export function BentoGridBlock() {
             </div>
             <button
               type="button"
-              className="mt-8 inline-flex w-fit items-center gap-2 px-0 text-sm text-[rgba(100,170,145,0.9)] hover:text-[rgba(120,185,160,1)] transition-colors"
-              aria-label="Play sprint walkthrough video"
+              className="mt-8 inline-flex w-fit items-center gap-2 text-sm text-[rgba(100,170,145,0.9)] hover:text-[rgba(120,185,160,1)] transition-colors"
+              onClick={onCTA}
             >
-              <PlayCircle className="h-4 w-4" aria-hidden="true" />
-              Play walkthrough
+              <CheckCircle2 className="h-4 w-4" />
+              View full progress report
             </button>
           </motion.article>
 
+          {/* Card 5 — AI Feedback (2 cols × 1 row) */}
           <motion.article
             variants={cardVariants}
             whileHover={{ y: -4 }}
             transition={{ duration: 0.2 }}
-            className="group col-span-1 flex h-full flex-col overflow-hidden rounded-3xl border border-white/7 bg-white/[0.025] p-0 transition-all hover:bg-white/[0.05] sm:col-span-2"
+            className="group col-span-1 flex h-full flex-col overflow-hidden rounded-3xl border border-white/7 bg-white/[0.025] p-6 transition-all hover:bg-white/[0.05] sm:col-span-2"
             role="article"
-            aria-label="Motion showcase video"
+            aria-label="AI feedback scores"
           >
-            <div className="relative h-full">
-              <img
-                src="https://images.unsplash.com/photo-1611162617474-5b21e879e113?w=1200&h=600&fit=crop&q=80"
-                alt="Motion design workspace with monitors"
-                className="absolute inset-0 h-full w-full object-cover opacity-30 transition-opacity duration-500 group-hover:opacity-40"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-[#000] via-[#000]/80 to-transparent" />
-              <div className="relative flex h-full flex-col justify-between p-6 md:p-8">
-                <div className="space-y-4">
-                  <div className="flex items-center gap-3">
-                    <span className="inline-flex w-fit items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.2em] text-white/50">
-                      Motion showcase
-                    </span>
+            <div className="space-y-2 mb-5">
+              <span className="inline-flex w-fit items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.2em] text-white/50">
+                AI Feedback
+              </span>
+              <h3 className="text-lg font-semibold tracking-tight text-white md:text-xl">
+                Structured debrief after every station
+              </h3>
+            </div>
+            <div className="space-y-3">
+              {feedbackScores.map((item) => (
+                <div key={item.label} className="flex items-center gap-4">
+                  <span className="w-40 shrink-0 text-xs text-white/45">{item.label}</span>
+                  <div className="flex-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
                     <motion.div
-                      animate={{ scale: [1, 1.1, 1] }}
-                      transition={{ repeat: Infinity, duration: 2.4, ease: "easeInOut" }}
-                      className="flex h-9 w-9 items-center justify-center rounded-full bg-[rgba(100,170,145,0.2)]"
-                    >
-                      <PlayCircle className="h-4 w-4 text-[rgba(100,170,145,0.9)]" aria-hidden="true" />
-                    </motion.div>
+                      initial={{ width: 0 }}
+                      whileInView={{ width: `${(item.score / item.max) * 100}%` }}
+                      viewport={{ once: true }}
+                      transition={{ duration: 0.7, ease: "easeOut" }}
+                      className="h-full rounded-full bg-[rgba(100,170,145,0.8)]"
+                    />
                   </div>
-                  <h3 className="text-xl font-semibold tracking-tight text-white md:text-2xl">
-                    Watch our latest animation breakdown
-                  </h3>
-                  <p className="max-w-md text-sm text-white/40 md:text-base leading-loose">
-                    A three-minute deep dive into timing curves, coordinated
-                    transitions, and how we translate component choreography
-                    into production-ready systems.
-                  </p>
+                  <span className="text-xs font-semibold text-white/70 tabular-nums w-8 text-right">{item.score}/{item.max}</span>
                 </div>
-                <div className="flex flex-wrap items-center justify-between gap-3 pt-4 text-xs text-white/50">
-                  <div className="flex flex-wrap gap-2">
-                    {reelStats.map((stat) => (
-                      <span key={stat.label} className="rounded-full border border-white/10 bg-white/5 px-3 py-1 uppercase tracking-[0.18em]">
-                        {stat.label}
-                      </span>
-                    ))}
-                  </div>
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-2 rounded-lg bg-[rgba(100,170,145,0.35)] border border-[rgba(100,170,145,0.25)] px-4 py-2 text-sm font-medium text-white hover:bg-[rgba(100,170,145,0.45)] transition-colors"
-                  >
-                    Watch now
-                    <PlayCircle className="h-4 w-4" aria-hidden="true" />
-                  </button>
-                </div>
-              </div>
+              ))}
             </div>
           </motion.article>
 
+          {/* Card 6 — Voice Practice (2 cols × 1 row) */}
           <motion.article
             variants={cardVariants}
             whileHover={{ y: -4 }}
             transition={{ duration: 0.2 }}
             className="group col-span-1 flex h-full flex-col rounded-3xl border border-white/7 bg-white/[0.025] p-6 transition-all hover:bg-white/[0.05] sm:col-span-2"
             role="article"
-            aria-label="Visual research gallery"
+            aria-label="Voice practice mode"
           >
             <div className="space-y-3">
               <span className="inline-flex w-fit items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.2em] text-white/50">
-                Visual research
+                Voice + Text
               </span>
               <h3 className="text-lg font-semibold tracking-tight text-white md:text-xl">
-                Capturing texture, light, and pace for new explorations
+                Practice how you think — speak or type
               </h3>
-              <p className="text-sm text-white/40 md:text-base leading-loose">
-                A snapshot of the references that steer our motion language and
-                narrative rhythm, curated for both product and marketing surfaces.
+              <p className="text-sm text-white/40 leading-loose">
+                Real-time speech recognition transcribes your questions as you speak. The AI patient replies naturally, in context, every time.
               </p>
             </div>
-            <div className="mt-6 grid grid-cols-2 gap-3">
-              {inspirationGallery.map((image) => (
-                <div
-                  key={image.src}
-                  className="relative aspect-[4/3] overflow-hidden rounded-xl border border-white/10 bg-white/5"
-                >
-                  <img
-                    src={image.src}
-                    alt={image.alt}
-                    className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                  />
-                </div>
+            <div className="mt-6 flex flex-wrap gap-2">
+              {["Real-time STT", "Natural TTS replies", "No scripted responses", "Exam simulation mode"].map((tag) => (
+                <span key={tag} className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.18em] text-white/50">
+                  {tag}
+                </span>
               ))}
             </div>
-            <button
-              type="button"
-              className="mt-6 inline-flex w-fit items-center gap-2 px-0 text-sm text-[rgba(100,170,145,0.9)] hover:text-[rgba(120,185,160,1)] transition-colors"
-              aria-label="Open the visual inspiration archive"
-            >
-              Open inspiration archive
-              <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
-            </button>
           </motion.article>
         </motion.div>
       </div>

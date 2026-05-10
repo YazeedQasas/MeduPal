@@ -1,59 +1,58 @@
 import React, { useState, useEffect } from 'react';
-import { X, Loader2, AlertCircle, ClipboardCheck, Clock, MapPin, FileText } from 'lucide-react';
+import { X, Loader2, AlertCircle, ClipboardCheck, Clock, FileText, Calendar } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
+import { supabase } from '../../lib/supabase';
 
 function AssignedExamStart({ onBack, onStart }) {
-    const [status, setStatus] = useState('loading'); // 'loading' | 'not_found' | 'found'
+    const { user } = useAuth();
+    const [status, setStatus] = useState('loading');
     const [examInfo, setExamInfo] = useState(null);
 
     useEffect(() => {
+        if (!user?.id) return;
+
         const fetchAssignedExam = async () => {
             setStatus('loading');
 
-            // TODO: Replace with actual Supabase query
-            // Example query structure:
-            // const { data, error } = await supabase
-            //     .from('sessions')
-            //     .select(`
-            //         id,
-            //         case:cases(id, title),
-            //         station:stations(id, name, room_number),
-            //         start_time,
-            //         status
-            //     `)
-            //     .eq('student_id', user.id)
-            //     .eq('status', 'Scheduled')
-            //     .order('start_time', { ascending: true })
-            //     .limit(1)
-            //     .single();
+            const { data, error } = await supabase
+                .from('sessions')
+                .select('id, start_time, end_time, case:cases(id, title)')
+                .eq('student_id', user.id)
+                .eq('status', 'Scheduled')
+                .eq('session_type', 'exam')
+                .order('start_time', { ascending: true })
+                .limit(1)
+                .single();
 
-            // Simulate network delay
-            await new Promise(resolve => setTimeout(resolve, 1000));
-
-            // Mock data - toggle this to test different states
-            const mockHasExam = true;
-
-            if (mockHasExam) {
-                setExamInfo({
-                    id: 'mock-session-id',
-                    caseName: 'Acute Abdominal Pain Assessment',
-                    stationName: 'Station 3',
-                    roomNumber: '201B',
-                    duration: 15,
-                    startTime: new Date().toISOString()
-                });
-                setStatus('found');
-            } else {
+            if (error || !data) {
                 setStatus('not_found');
+                return;
             }
+
+            const durationMs = data.end_time
+                ? new Date(data.end_time) - new Date(data.start_time)
+                : 10 * 60 * 1000;
+            const durationMin = Math.max(1, Math.round(durationMs / 60000));
+
+            setExamInfo({
+                id: data.id,
+                caseName: data.case?.title || 'Exam',
+                duration: durationMin,
+                startTime: data.start_time,
+            });
+            setStatus('found');
         };
 
         fetchAssignedExam();
-    }, []);
+    }, [user?.id]);
+
+    const formatDateTime = (iso) => {
+        if (!iso) return '—';
+        return new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+    };
 
     const handleBackdropClick = (e) => {
-        if (e.target === e.currentTarget) {
-            onBack();
-        }
+        if (e.target === e.currentTarget) onBack();
     };
 
     return (
@@ -62,7 +61,7 @@ function AssignedExamStart({ onBack, onStart }) {
             onClick={handleBackdropClick}
         >
             <div className="relative w-full max-w-md mx-4 bg-card border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
-                {/* Close Button */}
+                {/* Close */}
                 <button
                     onClick={onBack}
                     className="absolute top-4 right-4 p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
@@ -113,7 +112,7 @@ function AssignedExamStart({ onBack, onStart }) {
 
                     {status === 'found' && examInfo && (
                         <div className="space-y-4">
-                            {/* Case Info */}
+                            {/* Case */}
                             <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30 border border-white/5">
                                 <FileText className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
                                 <div>
@@ -122,18 +121,16 @@ function AssignedExamStart({ onBack, onStart }) {
                                 </div>
                             </div>
 
-                            {/* Station Info */}
+                            {/* Scheduled time */}
                             <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30 border border-white/5">
-                                <MapPin className="w-5 h-5 text-blue-500 mt-0.5 flex-shrink-0" />
+                                <Calendar className="w-5 h-5 text-blue-500 mt-0.5 flex-shrink-0" />
                                 <div>
-                                    <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Station</p>
-                                    <p className="text-sm font-semibold text-foreground">
-                                        {examInfo.stationName} <span className="text-muted-foreground font-normal">(Room {examInfo.roomNumber})</span>
-                                    </p>
+                                    <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Scheduled</p>
+                                    <p className="text-sm font-semibold text-foreground">{formatDateTime(examInfo.startTime)}</p>
                                 </div>
                             </div>
 
-                            {/* Duration Info */}
+                            {/* Duration */}
                             <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30 border border-white/5">
                                 <Clock className="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" />
                                 <div>

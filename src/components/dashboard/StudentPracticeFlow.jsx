@@ -249,6 +249,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
     const [inputValue, setInputValue] = useState('');
     const [isTyping, setIsTyping] = useState(false);
     const [caseSelected, setCaseSelected] = useState(false);
+    const [isRandomCase, setIsRandomCase] = useState(false);
     const [selectedSystem, setSelectedSystem] = useState(null);
     const [caseSearch, setCaseSearch] = useState('');
     const [patientStatus, setPatientStatus] = useState(INITIAL_VITALS);
@@ -268,6 +269,11 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
     const [diagnosisRationale, setDiagnosisRationale] = useState('');
     const [showMissedQuestions, setShowMissedQuestions] = useState(false);
     const [copiedToClipboard, setCopiedToClipboard] = useState(false);
+    // AI scoring state
+    const [historyEvalLoading, setHistoryEvalLoading] = useState(false);
+    const [historyEvalResult, setHistoryEvalResult] = useState(null);
+    const [historyEvalError, setHistoryEvalError] = useState(null);
+    const historyEvalDoneRef = useRef(false);
     
     // Physical Exam step states
     const [selectedZone, setSelectedZone] = useState(null);
@@ -300,6 +306,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
     const chatInputRef = useRef(null);
     const prewarmStreamRef = useRef(null);
     const sessionIdRef = useRef(null);
+    const spacebarPTTRef = useRef(false);
 
 
 
@@ -340,6 +347,10 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         setRevealedSymptoms([]);
         setConversationSummary('');
         patientTurnCount.current = 0;
+        setHistoryEvalResult(null);
+        setHistoryEvalError(null);
+        setHistoryEvalLoading(false);
+        historyEvalDoneRef.current = false;
     }, [selectedCase]);
 
     // Pre-warm mic when entering history-taking step so getUserMedia is instant on first click
@@ -371,6 +382,44 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         };
     }, [currentStep]);
 
+    // Trigger AI scoring when entering Step 2 (runs once per case)
+    useEffect(() => {
+        if (currentStep !== 2) return;
+        if (historyEvalDoneRef.current) return;
+        const apiBase = getPatientReplyApiUrl();
+        if (!apiBase) return;
+        historyEvalDoneRef.current = true;
+        setHistoryEvalLoading(true);
+        setHistoryEvalError(null);
+        const studentMsgs = messages.filter(m => m.role === 'student');
+        if (studentMsgs.length === 0) {
+            setHistoryEvalLoading(false);
+            return;
+        }
+        fetch(`${apiBase}/evaluate-history-taking`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                conversation: messages,
+                case_id: selectedCase?.id || '',
+                case_title: selectedCase?.title || '',
+                patient_name: selectedPatient?.name || '',
+            }),
+        })
+            .then(r => r.json())
+            .then(data => {
+                if (data._error) {
+                    setHistoryEvalError(`Scoring failed: ${data._error}`);
+                }
+                setHistoryEvalResult(data);
+                setHistoryEvalLoading(false);
+            })
+            .catch(err => {
+                setHistoryEvalError(`Scoring service unavailable: ${err?.message || err}`);
+                setHistoryEvalLoading(false);
+            });
+    }, [currentStep]); // eslint-disable-line react-hooks/exhaustive-deps
+
     const formatTime = (seconds) => {
         const mins = Math.floor(seconds / 60);
         const secs = seconds % 60;
@@ -387,6 +436,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         const pick = casesFromDb[Math.floor(Math.random() * casesFromDb.length)];
         setSelectedCase(pick);
         setCaseSelected(true);
+        setIsRandomCase(true);
     };
 
     const handleRandomFromSystem = () => {
@@ -395,6 +445,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         const pick = pool[Math.floor(Math.random() * pool.length)];
         setSelectedCase(pick);
         setCaseSelected(true);
+        setIsRandomCase(true);
     };
 
     const getPatientReply = useCallback(() => {
@@ -617,7 +668,10 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                 setIsRecording(false);
                 setIsTranscribing(true);
                 controller.stop()
-                    .then((blob) => sendAudioToSttApi(blob))
+                    .then((blob) => {
+                        prewarmStreamRef.current = controller.stream;
+                        return sendAudioToSttApi(blob);
+                    })
                     .then(({ text }) => {
                         applySttTranscript(text);
                         setIsTranscribing(false);
@@ -649,7 +703,10 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                 setIsRecording(false);
                 setIsTranscribing(true);
                 ctrl.stop()
-                    .then((blob) => sendAudioToSttApi(blob))
+                    .then((blob) => {
+                        prewarmStreamRef.current = ctrl.stream;
+                        return sendAudioToSttApi(blob);
+                    })
                     .then(({ text }) => {
                         applySttTranscript(text);
                         setIsTranscribing(false);
@@ -732,6 +789,34 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         }
     }, [isRecording, getMockTranscript, applySttTranscript, reportSttIssue, stopMicLevelMonitor]);
 
+    // Spacebar push-to-talk: hold Space to record, release to stop (only when not typing in the input)
+    useEffect(() => {
+        if (currentStep !== 1) return;
+
+        const onKeyDown = (e) => {
+            if (e.code !== 'Space' || e.repeat) return;
+            if (document.activeElement === chatInputRef.current) return;
+            if (isRecording || isTranscribing || isTyping || isSpeaking) return;
+            e.preventDefault();
+            spacebarPTTRef.current = true;
+            toggleRecording();
+        };
+
+        const onKeyUp = (e) => {
+            if (e.code !== 'Space' || !spacebarPTTRef.current) return;
+            e.preventDefault();
+            spacebarPTTRef.current = false;
+            if (isRecording) toggleRecording();
+        };
+
+        document.addEventListener('keydown', onKeyDown);
+        document.addEventListener('keyup', onKeyUp);
+        return () => {
+            document.removeEventListener('keydown', onKeyDown);
+            document.removeEventListener('keyup', onKeyUp);
+        };
+    }, [currentStep, isRecording, isTranscribing, isTyping, isSpeaking, toggleRecording]);
+
     // Cleanup speech recognition, Faster-Whisper recording, and synthesis on unmount
     useEffect(() => {
         return () => {
@@ -784,31 +869,22 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         };
     }, [showCompletionScreen, onExit]);
 
-    // Compute history score (same logic as step 2 evaluation UI)
+    // Compute history score — uses real AI eval result when available
     const computeHistoryScore = useCallback(() => {
-        const aiChecklist = {
-            hpi: true,
-            pmh: true,
-            meds: true,
-            allergies: false,
-            socialHistory: true
-        };
-        const checklistCompleted = Object.values(aiChecklist).filter(Boolean).length;
-        const aiRubricScores = {
-            communication: 2,
-            structure: 2,
-            safety: 1,
-            clinicalReasoning: 2,
-            professionalism: 2
-        };
+        if (historyEvalResult?.items_covered != null && historyEvalResult?.total_items) {
+            const base = (historyEvalResult.items_covered / historyEvalResult.total_items) * 8;
+            const bonus = selectedDiagnosis === selectedCase?.id ? 2 : 0;
+            return Math.min(10, Math.round((base + bonus) * 10) / 10);
+        }
+        // Fallback when scoring unavailable
+        const aiRubricScores = { communication: 2, structure: 2, safety: 1, clinicalReasoning: 2, professionalism: 2 };
         const rubricTotal = Object.values(aiRubricScores).reduce((a, b) => a + b, 0);
         let score = 0;
-        score += checklistCompleted * 0.5;
         if (hasDeteriorated && redFlagRecognized) score += 1.5;
         if (selectedDiagnosis === selectedCase?.id) score += 1.5;
         score += (rubricTotal / 10) * 4.5;
         return Math.min(10, Math.round(score * 10) / 10);
-    }, [hasDeteriorated, redFlagRecognized, selectedDiagnosis, selectedCase?.id]);
+    }, [historyEvalResult, hasDeteriorated, redFlagRecognized, selectedDiagnosis, selectedCase?.id]);
 
     // Compute physical score (same logic as step 4 evaluation UI)
     const computePhysicalScore = useCallback(() => {
@@ -1066,7 +1142,16 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
     };
 
     const goBack = () => {
-        if (currentStep > 0) setCurrentStep(currentStep - 1);
+        if (currentStep > 0) {
+            // Going back from evaluation to history — reset so re-entering step 2 re-scores
+            if (currentStep === 2) {
+                setHistoryEvalResult(null);
+                setHistoryEvalError(null);
+                setHistoryEvalLoading(false);
+                historyEvalDoneRef.current = false;
+            }
+            setCurrentStep(currentStep - 1);
+        }
     };
 
     return (
@@ -1081,11 +1166,13 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                         <h1 className="text-lg font-bold text-foreground">Practice Session</h1>
                         {selectedCase && (
                             <div className="flex items-center gap-2">
-                                <p className="text-xs text-muted-foreground">Case: {selectedCase.title}</p>
+                                <p className="text-xs text-muted-foreground">
+                                    {isRandomCase ? 'Case: Hidden' : `Case: ${selectedCase.title}`}
+                                </p>
                                 <span className={cn(
                                     "text-[10px] px-1.5 py-0.5 rounded font-medium",
-                                    selectedCase.category === 'Cardiac' 
-                                        ? "bg-red-500/10 text-red-400" 
+                                    selectedCase.category === 'Cardiac'
+                                        ? "bg-red-500/10 text-red-400"
                                         : "bg-blue-500/10 text-blue-400"
                                 )}>
                                     {selectedCase.category}
@@ -1208,7 +1295,9 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                                                     <div className="w-1.5 h-1.5 rounded-full" style={{ background: P.accent }} />
                                                     <p className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: P.accent }}>Selected case</p>
                                                 </div>
-                                                <p className="text-[17px] font-semibold leading-snug mb-3" style={{ color: P.text }}>{selectedCase.title}</p>
+                                                <p className="text-[17px] font-semibold leading-snug mb-3" style={{ color: P.text }}>
+                                                    {isRandomCase ? 'Random Case' : selectedCase.title}
+                                                </p>
                                                 <span className="inline-flex items-center text-xs px-3 py-1 rounded-full font-medium" style={{ background: 'rgba(255,255,255,0.07)', color: P.tagText }}>
                                                     {selectedCase.category}
                                                 </span>
@@ -1320,7 +1409,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                                                         {filtered.map((c) => (
                                                             <button
                                                                 key={c.id}
-                                                                onClick={() => { setSelectedCase(c); setCaseSelected(true); }}
+                                                                onClick={() => { setSelectedCase(c); setCaseSelected(true); setIsRandomCase(false); }}
                                                                 className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl text-left transition-colors hover:bg-white/5 group"
                                                             >
                                                                 <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: P.accentBg }}>
@@ -1562,9 +1651,11 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                                         </p>
                                     </div>
                                     {/* Case tag */}
-                                    <div className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                                        <span className="text-[11px] font-medium" style={{ color: 'rgba(255,255,255,0.45)' }}>{selectedCase.title}</span>
-                                    </div>
+                                    {!isRandomCase && (
+                                        <div className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                                            <span className="text-[11px] font-medium" style={{ color: 'rgba(255,255,255,0.45)' }}>{selectedCase.title}</span>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -1720,19 +1811,27 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                                             disabled={isTyping || isRecording || isTranscribing || isSpeaking}
                                         />
                                         <div className="flex items-center justify-between px-3 pb-3 pt-1">
-                                            <button
-                                                onClick={toggleRecording}
-                                                disabled={isTyping || isSpeaking || isTranscribing}
-                                                className="p-2 rounded-xl transition-all"
-                                                style={isRecording
-                                                    ? { background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.25)' }
-                                                    : isTranscribing
-                                                        ? { color: '#6ee7b7', background: 'rgba(110,231,183,0.08)' }
-                                                        : { color: 'rgba(255,255,255,0.3)', background: 'transparent' }}
-                                                title={isRecording ? 'Stop recording' : isTranscribing ? 'Transcribing…' : 'Voice input'}
-                                            >
-                                                {isRecording ? <MicOff size={15} /> : <Mic size={15} />}
-                                            </button>
+                                            <div className="flex items-center gap-1">
+                                                <button
+                                                    onClick={toggleRecording}
+                                                    disabled={isTyping || isSpeaking || isTranscribing}
+                                                    className="p-2 rounded-xl transition-all"
+                                                    style={isRecording
+                                                        ? { background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.25)' }
+                                                        : isTranscribing
+                                                            ? { color: '#6ee7b7', background: 'rgba(110,231,183,0.08)' }
+                                                            : { color: 'rgba(255,255,255,0.3)', background: 'transparent' }}
+                                                    title={isRecording ? 'Stop recording' : isTranscribing ? 'Transcribing…' : 'Hold Space or click to record'}
+                                                >
+                                                    {isRecording ? <MicOff size={15} /> : <Mic size={15} />}
+                                                </button>
+                                                {!isRecording && !isTranscribing && (
+                                                    <span className="text-[10px] select-none" style={{ color: 'rgba(255,255,255,0.2)' }}>Space</span>
+                                                )}
+                                                {isRecording && (
+                                                    <span className="text-[10px] select-none" style={{ color: '#f87171' }}>Release</span>
+                                                )}
+                                            </div>
                                             <button
                                                 onClick={handleSendMessage}
                                                 disabled={!inputValue.trim() || isTyping || isSpeaking}
@@ -1957,253 +2056,271 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
 
                 {/* Step 2: Evaluation */}
                 {currentStep === 2 && (() => {
-                    // AI-detected checklist (auto-filled, not user-editable)
-                    const aiChecklist = {
-                        hpi: true,
-                        pmh: true,
-                        meds: true,
-                        allergies: false,
-                        socialHistory: true
-                    };
-                    const checklistItems = [
-                        { key: 'hpi', label: 'History of Present Illness (HPI)' },
-                        { key: 'pmh', label: 'Past Medical History (PMH)' },
-                        { key: 'meds', label: 'Medications' },
-                        { key: 'allergies', label: 'Allergies' },
-                        { key: 'socialHistory', label: 'Social History' }
-                    ];
-                    const checklistCompleted = Object.values(aiChecklist).filter(Boolean).length;
+                    const evalScore = historyEvalResult
+                        ? Math.round((historyEvalResult.items_covered / historyEvalResult.total_items) * 100)
+                        : null;
                     
-                    // AI-scored rubric (auto-filled, not user-editable)
-                    const aiRubricScores = {
-                        communication: 2,
-                        structure: 2,
-                        safety: 1,
-                        clinicalReasoning: 2,
-                        professionalism: 2
-                    };
-                    const rubricCriteria = [
-                        { key: 'communication', label: 'Communication' },
-                        { key: 'structure', label: 'Structure' },
-                        { key: 'safety', label: 'Safety' },
-                        { key: 'clinicalReasoning', label: 'Clinical Reasoning' },
-                        { key: 'professionalism', label: 'Professionalism' }
-                    ];
-                    const rubricTotal = Object.values(aiRubricScores).reduce((a, b) => a + b, 0);
-                    
-                    const missedQuestions = {
-                        'pneumonia': [
-                            'When did your symptoms first start? (onset/duration)',
-                            'Can you describe your sputum? Color, amount, blood?',
-                            'Have you had any fevers or chills?',
-                            'Does the pain worsen when you breathe deeply? (pleuritic)',
-                            'Any recent travel or sick contacts? (exposures)',
-                            'Have you taken any antibiotics recently?'
-                        ],
-                        'asthma': [
-                            'What triggers your breathing problems?',
-                            'Do you wake up at night with symptoms?',
-                            'How often do you use your inhaler?',
-                            'Have you ever been admitted to ICU for breathing?',
-                            'Do you have any known allergies?',
-                            'Have you ever measured your peak flow?'
-                        ],
-                        'copd': [
-                            'How many pack-years have you smoked?',
-                            'How long have you had this chronic cough?',
-                            'How often do you have exacerbations?',
-                            'What inhalers are you currently using?',
-                            'Have you ever needed oxygen at home?',
-                            'How far can you walk before getting breathless?'
-                        ],
-                        'aortic-stenosis': [
-                            'Do you get breathless on exertion?',
-                            'Have you ever fainted or felt faint?',
-                            'Do you get chest pain during activity?',
-                            'Has anyone mentioned a heart murmur before?',
-                            'Do you have any ankle swelling?',
-                            'Any history of high blood pressure or high cholesterol?'
-                        ],
-                        'mitral-stenosis': [
-                            'Did you have rheumatic fever as a child?',
-                            'Do you need to sleep propped up on pillows?',
-                            'Do you feel your heart racing or fluttering?',
-                            'Have you coughed up any blood?',
-                            'Do you have any ankle or leg swelling?',
-                            'Are you pregnant or planning pregnancy?'
-                        ]
-                    };
-                    
-                    const getKeyFindings = () => {
-                        const caseKey = getCaseMockKey(selectedCase);
-                        const findings = {
-                            'pneumonia': ['Fever present', 'Productive cough with yellow sputum', 'Pleuritic chest pain', 'Shortness of breath on exertion'],
-                            'aortic-stenosis': ['Exertional chest pain', 'Syncope/near-syncope episodes', 'Exertional dyspnea', 'Reduced exercise tolerance'],
-                            'mitral-stenosis': ['Palpitations reported', 'Hemoptysis (pink-tinged sputum)', 'Orthopnea', 'Fatigue with minimal exertion'],
-                            'asthma': ['Nocturnal symptoms', 'Wheeze on triggers (cold, dust)', 'Chest tightness', 'Known allergies (cats, pollen)'],
-                            'copd': ['30-year smoking history', 'Chronic productive cough', 'Progressive dyspnea', 'Reduced exercise capacity']
-                        };
-                        return findings[caseKey] || findings['pneumonia'];
-                    };
-
-                    const calculateScore = () => {
-                        let score = 0;
-                        // Checklist: 2.5 points max (0.5 per item)
-                        score += checklistCompleted * 0.5;
-                        // Diagnosis match: 1.5 points
-                        if (selectedDiagnosis === selectedCase?.id) score += 1.5;
-                        // Rubric: 4.5 points max (rubricTotal/10 * 4.5)
-                        score += (rubricTotal / 10) * 4.5;
-                        return Math.min(10, Math.round(score * 10) / 10);
-                    };
-
-                    const getFeedback = () => {
-                        const score = calculateScore();
-                        if (score >= 8) return "Excellent history taking! You covered all key areas systematically.";
-                        if (score >= 6) return "Good history structure. Consider being more thorough with social history.";
-                        if (score >= 4) return "Adequate attempt. Remember to always check allergies and medications.";
-                        return "Keep practicing. Try to cover all OSCE checklist items systematically.";
-                    };
-
                     const copyEvaluationSummary = async () => {
-                        const keyFindings = getKeyFindings();
                         const diagnosisName = casesFromDb.find(c => c.id === selectedDiagnosis)?.title || 'Not selected';
-                        const summary = `
-OSCE EVALUATION SUMMARY
-========================
-Case: ${selectedCase?.title || 'Unknown'} (${selectedCase?.category || ''})
+                        const r = historyEvalResult;
+                        const checklistLines = r
+                            ? r.sections.flatMap(s => [
+                                `\n[${s.label}]`,
+                                ...s.items.map(i => `  ${i.num}. [${i.covered ? '✓' : '✗'}] ${i.text}${i.notes ? ` — ${i.notes}` : ''}`)
+                              ]).join('\n')
+                            : '  (scoring unavailable)';
+                        const summary = [
+                            'OSCE HISTORY-TAKING EVALUATION',
+                            '='.repeat(32),
+                            `Case: ${selectedCase?.title || 'Unknown'} (${selectedCase?.category || ''})`,
+                            `Items Covered: ${r ? `${r.items_covered}/${r.total_items}` : 'N/A'}`,
+                            '',
+                            'CHECKLIST:',
+                            checklistLines,
+                            '',
+                            `STRUCTURE FOLLOWED: ${r?.structure_followed ? 'Yes ✓' : 'No ✗'}`,
+                            r?.structure_notes ? `Note: ${r.structure_notes}` : '',
+                            '',
+                            `DIAGNOSIS: ${diagnosisName} (${diagnosisConfidence}% confidence)`,
+                            `Correct: ${selectedDiagnosis === selectedCase?.id ? 'Yes ✓' : 'No ✗'}`,
+                            diagnosisRationale ? `Rationale: ${diagnosisRationale}` : '',
+                            '',
+                            'FEEDBACK:',
+                            r?.feedback || '—',
+                            '',
+                            r?.strengths?.length ? `STRENGTHS:\n${r.strengths.map(s => `• ${s}`).join('\n')}` : '',
+                            r?.areas_for_improvement?.length
+                                ? `AREAS FOR IMPROVEMENT:\n${r.areas_for_improvement.map(a => `• ${a}`).join('\n')}`
+                                : '',
+                        ].filter(l => l !== undefined).join('\n').trim();
 
-KEY FINDINGS:
-${keyFindings.map(f => `• ${f}`).join('\n')}
-
-CLINICAL CHECKLIST (AI Detected): ${checklistCompleted}/5 completed
-- HPI: ${aiChecklist.hpi ? '✓' : '✗'}
-- PMH: ${aiChecklist.pmh ? '✓' : '✗'}
-- Medications: ${aiChecklist.meds ? '✓' : '✗'}
-- Allergies: ${aiChecklist.allergies ? '✓' : '✗'}
-- Social History: ${aiChecklist.socialHistory ? '✓' : '✗'}
-
-DIAGNOSIS:
-- Selected: ${diagnosisName}
-- Confidence: ${diagnosisConfidence}%
-- Correct: ${selectedDiagnosis === selectedCase?.id ? 'Yes ✓' : 'No ✗'}
-
-OSCE RUBRIC (AI Scored): ${rubricTotal}/10
-- Communication: ${aiRubricScores.communication}/2
-- Structure: ${aiRubricScores.structure}/2
-- Safety: ${aiRubricScores.safety}/2
-- Clinical Reasoning: ${aiRubricScores.clinicalReasoning}/2
-- Professionalism: ${aiRubricScores.professionalism}/2
-
-FINAL SCORE: ${calculateScore()}/10
-FEEDBACK: ${getFeedback()}
-`.trim();
-                        
                         try {
                             await navigator.clipboard.writeText(summary);
-                            setCopiedToClipboard(true);
-                            setTimeout(() => setCopiedToClipboard(false), 2000);
                         } catch {
-                            // Fallback for older browsers
-                            const textarea = document.createElement('textarea');
-                            textarea.value = summary;
-                            document.body.appendChild(textarea);
-                            textarea.select();
+                            const ta = document.createElement('textarea');
+                            ta.value = summary;
+                            document.body.appendChild(ta);
+                            ta.select();
                             document.execCommand('copy');
-                            document.body.removeChild(textarea);
-                            setCopiedToClipboard(true);
-                            setTimeout(() => setCopiedToClipboard(false), 2000);
+                            document.body.removeChild(ta);
                         }
+                        setCopiedToClipboard(true);
+                        setTimeout(() => setCopiedToClipboard(false), 2000);
                     };
-
-                    const score = calculateScore();
 
                     return (
                         <div className="h-full flex flex-col">
                             <div className="flex-1 flex overflow-hidden p-4 gap-4">
                                 {/* LEFT: Evaluation Content */}
                                 <div className="flex-[3] overflow-y-auto space-y-4 pr-2">
-                                    {/* Header */}
+
+                                    {/* Case title reveal */}
+                                    <div className="pt-1 pb-2">
+                                        {isRandomCase && (
+                                            <p className="text-xs font-medium text-muted-foreground uppercase tracking-widest mb-1">Case Revealed</p>
+                                        )}
+                                        <h1 style={{ fontFamily: "'Playfair Display', serif" }} className="text-3xl font-semibold text-foreground leading-tight">{selectedCase?.title}</h1>
+                                        <p className="text-sm text-muted-foreground mt-1">{selectedCase?.category}</p>
+                                    </div>
+
+                                    {/* Header with live score badge */}
                                     <div className="bg-card border border-white/5 rounded-xl p-4">
-                                        <div className="flex items-center gap-3 mb-2">
-                                            <div className="w-10 h-10 rounded-lg bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
-                                                <CheckCircle2 size={20} />
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 rounded-lg bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
+                                                    <CheckCircle2 size={20} />
+                                                </div>
+                                                <div>
+                                                    <h2 className="text-lg font-bold text-foreground">History Evaluation</h2>
+                                                    <p className="text-xs text-muted-foreground">
+                                                        {historyEvalLoading ? 'Analyzing session…' : historyEvalResult ? `${historyEvalResult.items_covered}/${historyEvalResult.total_items} checklist items covered` : 'OSCE checklist review'}
+                                                    </p>
+                                                </div>
                                             </div>
-                                            <div>
-                                                <h2 className="text-lg font-bold text-foreground">Evaluation</h2>
-                                                <p className="text-xs text-muted-foreground">Review your history taking performance</p>
+                                            <div className="flex items-center gap-2">
+                                                {!historyEvalLoading && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setHistoryEvalResult(null);
+                                                            setHistoryEvalError(null);
+                                                            setHistoryEvalLoading(true);
+                                                            historyEvalDoneRef.current = false;
+                                                            const apiBase = getPatientReplyApiUrl();
+                                                            if (!apiBase) { setHistoryEvalLoading(false); return; }
+                                                            historyEvalDoneRef.current = true;
+                                                            fetch(`${apiBase}/evaluate-history-taking`, {
+                                                                method: 'POST',
+                                                                headers: { 'Content-Type': 'application/json' },
+                                                                body: JSON.stringify({
+                                                                    conversation: messages,
+                                                                    case_id: selectedCase?.id || '',
+                                                                    case_title: selectedCase?.title || '',
+                                                                    patient_name: selectedPatient?.name || '',
+                                                                }),
+                                                            })
+                                                                .then(r => r.json())
+                                                                .then(data => {
+                                                                    if (data._error) setHistoryEvalError(`Scoring failed: ${data._error}`);
+                                                                    setHistoryEvalResult(data);
+                                                                    setHistoryEvalLoading(false);
+                                                                })
+                                                                .catch(err => { setHistoryEvalError(`Scoring service unavailable: ${err?.message || err}`); setHistoryEvalLoading(false); });
+                                                        }}
+                                                        className="text-xs px-2.5 py-1.5 rounded-lg bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted border border-white/5 transition-colors"
+                                                    >
+                                                        Re-score
+                                                    </button>
+                                                )}
+                                                {evalScore != null && !historyEvalLoading && (
+                                                    <div className={cn(
+                                                        "flex flex-col items-center justify-center w-14 h-14 rounded-full border-2 font-bold text-lg",
+                                                        evalScore >= 70 ? "border-emerald-500 text-emerald-400" :
+                                                        evalScore >= 50 ? "border-amber-500 text-amber-400" : "border-red-500 text-red-400"
+                                                    )}>
+                                                        {evalScore}
+                                                        <span className="text-[10px] font-normal text-muted-foreground leading-none">%</span>
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
 
-                                    {/* Clinical Checklist (AI-Detected) */}
-                                    <div className="bg-card border border-white/5 rounded-xl p-4">
-                                        <div className="flex items-center justify-between mb-3">
-                                            <div className="flex items-center gap-2">
-                                                <h3 className="font-semibold text-foreground text-sm">Clinical Checklist</h3>
-                                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
-                                                    AI Detected
-                                                </span>
-                                            </div>
-                                            <span className={cn(
-                                                "text-xs px-2 py-1 rounded-full font-medium",
-                                                checklistCompleted === 5 ? "bg-emerald-500/10 text-emerald-500" : "bg-amber-500/10 text-amber-500"
-                                            )}>
-                                                {checklistCompleted}/5 completed
-                                            </span>
+                                    {/* Loading state */}
+                                    {historyEvalLoading && (
+                                        <div className="bg-card border border-white/5 rounded-xl p-8 flex flex-col items-center gap-3">
+                                            <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                                            <p className="text-sm text-muted-foreground">Scoring against OSCE checklist…</p>
                                         </div>
-                                        <div className="space-y-2">
-                                            {checklistItems.map(item => (
-                                                <div
-                                                    key={item.key}
-                                                    className={cn(
-                                                        "flex items-center justify-between p-2.5 rounded-lg border",
-                                                        aiChecklist[item.key]
-                                                            ? "bg-emerald-500/10 border-emerald-500/30"
-                                                            : "bg-red-500/10 border-red-500/30"
-                                                    )}
-                                                >
-                                                    <div className="flex items-center gap-3">
-                                                        <div className={cn(
-                                                            "w-4 h-4 rounded flex items-center justify-center",
-                                                            aiChecklist[item.key] ? "bg-emerald-500" : "bg-red-500/50"
-                                                        )}>
-                                                            {aiChecklist[item.key] ? (
-                                                                <CheckCircle2 size={12} className="text-white" />
-                                                            ) : (
-                                                                <X size={12} className="text-white" />
-                                                            )}
-                                                        </div>
-                                                        <span className={cn(
-                                                            "text-sm",
-                                                            aiChecklist[item.key] ? "text-emerald-500" : "text-red-400"
-                                                        )}>{item.label}</span>
+                                    )}
+
+                                    {/* Error state */}
+                                    {historyEvalError && !historyEvalLoading && (
+                                        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 flex items-start gap-3">
+                                            <AlertTriangle size={16} className="text-amber-400 mt-0.5 shrink-0" />
+                                            <p className="text-sm text-amber-300">{historyEvalError}</p>
+                                        </div>
+                                    )}
+
+                                    {/* Real OSCE checklist sections */}
+                                    {historyEvalResult && !historyEvalLoading && historyEvalResult.sections?.map(section => {
+                                        const sectionCovered = section.items.filter(i => i.covered).length;
+                                        const sectionTotal = section.items.length;
+                                        return (
+                                            <div key={section.id} className="bg-card border border-white/5 rounded-xl p-4">
+                                                <div className="flex items-center justify-between mb-3">
+                                                    <div className="flex items-center gap-2">
+                                                        <h3 className="font-semibold text-foreground text-sm">{section.label}</h3>
+                                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">AI Detected</span>
                                                     </div>
                                                     <span className={cn(
-                                                        "text-[10px] px-1.5 py-0.5 rounded font-medium",
-                                                        aiChecklist[item.key] 
-                                                            ? "bg-emerald-500/20 text-emerald-400"
-                                                            : "bg-red-500/20 text-red-400"
+                                                        "text-xs px-2 py-1 rounded-full font-medium",
+                                                        sectionCovered === sectionTotal ? "bg-emerald-500/10 text-emerald-500" :
+                                                        sectionCovered > 0 ? "bg-amber-500/10 text-amber-500" : "bg-red-500/10 text-red-400"
                                                     )}>
-                                                        {aiChecklist[item.key] ? 'Covered' : 'Missed'}
+                                                        {sectionCovered}/{sectionTotal}
                                                     </span>
                                                 </div>
-                                            ))}
-                                        </div>
-                                    </div>
+                                                <div className="space-y-1.5">
+                                                    {section.items.map(item => (
+                                                        <div
+                                                            key={item.num}
+                                                            className={cn(
+                                                                "flex items-start gap-2.5 px-3 py-2 rounded-lg border text-sm",
+                                                                item.covered
+                                                                    ? "bg-emerald-500/8 border-emerald-500/20"
+                                                                    : "bg-red-500/8 border-red-500/20"
+                                                            )}
+                                                        >
+                                                            <span className={cn(
+                                                                "shrink-0 w-4 h-4 mt-0.5 rounded-full flex items-center justify-center text-[10px] font-bold",
+                                                                item.covered ? "bg-emerald-500 text-white" : "bg-red-500/50 text-white"
+                                                            )}>
+                                                                {item.covered ? '✓' : '✗'}
+                                                            </span>
+                                                            <div className="flex-1 min-w-0">
+                                                                <span className={cn(
+                                                                    "leading-snug",
+                                                                    item.covered ? "text-foreground/80" : "text-muted-foreground"
+                                                                )}>
+                                                                    <span className="text-muted-foreground/50 mr-1">{item.num}.</span>
+                                                                    {item.text}
+                                                                </span>
+                                                                {item.notes && (
+                                                                    <p className="text-[11px] text-amber-400/80 mt-0.5">{item.notes}</p>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
 
-                                    {/* Key Findings */}
-                                    <div className="bg-card border border-white/5 rounded-xl p-4">
-                                        <h3 className="font-semibold text-foreground text-sm mb-3">Key Findings</h3>
-                                        <ul className="space-y-2">
-                                            {getKeyFindings().map((finding, idx) => (
-                                                <li key={idx} className="flex items-start gap-2 text-sm">
-                                                    <div className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5 flex-shrink-0" />
-                                                    <span className="text-muted-foreground">{finding}</span>
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    </div>
+                                    {/* Structure / order feedback */}
+                                    {historyEvalResult && !historyEvalLoading && (
+                                        <div className={cn(
+                                            "rounded-xl border p-4 flex items-start gap-3",
+                                            historyEvalResult.structure_followed
+                                                ? "bg-emerald-500/8 border-emerald-500/20"
+                                                : "bg-amber-500/8 border-amber-500/20"
+                                        )}>
+                                            <span className={historyEvalResult.structure_followed ? "text-emerald-400" : "text-amber-400"}>
+                                                {historyEvalResult.structure_followed ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
+                                            </span>
+                                            <div>
+                                                <p className={cn("text-sm font-medium", historyEvalResult.structure_followed ? "text-emerald-400" : "text-amber-400")}>
+                                                    {historyEvalResult.structure_followed ? "Correct section order followed" : "Section order needs attention"}
+                                                </p>
+                                                {historyEvalResult.structure_notes && (
+                                                    <p className="text-xs text-muted-foreground mt-0.5">{historyEvalResult.structure_notes}</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* AI Feedback */}
+                                    {historyEvalResult && !historyEvalLoading && (
+                                        <div className="bg-card border border-white/5 rounded-xl p-4 space-y-3">
+                                            <h3 className="font-semibold text-foreground text-sm">Examiner Feedback</h3>
+                                            <p className="text-sm text-muted-foreground leading-relaxed">{historyEvalResult.feedback}</p>
+                                            {historyEvalResult.strengths?.length > 0 && (
+                                                <div>
+                                                    <p className="text-xs font-medium text-emerald-400 mb-1.5">Strengths</p>
+                                                    <ul className="space-y-1">
+                                                        {historyEvalResult.strengths.map((s, i) => (
+                                                            <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
+                                                                <span className="text-emerald-500 mt-0.5 shrink-0">•</span>{s}
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                </div>
+                                            )}
+
+                                            {/* Areas for improvement — collapsed toggle */}
+                                            {historyEvalResult.areas_for_improvement?.length > 0 && (
+                                                <div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setShowMissedQuestions(v => !v)}
+                                                        className="w-full flex items-center justify-between text-xs font-medium text-amber-400 hover:text-amber-300 transition-colors"
+                                                    >
+                                                        <span>Areas for improvement ({historyEvalResult.areas_for_improvement.length})</span>
+                                                        <ChevronRight size={14} className={cn("transition-transform", showMissedQuestions && "rotate-90")} />
+                                                    </button>
+                                                    {showMissedQuestions && (
+                                                        <ul className="mt-2 space-y-1">
+                                                            {historyEvalResult.areas_for_improvement.map((a, i) => (
+                                                                <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
+                                                                    <span className="text-amber-500 mt-0.5 shrink-0">•</span>{a}
+                                                                </li>
+                                                            ))}
+                                                        </ul>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
 
                                     {/* Diagnosis Guess */}
                                     <div className="bg-card border border-white/5 rounded-xl p-4">
@@ -2241,7 +2358,7 @@ FEEDBACK: ${getFeedback()}
                                                 <textarea
                                                     value={diagnosisRationale}
                                                     onChange={(e) => setDiagnosisRationale(e.target.value)}
-                                                    placeholder="Explain your reasoning..."
+                                                    placeholder="Explain your reasoning…"
                                                     rows={2}
                                                     className="w-full bg-muted/50 border border-white/5 rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
                                                 />
@@ -2249,133 +2366,23 @@ FEEDBACK: ${getFeedback()}
                                         </div>
                                     </div>
 
-                                    {/* OSCE Rubric (AI-Scored) */}
-                                    <div className="bg-card border border-white/5 rounded-xl p-4">
-                                        <div className="flex items-center justify-between mb-3">
-                                            <div className="flex items-center gap-2">
-                                                <h3 className="font-semibold text-foreground text-sm">OSCE Rubric</h3>
-                                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
-                                                    AI Scored
-                                                </span>
-                                            </div>
-                                            <span className={cn(
-                                                "text-xs px-2 py-1 rounded-full font-medium",
-                                                rubricTotal >= 8 ? "bg-emerald-500/10 text-emerald-500" :
-                                                rubricTotal >= 5 ? "bg-amber-500/10 text-amber-500" : "bg-red-500/10 text-red-500"
-                                            )}>
-                                                {rubricTotal}/10
-                                            </span>
-                                        </div>
-                                        <div className="space-y-2">
-                                            {rubricCriteria.map(criterion => {
-                                                const score = aiRubricScores[criterion.key];
-                                                return (
-                                                    <div 
-                                                        key={criterion.key} 
-                                                        className={cn(
-                                                            "flex items-center justify-between p-2.5 rounded-lg border",
-                                                            score === 2 ? "bg-emerald-500/10 border-emerald-500/30" :
-                                                            score === 1 ? "bg-amber-500/10 border-amber-500/30" : "bg-red-500/10 border-red-500/30"
-                                                        )}
-                                                    >
-                                                        <div className="flex flex-col">
-                                                            <span className={cn(
-                                                                "text-sm font-medium",
-                                                                score === 2 ? "text-emerald-500" :
-                                                                score === 1 ? "text-amber-500" : "text-red-400"
-                                                            )}>{criterion.label}</span>
-                                                            <span className="text-[10px] text-muted-foreground">Auto-scored</span>
-                                                        </div>
-                                                        <span className={cn(
-                                                            "text-sm font-bold px-2 py-1 rounded",
-                                                            score === 2 ? "bg-emerald-500/20 text-emerald-400" :
-                                                            score === 1 ? "bg-amber-500/20 text-amber-400" : "bg-red-500/20 text-red-400"
-                                                        )}>
-                                                            {score}/2
-                                                        </span>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-
-                                    {/* Missed Questions */}
+                                    {/* Copy summary */}
                                     <div className="bg-card border border-white/5 rounded-xl p-4">
                                         <button
-                                            onClick={() => setShowMissedQuestions(!showMissedQuestions)}
-                                            className="w-full flex items-center justify-between text-sm font-semibold text-foreground"
-                                        >
-                                            <span>Show what you should've asked</span>
-                                            <ChevronRight 
-                                                size={16} 
-                                                className={cn(
-                                                    "text-muted-foreground transition-transform",
-                                                    showMissedQuestions && "rotate-90"
-                                                )} 
-                                            />
-                                        </button>
-                                        {showMissedQuestions && (
-                                            <div className="mt-3 pt-3 border-t border-white/5">
-                                                <p className="text-xs text-muted-foreground mb-2">
-                                                    Suggested questions for {selectedCase?.title}:
-                                                </p>
-                                                <ul className="space-y-2">
-                                                    {(missedQuestions[getCaseMockKey(selectedCase)] || missedQuestions['pneumonia']).map((q, idx) => (
-                                                        <li key={idx} className="flex items-start gap-2 text-sm">
-                                                            <span className="text-primary font-medium">{idx + 1}.</span>
-                                                            <span className="text-muted-foreground">{q}</span>
-                                                        </li>
-                                                    ))}
-                                                </ul>
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    {/* Score & Feedback */}
-                                    <div className="bg-card border border-white/5 rounded-xl p-4">
-                                        <h3 className="font-semibold text-foreground text-sm mb-3">Performance Score</h3>
-                                        <div className="mb-3">
-                                            <div className="flex items-center justify-between mb-1.5">
-                                                <span className="text-xs text-muted-foreground">Score</span>
-                                                <span className={cn(
-                                                    "text-sm font-bold",
-                                                    score >= 8 ? "text-emerald-500" : score >= 5 ? "text-amber-500" : "text-red-500"
-                                                )}>
-                                                    {score}/10
-                                                </span>
-                                            </div>
-                                            <div className="h-3 bg-muted/50 rounded-full overflow-hidden">
-                                                <div 
-                                                    className={cn(
-                                                        "h-full rounded-full transition-all duration-500",
-                                                        score >= 8 ? "bg-emerald-500" : score >= 5 ? "bg-amber-500" : "bg-red-500"
-                                                    )}
-                                                    style={{ width: `${score * 10}%` }}
-                                                />
-                                            </div>
-                                        </div>
-                                        <div className="p-3 bg-muted/30 rounded-lg mb-3">
-                                            <p className="text-sm text-muted-foreground">{getFeedback()}</p>
-                                        </div>
-                                        <button
+                                            type="button"
                                             onClick={copyEvaluationSummary}
+                                            disabled={historyEvalLoading}
                                             className={cn(
-                                                "w-full py-2.5 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2",
+                                                "w-full py-2.5 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2 disabled:opacity-50",
                                                 copiedToClipboard
                                                     ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/30"
                                                     : "bg-muted/50 text-foreground border border-white/5 hover:bg-muted"
                                             )}
                                         >
                                             {copiedToClipboard ? (
-                                                <>
-                                                    <CheckCircle2 size={16} />
-                                                    Copied!
-                                                </>
+                                                <><CheckCircle2 size={16} /> Copied!</>
                                             ) : (
-                                                <>
-                                                    <FileText size={16} />
-                                                    Copy evaluation summary
-                                                </>
+                                                <><FileText size={16} /> Copy evaluation summary</>
                                             )}
                                         </button>
                                     </div>

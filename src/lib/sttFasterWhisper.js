@@ -32,6 +32,7 @@ function createRecorder(onAutoStop, onLevel) {
   const blobPromise = new Promise((resolve) => { resolveBlob = resolve; });
 
   const start = async (existingStream) => {
+    const ownStream = !existingStream;
     stream = existingStream || await navigator.mediaDevices.getUserMedia({ audio: true });
     const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
       ? 'audio/webm;codecs=opus'
@@ -43,7 +44,8 @@ function createRecorder(onAutoStop, onLevel) {
     chunks.length = 0;
     mediaRecorder.ondataavailable = (e) => { if (e.data?.size > 0) chunks.push(e.data); };
     mediaRecorder.onstop = () => {
-      stream.getTracks().forEach((t) => t.stop());
+      // Only stop tracks if we acquired this stream ourselves; external streams are reused
+      if (ownStream) stream.getTracks().forEach((t) => t.stop());
       if (silenceTimer) { clearInterval(silenceTimer); silenceTimer = null; }
       if (audioContext) { audioContext.close(); audioContext = null; }
       resolveBlob(new Blob(chunks, { type: mimeType }));

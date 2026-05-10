@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { MainLayout } from "./components/layout/MainLayout";
 import { AdminDashboard } from "./components/dashboard/AdminDashboard";
 import { Cases } from "./components/dashboard/Cases";
@@ -27,10 +27,12 @@ import { StudentProgress } from "./components/dashboard/StudentProgress";
 import { StudentProfile } from "./components/dashboard/StudentProfile";
 import { AdminInstructorsPage } from "./components/dashboard/AdminInstructorsPage";
 import PatientTestingPage from "./components/testing/PatientTestingPage";
+import { StudentNotificationsPage } from "./components/dashboard/StudentNotificationsPage";
 
 function AppContent() {
   const [activeTab, setActiveTab] = useState("landing");
   const [instructorViewingStudent, setInstructorViewingStudent] = useState(null);
+  const urlRedirectDone = useRef(false);
   const { user, loading, role } = useAuth();
 
   // Dedicated URL: /practice-history — standalone History Taking (voice) page for AI work
@@ -90,6 +92,8 @@ function AppContent() {
     if (loading || !user || role !== "student") return;
     if (activeTab === "auth" || activeTab === "auth-signup" || activeTab === "onboarding" || activeTab === "student-usage-setup") return;
     if (typeof window !== "undefined" && window.localStorage.getItem("medupal_onboarding_pending") === "true") return;
+    if (urlRedirectDone.current) return;
+    urlRedirectDone.current = true;
     const path = window.location.pathname;
     if (path === "/" || path === "/home" || path === "/student-dashboard" || path === "/student-hub") {
       setActiveTab("student-dashboard");
@@ -322,7 +326,7 @@ function AppContent() {
             </div>
           );
         }
-        return <StudentProgress />;
+        return <StudentProgress onStartPractice={() => setActiveTab('student-practice')} user={user} />;
       case "student-history":
         if (role !== "student") {
           return (
@@ -401,6 +405,9 @@ function AppContent() {
             backLabel="Back to Home"
           />
         );
+      case "student-notifications":
+        return <StudentNotificationsPage />;
+      case "users":
       case "instructors":
         if (role !== "admin") {
           return (
@@ -437,8 +444,8 @@ function AppContent() {
     }
   };
 
-  // Practice and exam pages are full-screen — no sidebar
-  if (activeTab === 'student-practice' || activeTab === 'student-exam') {
+  // Practice page is full-screen (immersive voice session) — no sidebar
+  if (activeTab === 'student-practice') {
     return renderContent();
   }
 

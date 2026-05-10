@@ -9,6 +9,8 @@ import { Footer } from '../ui/FooterSection';
 import { MedicalCrossIcon } from '../ui/MedicalCrossIcon';
 import { ContactFormSection } from '../ui/ContactFormSection';
 import { BentoGridBlock } from '../ui/BentoGridBlock';
+import { CinematicHero } from '../ui/cinematic-landing-hero';
+import { Testimonials } from '../ui/unique-testimonial';
 import { InteractiveGlobe } from '../ui/InteractiveGlobe';
 import GradualBlur from '../ui/GradualBlur';
 import aquLogo from '../../assets/AQU-WHITE.png';
@@ -17,6 +19,7 @@ import cambridgeLogo from '../../assets/Cambridge.png';
 import uclLogo from '../../assets/UCL-White.png';
 import hopkinsLogo from '../../assets/Johns-Hopkins.png';
 import aaupLogo from '../../assets/AAUP-Normal.png';
+import xpatientLogo from '../../assets/Logo/XPatient_LOGO_white.png';
 import {
   Brain, Stethoscope, ClipboardList, ShieldCheck, ArrowRight, ArrowUpRight,
   Zap, Target, Award, ChevronDown, MessageSquare, Send, LogIn,
@@ -117,7 +120,7 @@ function AppleBackground() {
    SVG score ring
 ───────────────────────────────────────── */
 function ScoreRing({ score, active }) {
-  const R   = 36;
+  const R = 36;
   const circ = 2 * Math.PI * R;
   const offset = active ? circ * (1 - score / 100) : circ;
   return (
@@ -159,11 +162,11 @@ function FeedbackCard() {
   }, []);
 
   const domains = [
-    { label: 'History Taking',    pct: 92, color: '#60a5fa', delay: '0.3s' },
-    { label: 'Communication',     pct: 84, color: '#a78bfa', delay: '0.5s' },
-    { label: 'Clinical Reasoning',pct: 78, color: '#34d399', delay: '0.7s' },
-    { label: 'Examination',       pct: 88, color: '#f472b6', delay: '0.9s' },
-    { label: 'Management Plan',   pct: 71, color: '#fb923c', delay: '1.1s' },
+    { label: 'History Taking', pct: 92, color: '#60a5fa', delay: '0.3s' },
+    { label: 'Communication', pct: 84, color: '#a78bfa', delay: '0.5s' },
+    { label: 'Clinical Reasoning', pct: 78, color: '#34d399', delay: '0.7s' },
+    { label: 'Examination', pct: 88, color: '#f472b6', delay: '0.9s' },
+    { label: 'Management Plan', pct: 71, color: '#fb923c', delay: '1.1s' },
   ];
 
   const feedback = [
@@ -280,11 +283,11 @@ function FeedbackCard() {
 const phrases = ['smart automation', 'AI-powered feedback', 'physical manikins', 'the future of medicine'];
 
 export default function LandingPage({ setActiveTab }) {
-  const [phraseIdx, setPhraseIdx]     = useState(0);
-  const [visible, setVisible]         = useState(true);
-  const [scrolled, setScrolled]       = useState(false);
-  const [activeSection, setActiveSection] = useState('');
-  const [mouse, setMouse]             = useState({ x: 0, y: 0 });
+  const [phraseIdx, setPhraseIdx] = useState(0);
+  const [visible, setVisible] = useState(true);
+  const [scrolled, setScrolled] = useState(false);
+  const [activeSection, setActiveSection] = useState('home');
+  const [mouse, setMouse] = useState({ x: 0, y: 0 });
   const [aboutWordIdx, setAboutWordIdx] = useState(0);
   const heroRef = useRef(null);
 
@@ -309,12 +312,15 @@ export default function LandingPage({ setActiveTab }) {
   useEffect(() => {
     const onScroll = () => {
       setScrolled(window.scrollY > 20);
-      const sections = ['features', 'about', 'contact'];
-      for (const id of [...sections].reverse()) {
+      const ids = ['cases', 'about', 'contact'];
+      for (const id of [...ids].reverse()) {
         const el = document.getElementById(id);
-        if (el && window.scrollY >= el.offsetTop - 120) { setActiveSection(id); return; }
+        if (el && el.getBoundingClientRect().top <= 140) {
+          setActiveSection(id);
+          return;
+        }
       }
-      setActiveSection('');
+      setActiveSection('home');
     };
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
@@ -325,8 +331,8 @@ export default function LandingPage({ setActiveTab }) {
     const { left, top, width, height } = heroRef.current?.getBoundingClientRect() ?? {};
     if (!width) return;
     setMouse({
-      x: ((e.clientX - left) / width  - 0.5) * 2,
-      y: ((e.clientY - top)  / height - 0.5) * 2,
+      x: ((e.clientX - left) / width - 0.5) * 2,
+      y: ((e.clientY - top) / height - 0.5) * 2,
     });
   }, []);
 
@@ -334,9 +340,8 @@ export default function LandingPage({ setActiveTab }) {
     <a
       key={id}
       href={`#${id}`}
-      className={`relative text-sm transition-colors ${
-        activeSection === id ? 'text-white' : 'text-white/50 hover:text-white/80'
-      }`}
+      className={`relative text-sm transition-colors ${activeSection === id ? 'text-white' : 'text-white/50 hover:text-white/80'
+        }`}
     >
       {label}
       {activeSection === id && (
@@ -348,39 +353,64 @@ export default function LandingPage({ setActiveTab }) {
   return (
     <>
       {/* ── NAV ── */}
-      <nav className="relative z-20 w-full" style={{ padding: '10px 16px' }}>
-        <div className="flex items-center justify-between">
+      <nav
+        className="sticky top-0 z-[999] w-full transition-all duration-500"
+        style={{
+          padding: scrolled ? '10px 56px' : '0',
+        }}
+      >
+        <div
+          className="relative flex items-center justify-between transition-all duration-500"
+          style={{
+            padding: scrolled ? '10px 20px' : '10px 16px',
+            background: scrolled ? 'rgba(8,8,8,0.88)' : 'transparent',
+            backdropFilter: scrolled ? 'blur(16px)' : 'none',
+            WebkitBackdropFilter: scrolled ? 'blur(16px)' : 'none',
+            border: 'none',
+            borderRadius: scrolled ? '16px' : '0',
+            boxShadow: scrolled ? '0 4px 24px rgba(0,0,0,0.55)' : 'none',
+          }}
+        >
 
           {/* ── FAR LEFT: logo ── */}
-          <div className="flex items-center gap-0.5 flex-shrink-0">
-            <div className="w-[28px] h-[28px] rounded-full flex items-center justify-center -mr-1" style={{
-              background: 'rgba(16,185,129,0.15)',
-              boxShadow: '0 0 12px rgba(16,185,129,0.2)',
-            }}>
-              <MedicalCrossIcon size={14} color="#10b981" />
-            </div>
-            <span className="text-[13px] font-semibold tracking-tight text-white/85">patient</span>
+          <div className="flex items-center flex-shrink-0">
+            <img
+              src={xpatientLogo}
+              alt="XPatient"
+              style={{ height: scrolled ? 36 : 48, width: 'auto', transition: 'height 0.5s ease' }}
+            />
           </div>
 
           {/* ── CENTER: floating nav links ── */}
           <div className="hidden md:flex items-center absolute left-1/2 top-1/2" style={{ transform: 'translate(-50%, -50%)' }}>
             {[
-              { id: 'home',     label: 'Home' },
-              { id: 'features', label: 'Features' },
-              { id: 'cases',    label: 'Cases' },
-              { id: 'about',    label: 'About' },
-              { id: 'contact',  label: 'Contact' },
+              { id: 'home', label: 'Home' },
+              { id: 'cases', label: 'Practice' },
+              { id: 'about', label: 'About' },
+              { id: 'contact', label: 'Contact' },
             ].map(({ id, label }) => (
               <a
                 key={id}
                 href={id === 'home' ? '#' : `#${id}`}
-                className={`nav-link px-3.5 py-[5px] text-[12.5px] whitespace-nowrap cursor-pointer ${
-                  activeSection === id
-                    ? 'text-white/90 font-medium'
-                    : 'text-white/30 hover:text-white/65'
-                }`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (id === 'home') {
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  } else {
+                    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
+                  }
+                }}
+                className={`nav-link relative px-3.5 py-[5px] text-[12.5px] whitespace-nowrap cursor-pointer ${activeSection === id
+                  ? 'text-white/90 font-medium'
+                  : 'text-white/30 hover:text-white/65'
+                  }`}
               >
                 {label}
+                {activeSection === id && (
+                  <span className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 w-[60%] h-px rounded-full"
+                    style={{ background: 'rgba(255,255,255,0.45)', boxShadow: '0 0 8px rgba(180,220,200,0.5)' }}
+                  />
+                )}
               </a>
             ))}
           </div>
@@ -422,153 +452,153 @@ export default function LandingPage({ setActiveTab }) {
         boxShadow: '0 0 0 1px rgba(0,0,0,0.6), 0 50px 100px rgba(0,0,0,0.9)',
         background: '#000',
       }}>
-      <section
-        ref={heroRef}
-        onMouseMove={handleMouseMove}
-        className="relative flex flex-col items-center justify-center overflow-x-hidden"
-        style={{ minHeight: 'calc(100vh - 3.5rem)' }}
-      >
-        {/* ── PRIMARY glow — bleeds up through the nav area ── */}
-        <div className="absolute pointer-events-none" style={{
-          top: '-28%', left: '50%',
-          transform: 'translateX(-44%)',
-          width: '130%', height: '110%',
-          background: 'radial-gradient(ellipse 65% 52% at 56% 15%, rgba(230,245,235,0.95) 0%, rgba(195,225,208,0.60) 18%, rgba(155,200,175,0.28) 40%, rgba(100,165,140,0.08) 62%, transparent 78%)',
-          filter: 'blur(14px)',
-        }} />
-        {/* ── glow soft outer halo — also bleeds into nav ── */}
-        <div className="absolute pointer-events-none" style={{
-          top: '-20%', left: '50%',
-          transform: 'translateX(-44%)',
-          width: '130%', height: '95%',
-          background: 'radial-gradient(ellipse 72% 60% at 55% 12%, rgba(180,215,195,0.35) 0%, rgba(120,175,150,0.12) 50%, transparent 75%)',
-          filter: 'blur(40px)',
-        }} />
-
-        {/* ── secondary lower-left dark-green depth glow ── */}
-        <div className="absolute pointer-events-none" style={{
-          bottom: '0%', left: '-3%',
-          width: '48%', height: '60%',
-          background: 'radial-gradient(ellipse 80% 85% at 10% 88%, rgba(20,65,42,0.80) 0%, rgba(15,50,32,0.40) 40%, transparent 70%)',
-          filter: 'blur(25px)',
-        }} />
-
-
-        {/* ── bottom fade to black ── */}
-        <div className="absolute inset-x-0 bottom-0 pointer-events-none" style={{
-          height: '28%',
-          background: 'linear-gradient(to top, #000 0%, transparent 100%)',
-        }} />
-
-        {/* ── mouse spotlight ── */}
-        <div className="absolute pointer-events-none" style={{
-          width: 600, height: 600, borderRadius: '50%',
-          left: '50%', top: '40%',
-          background: 'radial-gradient(circle, rgba(90,130,255,0.07) 0%, transparent 65%)',
-          transform: `translate(calc(-50% + ${mouse.x * 70}px), calc(-50% + ${mouse.y * 50}px))`,
-          transition: 'transform 0.4s cubic-bezier(0.25,0.46,0.45,0.94)',
-        }} />
-
-
-
-        {/* ── main content ── */}
-        <div className="relative z-10 text-center mx-auto px-6 flex flex-col items-center" style={{ gap: 16 }}>
-
-          {/* eyebrow pill */}
-          <div
-            onClick={() => setActiveTab('auth')}
-            className="animate-element animate-delay-100"
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 8,
-              padding: '6px 14px', borderRadius: 999,
-              border: '1px solid rgba(255,255,255,0.14)',
-              background: 'rgba(255,255,255,0.05)',
-              fontSize: 12, color: 'rgba(255,255,255,0.60)',
-              cursor: 'pointer', whiteSpace: 'nowrap',
-            }}
-          >
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.4)', display: 'inline-block', flexShrink: 0 }} />
-            AI-powered OSCE training — now available
-            <span style={{ fontSize: 11, opacity: 0.7 }}>→</span>
-          </div>
-
-          {/* headline — gradient text with shimmer */}
-          <h1 className="hero-title animate-element animate-delay-200" style={{
-            fontSize: 'clamp(40px,5.8vw,68px)',
-            fontWeight: 600,
-            letterSpacing: '-0.025em',
-            lineHeight: 1.22,
-            margin: 0,
-          }}>
-            Master every OSCE{' '}
-            <span className="hero-title-fade">station.</span>
-          </h1>
-
-          {/* sub-copy */}
-          <p className="animate-element animate-delay-300" style={{
-            fontSize: 14,
-            fontWeight: 400,
-            color: 'rgba(255,255,255,0.42)',
-            lineHeight: 1.85,
-            maxWidth: 520,
-            margin: 0,
-          }}>
-            Choose scenarios, pick a mode, and receive AI-powered feedback to sharpen clinical reasoning
-          </p>
-
-          {/* CTAs */}
-          <div className="animate-element animate-delay-400" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
-            <button
-              onClick={() => setActiveTab('cases')}
-              style={{
-                height: 40, padding: '0 22px', borderRadius: 999,
-                border: '1px solid rgba(255,255,255,0.22)',
-                background: 'rgba(255,255,255,0.07)',
-                color: 'rgba(255,255,255,0.72)',
-                fontSize: 13, fontWeight: 500, cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 6,
-                backdropFilter: 'blur(6px)',
-                transition: 'all 0.25s ease',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.35)'; e.currentTarget.style.color = '#fff'; e.currentTarget.style.background = 'rgba(255,255,255,0.12)'; }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.22)'; e.currentTarget.style.color = 'rgba(255,255,255,0.72)'; e.currentTarget.style.background = 'rgba(255,255,255,0.07)'; }}
-            >
-              Open Cases
-              <ArrowRight size={11} style={{ opacity: 0.6 }} />
-            </button>
-            <button
-              onClick={() => setActiveTab('auth')}
-              style={{
-                height: 40, padding: '0 24px', borderRadius: 999,
-                border: 'none',
-                background: 'linear-gradient(135deg, rgba(120,180,160,0.55) 0%, rgba(80,140,120,0.40) 50%, rgba(50,110,90,0.50) 100%)',
-                color: '#ffffff',
-                fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                backdropFilter: 'blur(6px)',
-                boxShadow: '0 0 20px rgba(100,170,145,0.18), inset 0 1px 0 rgba(255,255,255,0.12)',
-                transition: 'all 0.25s ease',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = 'linear-gradient(135deg, rgba(130,195,175,0.65) 0%, rgba(90,155,135,0.50) 50%, rgba(60,125,105,0.60) 100%)'; e.currentTarget.style.boxShadow = '0 0 28px rgba(100,170,145,0.28), inset 0 1px 0 rgba(255,255,255,0.15)'; }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'linear-gradient(135deg, rgba(120,180,160,0.55) 0%, rgba(80,140,120,0.40) 50%, rgba(50,110,90,0.50) 100%)'; e.currentTarget.style.boxShadow = '0 0 20px rgba(100,170,145,0.18), inset 0 1px 0 rgba(255,255,255,0.12)'; }}
-            >
-              Discover More
-            </button>
-          </div>
-        </div>
-
-
-
-        {/* ── scroll indicator bottom-left ── */}
-        <div
-          className="animate-element animate-delay-500 absolute bottom-8 left-8 flex items-center gap-2.5 z-[1001]"
+        <section
+          ref={heroRef}
+          onMouseMove={handleMouseMove}
+          className="relative flex flex-col items-center justify-center overflow-x-hidden"
+          style={{ minHeight: 'calc(100vh - 3.5rem)' }}
         >
-          <div className="w-7 h-7 rounded-full border border-white/14 flex items-center justify-center">
-            <ChevronDown size={12} className="text-white/30 animate-bounce" />
-          </div>
-          <span className="text-[10px] tracking-[0.22em] uppercase text-white/22">01 · Scroll down</span>
-        </div>
+          {/* ── PRIMARY glow — bleeds up through the nav area ── */}
+          <div className="absolute pointer-events-none" style={{
+            top: '-28%', left: '50%',
+            transform: 'translateX(-44%)',
+            width: '130%', height: '110%',
+            background: 'radial-gradient(ellipse 65% 52% at 56% 15%, rgba(230,245,235,0.95) 0%, rgba(195,225,208,0.60) 18%, rgba(155,200,175,0.28) 40%, rgba(100,165,140,0.08) 62%, transparent 78%)',
+            filter: 'blur(14px)',
+          }} />
+          {/* ── glow soft outer halo — also bleeds into nav ── */}
+          <div className="absolute pointer-events-none" style={{
+            top: '-20%', left: '50%',
+            transform: 'translateX(-44%)',
+            width: '130%', height: '95%',
+            background: 'radial-gradient(ellipse 72% 60% at 55% 12%, rgba(180,215,195,0.35) 0%, rgba(120,175,150,0.12) 50%, transparent 75%)',
+            filter: 'blur(40px)',
+          }} />
 
-      </section>
+          {/* ── secondary lower-left dark-green depth glow ── */}
+          <div className="absolute pointer-events-none" style={{
+            bottom: '0%', left: '-3%',
+            width: '48%', height: '60%',
+            background: 'radial-gradient(ellipse 80% 85% at 10% 88%, rgba(20,65,42,0.80) 0%, rgba(15,50,32,0.40) 40%, transparent 70%)',
+            filter: 'blur(25px)',
+          }} />
+
+
+          {/* ── bottom fade to black ── */}
+          <div className="absolute inset-x-0 bottom-0 pointer-events-none" style={{
+            height: '28%',
+            background: 'linear-gradient(to top, #000 0%, transparent 100%)',
+          }} />
+
+          {/* ── mouse spotlight ── */}
+          <div className="absolute pointer-events-none" style={{
+            width: 600, height: 600, borderRadius: '50%',
+            left: '50%', top: '40%',
+            background: 'radial-gradient(circle, rgba(90,130,255,0.07) 0%, transparent 65%)',
+            transform: `translate(calc(-50% + ${mouse.x * 70}px), calc(-50% + ${mouse.y * 50}px))`,
+            transition: 'transform 0.4s cubic-bezier(0.25,0.46,0.45,0.94)',
+          }} />
+
+
+
+          {/* ── main content ── */}
+          <div className="relative z-10 text-center mx-auto px-6 flex flex-col items-center" style={{ gap: 16 }}>
+
+            {/* eyebrow pill */}
+            <div
+              onClick={() => setActiveTab('auth')}
+              className="animate-element animate-delay-100"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 8,
+                padding: '6px 14px', borderRadius: 999,
+                border: '1px solid rgba(255,255,255,0.14)',
+                background: 'rgba(255,255,255,0.05)',
+                fontSize: 12, color: 'rgba(255,255,255,0.60)',
+                cursor: 'pointer', whiteSpace: 'nowrap',
+              }}
+            >
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.4)', display: 'inline-block', flexShrink: 0 }} />
+              AI-powered OSCE training — now available
+              <span style={{ fontSize: 11, opacity: 0.7 }}>→</span>
+            </div>
+
+            {/* headline — gradient text with shimmer */}
+            <h1 className="hero-title animate-element animate-delay-200" style={{
+              fontSize: 'clamp(40px,5.8vw,68px)',
+              fontWeight: 600,
+              letterSpacing: '-0.025em',
+              lineHeight: 1.22,
+              margin: 0,
+            }}>
+              Master every OSCE{' '}
+              <span className="hero-title-fade">station.</span>
+            </h1>
+
+            {/* sub-copy */}
+            <p className="animate-element animate-delay-300" style={{
+              fontSize: 14,
+              fontWeight: 400,
+              color: 'rgba(255,255,255,0.42)',
+              lineHeight: 1.85,
+              maxWidth: 520,
+              margin: 0,
+            }}>
+              Choose scenarios, pick a mode, and receive AI-powered feedback to sharpen clinical reasoning
+            </p>
+
+            {/* CTAs */}
+            <div className="animate-element animate-delay-400" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+              <button
+                onClick={() => setActiveTab('auth')}
+                style={{
+                  height: 40, padding: '0 22px', borderRadius: 999,
+                  border: '1px solid rgba(255,255,255,0.22)',
+                  background: 'rgba(255,255,255,0.07)',
+                  color: 'rgba(255,255,255,0.72)',
+                  fontSize: 13, fontWeight: 500, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  backdropFilter: 'blur(6px)',
+                  transition: 'all 0.25s ease',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.35)'; e.currentTarget.style.color = '#fff'; e.currentTarget.style.background = 'rgba(255,255,255,0.12)'; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.22)'; e.currentTarget.style.color = 'rgba(255,255,255,0.72)'; e.currentTarget.style.background = 'rgba(255,255,255,0.07)'; }}
+              >
+                Open Cases
+                <ArrowRight size={11} style={{ opacity: 0.6 }} />
+              </button>
+              <button
+                onClick={() => setActiveTab('auth')}
+                style={{
+                  height: 40, padding: '0 24px', borderRadius: 999,
+                  border: 'none',
+                  background: 'linear-gradient(135deg, rgba(120,180,160,0.55) 0%, rgba(80,140,120,0.40) 50%, rgba(50,110,90,0.50) 100%)',
+                  color: '#ffffff',
+                  fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                  backdropFilter: 'blur(6px)',
+                  boxShadow: '0 0 20px rgba(100,170,145,0.18), inset 0 1px 0 rgba(255,255,255,0.12)',
+                  transition: 'all 0.25s ease',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'linear-gradient(135deg, rgba(130,195,175,0.65) 0%, rgba(90,155,135,0.50) 50%, rgba(60,125,105,0.60) 100%)'; e.currentTarget.style.boxShadow = '0 0 28px rgba(100,170,145,0.28), inset 0 1px 0 rgba(255,255,255,0.15)'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'linear-gradient(135deg, rgba(120,180,160,0.55) 0%, rgba(80,140,120,0.40) 50%, rgba(50,110,90,0.50) 100%)'; e.currentTarget.style.boxShadow = '0 0 20px rgba(100,170,145,0.18), inset 0 1px 0 rgba(255,255,255,0.12)'; }}
+              >
+                Discover More
+              </button>
+            </div>
+          </div>
+
+
+
+          {/* ── scroll indicator bottom-left ── */}
+          <div
+            className="animate-element animate-delay-500 absolute bottom-8 left-8 flex items-center gap-2.5 z-[10]"
+          >
+            <div className="w-7 h-7 rounded-full border border-white/14 flex items-center justify-center">
+              <ChevronDown size={12} className="text-white/30 animate-bounce" />
+            </div>
+            <span className="text-[10px] tracking-[0.22em] uppercase text-white/22">01 · Scroll down</span>
+          </div>
+
+        </section>
       </div>{/* end hero card */}
 
       {/* ══════════════════════════════════════════
@@ -582,36 +612,36 @@ export default function LandingPage({ setActiveTab }) {
           style={{ background: 'linear-gradient(to left, #000, transparent)' }} />
 
         <FadeIn>
-        <div className="max-w-5xl mx-auto flex items-center justify-between gap-8 md:gap-0">
-          {/* "Used at" label */}
-          <p className="text-[10px] tracking-[0.22em] uppercase text-white/18 whitespace-nowrap flex-shrink-0">Used at</p>
+          <div className="max-w-5xl mx-auto flex items-center justify-between gap-8 md:gap-0">
+            {/* "Used at" label */}
+            <p className="text-[10px] tracking-[0.22em] uppercase text-white/18 whitespace-nowrap flex-shrink-0">Used at</p>
 
-          {/* university logo placeholders */}
-          {[
-            { src: oxfordLogo, alt: 'Oxford', filter: 'invert(1) brightness(1.5)' },
-            { src: cambridgeLogo, alt: 'Cambridge', filter: 'brightness(3)' },
-            { src: uclLogo, alt: 'UCL', filter: 'brightness(3)' },
-            { src: hopkinsLogo, alt: 'Johns Hopkins', filter: 'brightness(3)' },
-            { src: aaupLogo, alt: 'AAUP', filter: 'none' },
-            { src: aquLogo, alt: 'AQU', filter: 'brightness(3)' },
-          ].map(({ src, alt, filter }) => (
-            <div key={alt} className="flex items-center cursor-default group flex-shrink-0">
-              <img src={src} alt={alt} className="uni-logo" style={{
-                height: 38,
-                width: 'auto',
-                filter,
-                opacity: 0.35,
-              }} />
-            </div>
-          ))}
-        </div>
+            {/* university logo placeholders */}
+            {[
+              { src: oxfordLogo, alt: 'Oxford', filter: 'invert(1) brightness(1.5)' },
+              { src: cambridgeLogo, alt: 'Cambridge', filter: 'brightness(3)' },
+              { src: uclLogo, alt: 'UCL', filter: 'brightness(3)' },
+              { src: hopkinsLogo, alt: 'Johns Hopkins', filter: 'brightness(3)' },
+              { src: aaupLogo, alt: 'AAUP', filter: 'none' },
+              { src: aquLogo, alt: 'AQU', filter: 'brightness(3)' },
+            ].map(({ src, alt, filter }) => (
+              <div key={alt} className="flex items-center cursor-default group flex-shrink-0">
+                <img src={src} alt={alt} className="uni-logo" style={{
+                  height: 38,
+                  width: 'auto',
+                  filter,
+                  opacity: 0.35,
+                }} />
+              </div>
+            ))}
+          </div>
         </FadeIn>
       </div>
 
       {/* ══════════════════════════════════════════
           MACBOOK SHOWCASE
       ══════════════════════════════════════════ */}
-      <section className="relative" style={{ padding: '100px 48px 20px', zIndex: 10 }}>
+      <section id="cases" className="relative" style={{ padding: '100px 48px 20px', zIndex: 10 }}>
         <FadeIn>
           <div style={{
             maxWidth: 1200,
@@ -651,18 +681,20 @@ export default function LandingPage({ setActiveTab }) {
                 </span>
               </div>
 
-              <button style={{
-                display: 'inline-flex', alignItems: 'center', gap: 7,
-                height: 38, padding: '0 20px',
-                background: 'linear-gradient(135deg, rgba(120,180,160,0.45), rgba(80,140,130,0.25))',
-                border: '1px solid rgba(120,180,160,0.25)',
-                borderRadius: 999,
-                color: 'rgba(255,255,255,0.85)',
-                fontSize: 13,
-                fontWeight: 500,
-                cursor: 'pointer',
-                letterSpacing: '0.01em',
-              }}>
+              <button
+                onClick={() => setActiveTab('auth')}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 7,
+                  height: 38, padding: '0 20px',
+                  background: 'linear-gradient(135deg, rgba(120,180,160,0.45), rgba(80,140,130,0.25))',
+                  border: '1px solid rgba(120,180,160,0.25)',
+                  borderRadius: 999,
+                  color: 'rgba(255,255,255,0.85)',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  letterSpacing: '0.01em',
+                }}>
                 Start training
                 <ArrowRight size={13} style={{ opacity: 0.6 }} />
               </button>
@@ -672,13 +704,12 @@ export default function LandingPage({ setActiveTab }) {
             <div className="relative" style={{ flex: 1, minWidth: 0 }}>
               <div style={{
                 borderRadius: '16px 16px 0 0',
-                border: '1.5px solid rgba(255,255,255,0.10)',
-                borderBottom: 'none',
+                border: 'none',
                 background: '#0a0a0a',
                 padding: '10px 10px 0',
               }}>
                 <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 6 }}>
-                  <div style={{ width: 5, height: 5, borderRadius: '50%', background: 'rgba(255,255,255,0.10)' }} />
+                  <div style={{ width: 5, height: 5, borderRadius: '50%', background: 'rgba(255,255,255,0.06)' }} />
                 </div>
                 <div style={{
                   borderRadius: '8px 8px 0 0',
@@ -691,12 +722,12 @@ export default function LandingPage({ setActiveTab }) {
                 </div>
               </div>
 
-              {/* fade-out */}
+              {/* fade — bottom only */}
               <div style={{
                 position: 'absolute',
                 bottom: 0, left: 0, right: 0,
-                height: '45%',
-                background: 'linear-gradient(to top, #000000 0%, rgba(0,0,0,0.92) 30%, rgba(0,0,0,0.5) 60%, transparent 100%)',
+                height: '55%',
+                background: 'linear-gradient(to top, #050505 0%, rgba(5,5,5,0.92) 30%, rgba(5,5,5,0.5) 60%, transparent 100%)',
                 pointerEvents: 'none',
                 zIndex: 2,
               }} />
@@ -753,16 +784,27 @@ export default function LandingPage({ setActiveTab }) {
           BENTO GRID (Core features → About)
       ══════════════════════════════════════════ */}
       <FadeIn>
-        <BentoGridBlock />
+        <BentoGridBlock onCTA={() => setActiveTab('auth')} />
+      </FadeIn>
+
+      {/* ══════════════════════════════════════════
+          CINEMATIC SCROLL HERO — after bento grid
+      ══════════════════════════════════════════ */}
+      <div className="overflow-x-hidden w-full">
+        <CinematicHero setActiveTab={setActiveTab} />
+      </div>
+
+      {/* ══════════════════════════════════════════
+          TESTIMONIALS
+      ══════════════════════════════════════════ */}
+      <FadeIn>
+        <Testimonials />
       </FadeIn>
 
       {/* ══════════════════════════════════════════
           ABOUT — CTA + globe
       ══════════════════════════════════════════ */}
-      <section id="about" className="relative py-32 px-6 overflow-hidden">
-        <div className="absolute inset-0 pointer-events-none">
-          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(100%,800px)] h-[480px] rounded-full bg-[rgba(100,170,145,0.06)] blur-[120px]" />
-        </div>
+      <section id="about" className="relative py-32 px-6">
 
         <div className="relative max-w-6xl mx-auto grid md:grid-cols-2 gap-16 lg:gap-20 items-center">
           <FadeIn>
@@ -796,7 +838,7 @@ export default function LandingPage({ setActiveTab }) {
                 e.currentTarget.style.boxShadow = '0 0 24px rgba(100,170,145,0.2), inset 0 1px 0 rgba(255,255,255,0.12)';
               }}
             >
-              Start your journey
+              About us
               <ArrowUpRight size={18} strokeWidth={2.2} className="opacity-90" />
             </button>
           </FadeIn>

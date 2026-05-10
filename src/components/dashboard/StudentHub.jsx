@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Stethoscope, ChevronRight, ChevronUp, ChevronDown,
   Clock, BookOpen, Brain, TrendingUp, Send,
@@ -61,16 +61,15 @@ const DAILY_TIPS = [
 
 /* ── Lollipop chart ── */
 const DAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-const MOCK_WEEK  = [20, 55, 80, 60, 72, 45, 30];
 
-function LollipopChart({ todayIdx = new Date().getDay() }) {
-  const max = Math.max(...MOCK_WEEK);
+function LollipopChart({ data = Array(7).fill(0), todayIdx = new Date().getDay() }) {
+  const max = Math.max(...data, 1);
   const H   = 110;
   return (
     <div className="mt-6">
       {/* stems + dots */}
       <div className="flex items-end justify-between px-1" style={{ height: H + 36 }}>
-        {MOCK_WEEK.map((v, i) => {
+        {data.map((v, i) => {
           const stemH  = Math.max(10, (v / max) * H);
           const active = i === todayIdx;
           return (
@@ -465,11 +464,11 @@ export function StudentHub({ setActiveTab }) {
   const [domains, setDomains]             = useState([]);
   const [loading, setLoading]             = useState(true);
   const [expandedIdx, setExpandedIdx]     = useState(0);
+  const [weekData, setWeekData]           = useState(Array(7).fill(0));
 
-  useEffect(() => {
+  const loadStudentData = useCallback(async () => {
     if (!user?.id) return;
-    (async () => {
-      const { data: completed } = await supabase
+    const { data: completed } = await supabase
         .from('sessions')
         .select('id, start_time, score, status, case:cases(title, category, difficulty)')
         .eq('student_id', user.id).eq('status', 'Completed')
@@ -524,6 +523,20 @@ export function StudentHub({ setActiveTab }) {
         score: scored.length ? Math.min(10, parseFloat(avgScore) * [1, 0.95, 0.9, 0.93, 0.85][i]) : 0,
       }));
 
+      // Compute real weekly scores (score*10 per day, take best session of the day)
+      const weekStart = new Date();
+      weekStart.setHours(0, 0, 0, 0);
+      weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+      const wData = Array(7).fill(0);
+      all.forEach((s) => {
+        if (!s.start_time || s.score == null) return;
+        const d = new Date(s.start_time);
+        if (d >= weekStart) {
+          const idx = d.getDay();
+          wData[idx] = Math.max(wData[idx], Math.round(s.score * 10));
+        }
+      });
+
       setStats({
         total: all.length,
         avgScore,
@@ -533,9 +546,26 @@ export function StudentHub({ setActiveTab }) {
       setRecent(recent || []);
       setUpcomingExams(allExams);
       setDomains(domainScores);
+      setWeekData(wData);
       setLoading(false);
-    })();
   }, [user?.id]);
+
+  useEffect(() => { loadStudentData(); }, [loadStudentData]);
+
+  // Real-time: refresh when any of this student's exam sessions change (delete / update / insert)
+  useEffect(() => {
+    if (!user?.id) return;
+    const channel = supabase
+      .channel(`studenthub-sessions-${user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions' }, (payload) => {
+        const row = payload?.new || payload?.old;
+        if (!row) return;
+        if (row.student_id !== user.id) return;
+        loadStudentData();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [user?.id, loadStudentData]);
 
   if (showExam) {
     return (
@@ -736,14 +766,11 @@ export function StudentHub({ setActiveTab }) {
                     </div>
                   </div>
 
-                  <LollipopChart todayIdx={new Date().getDay()} />
+                  <LollipopChart data={weekData} todayIdx={new Date().getDay()} />
 
                   {(() => {
-                    const mockMode      = stats.total === 0 && !loading;
-                    const rawScore      = mockMode ? 8.4 : parseFloat(stats.avgScore) || 0;
-                    const displayScore  = rawScore ? `${Math.round(rawScore * 10)}%` : '—';
-                    const displayStreak = mockMode ? 5  : stats.streak;
-                    const displayTotal  = mockMode ? 12 : stats.total;
+                    const rawScore     = parseFloat(stats.avgScore) || 0;
+                    const displayScore = loading ? '—' : rawScore ? `${Math.round(rawScore * 10)}%` : '—';
                     return (
                       <div className="mt-4 flex items-end gap-4">
                         <div>
@@ -751,15 +778,17 @@ export function StudentHub({ setActiveTab }) {
                             {displayScore}
                           </p>
                           <p className="text-sm mt-2" style={{ color: P.muted }}>
-                            {mockMode
-                              ? '↑ Example data · start a session to see real stats'
-                              : `${weekImproved ? '↑ Improving' : 'Keep going'} · ${displayTotal} session${displayTotal !== 1 ? 's' : ''} total`}
+                            {loading
+                              ? 'Loading...'
+                              : stats.total === 0
+                              ? 'No sessions yet · complete a session to see stats'
+                              : `${weekImproved ? '↑ Improving' : 'Keep going'} · ${stats.total} session${stats.total !== 1 ? 's' : ''} total`}
                           </p>
                         </div>
                         <div className="ml-auto flex flex-col items-end gap-1">
                           <span className="text-xs font-semibold px-2.5 py-1 rounded-full"
                             style={{ background: 'rgba(110,231,183,0.15)', color: '#6ee7b7' }}>
-                            {displayStreak} day streak 🔥
+                            {stats.streak} day streak 🔥
                           </span>
                         </div>
                       </div>
@@ -776,7 +805,7 @@ export function StudentHub({ setActiveTab }) {
                   </div>
                   <p className="text-[11px] mb-4" style={{ color: P.muted }}>Daily practice points</p>
 
-                  <SmallAreaChart data={MOCK_WEEK} color={P.accent} />
+                  <SmallAreaChart data={weekData.some(v => v > 0) ? weekData : [0, 0, 0, 0, 0, 0, 0]} color={P.accent} />
 
                   <div className="flex justify-between mt-2 px-0.5">
                     {DAY_LABELS.map((d, i) => {
@@ -799,13 +828,15 @@ export function StudentHub({ setActiveTab }) {
                     <div className="flex items-center justify-between">
                       <span className="text-[11px]" style={{ color: P.muted }}>Weekly avg</span>
                       <span className="text-sm font-bold" style={{ color: P.accent }}>
-                        {Math.round(MOCK_WEEK.reduce((a, b) => a + b, 0) / MOCK_WEEK.length)} pts
+                        {weekData.some(v => v > 0)
+                          ? `${Math.round(weekData.reduce((a, b) => a + b, 0) / weekData.filter(v => v > 0).length)} pts`
+                          : '— pts'}
                       </span>
                     </div>
                     <div className="flex items-center justify-between mt-1">
                       <span className="text-[11px]" style={{ color: P.muted }}>Best day</span>
                       <span className="text-sm font-bold" style={{ color: P.text }}>
-                        {Math.max(...MOCK_WEEK)} pts
+                        {weekData.some(v => v > 0) ? `${Math.max(...weekData)} pts` : '— pts'}
                       </span>
                     </div>
                   </div>
@@ -880,17 +911,16 @@ export function StudentHub({ setActiveTab }) {
                   </div>
 
                   {(() => {
-                    const mock = stats.total === 0 && !loading;
-                    const t = mock ? 12  : stats.total;
-                    const a = mock ? 8.4 : parseFloat(stats.avgScore) || 0;
-                    const s = mock ? 5   : stats.streak;
+                    const t = stats.total;
+                    const a = parseFloat(stats.avgScore) || 0;
+                    const s = stats.streak;
 
                     const metrics = [
                       {
                         label:    'Sessions Completed',
                         value:    loading ? '—' : t,
                         unit:     `/ 20 goal`,
-                        sub:      mock ? 'Example · start a session' : t === 0 ? 'No sessions yet' : `${t} total session${t !== 1 ? 's' : ''}`,
+                        sub:      loading ? '' : t === 0 ? 'No sessions yet' : `${t} total session${t !== 1 ? 's' : ''}`,
                         color:    P.accent,
                         progress: Math.min(1, t / 20),
                       },
@@ -1017,39 +1047,27 @@ export function StudentHub({ setActiveTab }) {
               </button>
             </div>
 
-            {(() => {
-              const MOCK_SESSIONS = [
-                { id: 'm1', status: 'Completed',  score: 8.4,  start_time: new Date(Date.now() - 2*3600000).toISOString(),  case: { title: 'Chest Pain Assessment',   category: 'Cardiology',       difficulty: 'Medium' } },
-                { id: 'm2', status: 'In Progress', score: null, start_time: new Date(Date.now() - 26*3600000).toISOString(), case: { title: 'Respiratory Examination',  category: 'Respiratory',      difficulty: 'Hard'   } },
-                { id: 'm3', status: 'Completed',  score: 7.2,  start_time: new Date(Date.now() - 50*3600000).toISOString(), case: { title: 'Abdominal Pain History',   category: 'Gastroenterology', difficulty: 'Easy'   } },
-              ];
-              const sessions = loading
-                ? null
-                : recentSessions.length > 0 ? recentSessions : MOCK_SESSIONS;
-
-              if (!sessions) return (
-                <div className="space-y-3">
-                  {[1,2,3].map(i => <div key={i} className="h-16 rounded-xl animate-pulse" style={{ background: P.tag }} />)}
-                </div>
-              );
-
-              return (
-                <div>
-                  {recentSessions.length === 0 && (
-                    <p className="text-[10px] mb-2" style={{ color: P.muted }}>— Example data</p>
-                  )}
-                  {sessions.map((s, i) => (
-                    <SessionItem
-                      key={s.id}
-                      session={s}
-                      idx={i}
-                      expanded={expandedIdx === i}
-                      onToggle={() => setExpandedIdx(expandedIdx === i ? -1 : i)}
-                    />
-                  ))}
-                </div>
-              );
-            })()}
+            {loading ? (
+              <div className="space-y-3">
+                {[1, 2, 3].map(i => (
+                  <div key={i} className="h-16 rounded-xl animate-pulse" style={{ background: P.tag }} />
+                ))}
+              </div>
+            ) : recentSessions.length === 0 ? (
+              <p className="text-sm py-6 text-center" style={{ color: P.muted }}>
+                No sessions yet. Start your first practice!
+              </p>
+            ) : (
+              recentSessions.map((s, i) => (
+                <SessionItem
+                  key={s.id}
+                  session={s}
+                  idx={i}
+                  expanded={expandedIdx === i}
+                  onToggle={() => setExpandedIdx(expandedIdx === i ? -1 : i)}
+                />
+              ))
+            )}
           </div>
 
           </div>

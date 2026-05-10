@@ -1,6 +1,7 @@
 import React from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
-import { Facebook, Instagram, Youtube, Linkedin, Frame } from 'lucide-react';
+import { Facebook, Instagram, Youtube, Linkedin } from 'lucide-react';
+import xpatientLogo from '../../assets/Logo/XPatient_LOGO_white.png';
 
 const footerLinks = [
   {
@@ -66,7 +67,7 @@ export function Footer() {
     <footer
       className="relative w-full max-w-6xl mx-auto flex flex-col items-center justify-center rounded-t-3xl border-t px-6 pt-12 pb-32 lg:pt-16 lg:pb-36"
       style={{
-        background: 'radial-gradient(35% 128px at 50% 0%, rgba(255,255,255,0.06), transparent), #000',
+        background: 'radial-gradient(35% 128px at 50% 0%, rgba(255,255,255,0.06), transparent)',
         borderColor: 'rgba(255,255,255,0.08)',
       }}
     >
@@ -77,7 +78,11 @@ export function Footer() {
 
       <div className="grid w-full gap-8 xl:grid-cols-3 xl:gap-8">
         <AnimatedContainer className="space-y-4">
-          <Frame className="size-8 text-white/70" />
+          <img
+            src={xpatientLogo}
+            alt="XPatient"
+            style={{ height: 36, width: 'auto', opacity: 0.75 }}
+          />
           <p className="mt-8 text-sm md:mt-0" style={{ color: 'rgba(255,255,255,0.4)' }}>
             © {new Date().getFullYear()} Xpatient. All rights reserved.
           </p>

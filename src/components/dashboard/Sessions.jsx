@@ -64,8 +64,10 @@ function Sessions() {
         { label: 'Avg. Score', value: '0%', icon: Play, color: 'text-purple-500', bg: 'bg-purple-500/10' },
     ]);
 
-    const fetchSessions = async () => {
-        const { data, error } = await supabase
+    const fetchSessions = useCallback(async () => {
+        if (!user?.id) return;
+
+        let query = supabase
             .from('sessions')
             .select(`
                 *,
@@ -74,30 +76,56 @@ function Sessions() {
                 station:stations(name),
                 examiner:profiles!examiner_id(full_name)
             `)
-            .order('created_at', { ascending: false });
+            .order('start_time', { ascending: false });
+
+        // Instructors only see their own sessions; admins see all
+        if (role === 'instructor') {
+            query = query.eq('examiner_id', user.id);
+        }
+
+        const { data } = await query;
 
         if (data) {
-            // Transform data to match component state structure
             const formatted = data.map(s => ({
-                id: s.id.split('-')[0], // reliable-ish short ID
+                id: s.id.split('-')[0],
                 fullId: s.id,
                 caseTitle: s.case?.title || 'Unknown Case',
                 student: s.student?.full_name || 'Unknown',
                 examiner: s.examiner?.full_name || 'Unknown',
                 date: new Date(s.start_time).toLocaleString(),
-                duration: s.end_time ? 'Completed' : '—',
+                duration: s.end_time
+                    ? `${Math.max(1, Math.round((new Date(s.end_time) - new Date(s.start_time)) / 60000))} min`
+                    : '—',
                 status: s.status,
                 score: s.score,
-                sessionType: s.session_type ?? s.type ?? 'practice', // practice | exam — instructors see all scores
-                station: s.station?.name || 'Unknown'
+                sessionType: s.session_type ?? s.type ?? 'practice',
+                station: s.station?.name || '—',
+                startTime: s.start_time,
             }));
             setSessions(formatted);
+
+            // Compute live stats
+            const todayStr = new Date().toDateString();
+            const active    = formatted.filter(s => s.status === 'In Progress').length;
+            const doneToday = formatted.filter(s => s.status === 'Completed' && new Date(s.startTime).toDateString() === todayStr).length;
+            const upcoming  = formatted.filter(s => s.status === 'Scheduled').length;
+            const scored    = formatted.filter(s => s.score != null);
+            const avgScore  = scored.length
+                ? Math.round(scored.reduce((sum, s) => sum + (s.score <= 10 ? s.score * 10 : s.score), 0) / scored.length)
+                : null;
+
+            setStats([
+                { label: 'Active Sessions',  value: String(active),              icon: Activity,    color: 'text-blue-500',    bg: 'bg-blue-500/10' },
+                { label: 'Completed Today',  value: String(doneToday),           icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+                { label: 'Upcoming',         value: String(upcoming),            icon: Clock,       color: 'text-amber-500',   bg: 'bg-amber-500/10' },
+                { label: 'Avg. Score',       value: avgScore != null ? `${avgScore}%` : '—', icon: Play, color: 'text-purple-500', bg: 'bg-purple-500/10' },
+            ]);
         }
-    };
+    }, [user?.id, role]);
 
     useEffect(() => {
         fetchSessions();
-    }, []);
+    }, [fetchSessions]);
 
     const handleDelete = async (id) => {
         if (window.confirm("Are you sure you want to delete this session?")) {
@@ -211,13 +239,15 @@ function Sessions() {
                     <h1 className="text-2xl font-bold text-foreground">OSCE Sessions</h1>
                     <p className="text-muted-foreground mt-1">Monitor live exams and review historical performance data.</p>
                 </div>
-                <button
-                    onClick={handleStartSession}
-                    className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg font-medium hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20"
-                >
-                    {isInstructor ? <Plus size={18} /> : <Play size={18} />}
-                    {isInstructor ? 'Start New Session' : 'Practice'}
-                </button>
+                {!isInstructor && (
+                    <button
+                        onClick={handleStartSession}
+                        className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg font-medium hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20"
+                    >
+                        <Play size={18} />
+                        Practice
+                    </button>
+                )}
             </div>
 
             {/* Stats Overview */}

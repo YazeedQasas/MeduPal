@@ -15,8 +15,17 @@ export function CreateSessionForm({ onClose, onCreated, advisedStudentIds = null
         student_id: isStudentTraining ? user?.id : '',
         station_id: '',
         status: isStudentTraining ? 'In Progress' : 'Scheduled',
-        start_time: new Date().toISOString().slice(0, 16)
+        start_time: new Date().toISOString().slice(0, 16),
     });
+
+    const startImmediately = formData.status === 'In Progress';
+
+    // When "Start Immediately" is chosen, snap start_time to now
+    useEffect(() => {
+        if (startImmediately) {
+            setFormData(prev => ({ ...prev, start_time: new Date().toISOString().slice(0, 16) }));
+        }
+    }, [startImmediately]);
     const [options, setOptions] = useState({
         cases: [],
         students: [],
@@ -193,10 +202,16 @@ export function CreateSessionForm({ onClose, onCreated, advisedStudentIds = null
                                 </select>
                             </div>
                             <div className="space-y-2">
-                                <label className="text-sm font-medium text-foreground">Start Time</label>
+                                <label className="text-sm font-medium text-foreground">
+                                    Start Time
+                                    {startImmediately && (
+                                        <span className="ml-2 text-xs font-normal text-muted-foreground">(set to now)</span>
+                                    )}
+                                </label>
                                 <input
                                     type="datetime-local"
-                                    className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/50 outline-none"
+                                    disabled={startImmediately}
+                                    className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/50 outline-none disabled:opacity-40 disabled:cursor-not-allowed"
                                     value={formData.start_time}
                                     onChange={e => setFormData({ ...formData, start_time: e.target.value })}
                                 />

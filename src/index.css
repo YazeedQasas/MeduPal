@@ -38,27 +38,20 @@ html {
   margin: 0;
   padding: 0;
   overflow-x: hidden;
-  height: 100%;
-  min-height: 100%;
-  background:
-    radial-gradient(circle at 20% 20%, rgba(0,255,150,0.08), transparent 40%),
-    radial-gradient(circle at 80% 0%, rgba(0,255,150,0.06), transparent 40%),
-    #050505;
+  background: #050505;
 }
 
 body {
   margin: 0;
   padding: 0;
-  height: 100%;
-  min-height: 100%;
+  min-height: 100vh;
   font-family: 'Poppins', system-ui, sans-serif;
-  background-color: hsl(var(--background));
+  background: #050505;
   color: hsl(var(--foreground));
 }
 
 #root {
-  height: 100%;
-  min-height: 100%;
+  min-height: 100vh;
   background: transparent;
 }
 

@@ -43,7 +43,7 @@ export function ContactFormSection() {
   return (
     <section
       id="contact"
-      className="relative overflow-hidden bg-[#000] px-6 py-32 sm:px-8"
+      className="relative overflow-hidden px-6 py-32 sm:px-8"
     >
       {/* Subtle teal glow — matches landing hero/bento */}
       <div className="pointer-events-none absolute -bottom-20 left-1/2 h-[400px] w-[600px] -translate-x-1/2 rounded-full bg-[rgba(100,170,145,0.06)] blur-[80px]" />
@@ -105,13 +105,13 @@ export function ContactFormSection() {
                 </div>
                 <div className="space-y-3">
                   <a
-                    href="mailto:hello@xpatint.com"
+                    href="mailto:xpatientinfo@gmail.com"
                     className="flex items-center gap-3 rounded-xl border border-white/8 bg-white/5 p-3 text-white/70 hover:text-white hover:border-white/12 transition-colors"
                   >
                     <Mail className="h-4 w-4 text-white/50 shrink-0" />
                     <div className="text-sm">
                       <span className="text-white/50 block text-[10px] uppercase tracking-wider">Email</span>
-                      hello@xpatint.com
+                      xpatientinfo@gmail.com
                     </div>
                   </a>
                   <div className="flex items-center gap-3 rounded-xl border border-white/8 bg-white/5 p-3 text-white/70">
