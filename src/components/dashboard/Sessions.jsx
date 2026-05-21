@@ -17,12 +17,21 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { supabase } from '../../lib/supabase';
+import { formatExamStation } from '../../lib/examStationDisplay';
 import { useAuth } from '../../context/AuthContext';
 import { CreateSessionForm } from './CreateSessionForm';
 import SessionTypeSelect from './SessionTypeSelect';
-import AssignedExamStart from './AssignedExamStart';
 import SessionWorkspace from './SessionWorkspace';
 import StudentPracticeFlow from './StudentPracticeFlow';
+import {
+    canJoinExamSession,
+    canInstructorStartExam,
+    autoCompleteExpiredSessions,
+    joinSession,
+    startExamSession,
+    sessionToPracticeLaunch,
+    isExamSession,
+} from '../../lib/joinSession';
 
 function Sessions() {
     const { user, role } = useAuth();
@@ -36,9 +45,11 @@ function Sessions() {
     const [isCreating, setIsCreating] = useState(false);
     const [showTypeSelect, setShowTypeSelect] = useState(false);
     const [selectedMode, setSelectedMode] = useState(null);
-    const [showAssignedExam, setShowAssignedExam] = useState(false);
     const [activeSession, setActiveSession] = useState(null);
+    const [clockTick, setClockTick] = useState(0);
     const [showPractice, setShowPractice] = useState(false);
+    const [examLaunch, setExamLaunch] = useState(null);
+    const [sessionActionBusy, setSessionActionBusy] = useState(null);
 
     const fetchMyAdvisees = useCallback(async () => {
         if (!isInstructorOnly) {
@@ -67,13 +78,15 @@ function Sessions() {
     const fetchSessions = useCallback(async () => {
         if (!user?.id) return;
 
+        await autoCompleteExpiredSessions();
+
         let query = supabase
             .from('sessions')
             .select(`
                 *,
                 student:profiles!student_id(full_name),
                 case:cases(title),
-                station:stations(name),
+                station:stations(name, room_number, location),
                 examiner:profiles!examiner_id(full_name)
             `)
             .order('start_time', { ascending: false });
@@ -90,6 +103,7 @@ function Sessions() {
                 id: s.id.split('-')[0],
                 fullId: s.id,
                 caseTitle: s.case?.title || 'Unknown Case',
+                caseId: s.case_id,
                 student: s.student?.full_name || 'Unknown',
                 examiner: s.examiner?.full_name || 'Unknown',
                 date: new Date(s.start_time).toLocaleString(),
@@ -100,7 +114,9 @@ function Sessions() {
                 score: s.score,
                 sessionType: s.session_type ?? s.type ?? 'practice',
                 station: s.station?.name || '—',
+                roomName: formatExamStation(s.station, s.room_name),
                 startTime: s.start_time,
+                endTime: s.end_time,
             }));
             setSessions(formatted);
 
@@ -127,6 +143,14 @@ function Sessions() {
         fetchSessions();
     }, [fetchSessions]);
 
+    useEffect(() => {
+        const id = setInterval(() => {
+            setClockTick((t) => t + 1);
+            fetchSessions();
+        }, 30000);
+        return () => clearInterval(id);
+    }, [fetchSessions]);
+
     const handleDelete = async (id) => {
         if (window.confirm("Are you sure you want to delete this session?")) {
             const { error } = await supabase.from('sessions').delete().eq('id', id);
@@ -139,9 +163,36 @@ function Sessions() {
         }
     };
 
-    const handleJoin = (session) => {
-        alert(`Joining session: ${session.caseTitle} with ${session.student}`);
-        // TODO: Navigate to session runner
+    const handleStartExam = async (session) => {
+        if (!isInstructor) return;
+        setSessionActionBusy(session.fullId);
+        const result = await startExamSession(session.fullId);
+        setSessionActionBusy(null);
+        if (!result.ok) {
+            alert(result.error);
+            return;
+        }
+        fetchSessions();
+    };
+
+    const handleJoin = async (session) => {
+        if (!isInstructor) return;
+        const row = { session_type: session.sessionType, status: session.status };
+        if (!isExamSession(row)) return;
+        if (!canJoinExamSession(row)) {
+            alert('JOIN is only available when the exam is In Progress. Use Start first if it is still Scheduled.');
+            return;
+        }
+        setSessionActionBusy(session.fullId);
+        const result = await joinSession(session.fullId);
+        setSessionActionBusy(null);
+        if (!result.ok) {
+            alert(result.error);
+            return;
+        }
+        setExamLaunch(sessionToPracticeLaunch(result.session, session.caseTitle, {
+            studentName: session.student,
+        }));
     };
 
     const handleStartSession = () => {
@@ -164,19 +215,7 @@ function Sessions() {
                 caseName: 'Training Case (placeholder)',
                 stationName: 'Training Station (placeholder)'
             });
-        } else if (mode === 'exam') {
-            setShowAssignedExam(true);
         }
-    };
-
-    const handleExamStart = (examInfo) => {
-        setShowAssignedExam(false);
-        setActiveSession({
-            id: 'local-exam-1',
-            type: 'exam',
-            caseName: examInfo.caseName,
-            stationName: examInfo.stationName
-        });
     };
 
     const handleExitSession = () => {
@@ -186,16 +225,28 @@ function Sessions() {
     const filteredSessions = sessions.filter(session => {
         const matchesSearch = session.student.toLowerCase().includes(searchTerm.toLowerCase()) ||
             session.caseTitle.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (session.roomName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
             session.id.toLowerCase().includes(searchTerm.toLowerCase());
         const matchesStatus = statusFilter === 'All' || session.status === statusFilter;
         return matchesSearch && matchesStatus;
     });
-
     if (activeSession) {
         return (
             <SessionWorkspace
                 session={activeSession}
                 onExit={handleExitSession}
+            />
+        );
+    }
+
+    if (examLaunch) {
+        return (
+            <StudentPracticeFlow
+                assignedSession={examLaunch}
+                onExit={() => {
+                    setExamLaunch(null);
+                    fetchSessions();
+                }}
             />
         );
     }
@@ -223,13 +274,6 @@ function Sessions() {
                     onCreated={() => { fetchSessions(); fetchMyAdvisees(); }}
                     advisedStudentIds={isInstructorOnly ? advisedStudentIds : null}
                     sessionMode={selectedMode}
-                />
-            )}
-
-            {showAssignedExam && (
-                <AssignedExamStart
-                    onBack={() => setShowAssignedExam(false)}
-                    onStart={handleExamStart}
                 />
             )}
 
@@ -271,7 +315,7 @@ function Sessions() {
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
                     <input
                         type="text"
-                        placeholder="Search by student, case or ID..."
+                        placeholder="Search by student, case, room or ID..."
                         className="w-full bg-card border border-white/5 rounded-lg pl-10 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
@@ -303,6 +347,7 @@ function Sessions() {
                             <tr>
                                 <th className="px-6 py-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Session & Student</th>
                                 <th className="px-6 py-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Case Scenerio</th>
+                                <th className="px-6 py-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Location</th>
                                 <th className="px-6 py-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status</th>
                                 <th className="px-6 py-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Date & Time</th>
                                 <th className="px-6 py-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right">Performace</th>
@@ -310,7 +355,20 @@ function Sessions() {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-white/5">
-                            {filteredSessions.map((session) => (
+                            {filteredSessions.map((session) => {
+                                const examRow = {
+                                    session_type: session.sessionType,
+                                    status: session.status,
+                                    start_time: session.startTime,
+                                    end_time: session.endTime,
+                                };
+                                const canStart = isInstructor
+                                    && session.sessionType === 'exam'
+                                    && session.status === 'Scheduled'
+                                    && canInstructorStartExam(examRow);
+                                void clockTick;
+
+                                return (
                                 <tr key={session.id} className="group hover:bg-muted/20 transition-colors">
                                     <td className="px-6 py-4">
                                         <div className="flex items-center gap-3">
@@ -325,8 +383,13 @@ function Sessions() {
                                     </td>
                                     <td className="px-6 py-4">
                                         <div className="text-sm text-foreground">{session.caseTitle}</div>
-                                        <div className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-                                            <Calendar size={12} /> {session.station}
+                                        {session.sessionType === 'exam' && (
+                                            <p className="text-[10px] text-muted-foreground mt-0.5 uppercase tracking-wide">Exam</p>
+                                        )}
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <div className="text-sm text-foreground">
+                                            {session.roomName || (session.sessionType === 'exam' ? '—' : session.station)}
                                         </div>
                                     </td>
                                     <td className="px-6 py-4">
@@ -378,12 +441,26 @@ function Sessions() {
                                     </td>
                                     <td className="px-6 py-4 text-right">
                                         <div className="flex items-center justify-end gap-2">
-                                            <button
-                                                onClick={() => handleJoin(session)}
-                                                className="text-primary hover:text-primary/80 text-xs font-bold px-3 py-1 border border-primary/20 rounded hover:bg-primary/10 transition-colors"
-                                            >
-                                                JOIN
-                                            </button>
+                                            {canStart && (
+                                                <button
+                                                    type="button"
+                                                    disabled={sessionActionBusy === session.fullId}
+                                                    onClick={() => handleStartExam(session)}
+                                                    className="text-amber-400 hover:text-amber-300 text-xs font-bold px-3 py-1 border border-amber-500/30 rounded hover:bg-amber-500/10 transition-colors disabled:opacity-50"
+                                                >
+                                                    {sessionActionBusy === session.fullId ? '…' : 'START'}
+                                                </button>
+                                            )}
+                                            {isInstructor && session.sessionType === 'exam' && session.status === 'In Progress' && (
+                                                <button
+                                                    type="button"
+                                                    disabled={sessionActionBusy === session.fullId}
+                                                    onClick={() => handleJoin(session)}
+                                                    className="text-primary hover:text-primary/80 text-xs font-bold px-3 py-1 border border-primary/20 rounded hover:bg-primary/10 transition-colors disabled:opacity-50"
+                                                >
+                                                    {sessionActionBusy === session.fullId ? '…' : 'JOIN'}
+                                                </button>
+                                            )}
                                             <button
                                                 onClick={() => handleDelete(session.fullId)}
                                                 className="p-2 hover:bg-destructive/10 rounded-full text-muted-foreground hover:text-destructive transition-colors"
@@ -394,7 +471,8 @@ function Sessions() {
                                         </div>
                                     </td>
                                 </tr>
-                            ))}
+                            );
+                            })}
                         </tbody>
                     </table>
                 </div>

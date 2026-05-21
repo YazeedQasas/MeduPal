@@ -3,10 +3,14 @@ import {
   Stethoscope, ChevronRight, ChevronUp, ChevronDown,
   Clock, BookOpen, Brain, TrendingUp, Send,
   MoreHorizontal, Activity, ClipboardCheck, Calendar,
+  AlertTriangle, MapPin, User,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
-import AssignedExamStart from './AssignedExamStart';
+import { formatExamStation } from '../../lib/examStationDisplay';
+import { fetchStudentExamSessions, getSessionKind, splitStudentExamSessions } from '../../lib/studentExamSessions';
+
+const isPracticeSession = (row) => getSessionKind(row) === 'practice';
 
 /* ── palette ── */
 const P = {
@@ -46,6 +50,121 @@ function fmt(iso) {
   if (d.toDateString() === today.toDateString())
     return `Today · ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   return d.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function fmtExamDuration(start, end) {
+  if (!start || !end) return null;
+  const mins = Math.round((new Date(end) - new Date(start)) / 60000);
+  return mins > 0 ? `${mins} min` : null;
+}
+
+function ExamDashboardAlert({ exams, onViewExam }) {
+  if (!exams?.length) return null;
+  const inProgress = exams.some((e) => e.status === 'In Progress');
+  const firstStart = exams[0]?.start_time;
+
+  return (
+    <div
+      className="rounded-xl border border-amber-500/35 bg-amber-500/10 px-4 py-3.5 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3"
+      role="alert"
+    >
+      <div className="flex gap-3 min-w-0">
+        <div className="w-10 h-10 rounded-lg bg-amber-500/20 flex items-center justify-center shrink-0">
+          <AlertTriangle size={20} className="text-amber-400" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-amber-200">
+            {inProgress ? 'OSCE exam in progress' : 'Upcoming OSCE exam'}
+          </p>
+          <p className="text-sm text-amber-100/90 mt-0.5">
+            {inProgress
+              ? 'Your examiner has started the exam. Go to your assigned station when called.'
+              : `You have an exam scheduled for ${fmt(firstStart)}.`}
+          </p>
+          <p className="text-[11px] text-amber-200/60 mt-1">
+            {exams.length} station{exams.length !== 1 ? 's' : ''}
+            {exams[0]?.instructor?.full_name ? ` · Examiner: ${exams[0].instructor.full_name}` : ''}
+          </p>
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onViewExam}
+        className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-amber-500 text-amber-950 hover:bg-amber-400 transition-colors shrink-0"
+      >
+        View Exam
+        <ChevronRight size={16} />
+      </button>
+    </div>
+  );
+}
+
+function UpcomingExamPanel({ exams, onViewExam }) {
+  if (!exams?.length) return null;
+
+  return (
+    <Card className="p-5">
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <div className="flex items-center gap-2">
+          <ClipboardCheck size={18} className="text-amber-400" />
+          <h2 className="font-bold text-base" style={{ color: P.text }}>Upcoming Exam</h2>
+        </div>
+        <button
+          type="button"
+          onClick={onViewExam}
+          className="text-xs font-semibold px-3 py-1.5 rounded-lg"
+          style={{ background: P.accentBg, color: P.accent }}
+        >
+          View all
+        </button>
+      </div>
+
+      <ul className="space-y-3">
+        {exams.map((exam, idx) => {
+          const duration = fmtExamDuration(exam.start_time, exam.end_time);
+          const statusStyle = exam.status === 'In Progress'
+            ? { background: 'rgba(96,165,250,0.15)', color: '#60a5fa' }
+            : { background: 'rgba(251,191,36,0.15)', color: '#fbbf24' };
+
+          return (
+            <li
+              key={exam.id}
+              className="rounded-xl px-3 py-3 border"
+              style={{ borderColor: P.border, background: 'rgba(255,255,255,0.02)' }}
+            >
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <p className="text-xs font-semibold" style={{ color: P.text }}>
+                  Station {idx + 1}
+                </p>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={statusStyle}>
+                  {exam.status}
+                </span>
+              </div>
+              <div className="space-y-1.5 text-xs" style={{ color: P.muted }}>
+                <p className="flex items-center gap-1.5">
+                  <Calendar size={12} className="shrink-0" />
+                  <span style={{ color: P.text }}>{fmt(exam.start_time)}</span>
+                  {duration ? <span>· {duration}</span> : null}
+                </p>
+                {exam.instructor?.full_name && (
+                  <p className="flex items-center gap-1.5">
+                    <User size={12} className="shrink-0" />
+                    Examiner: <span style={{ color: P.text }}>{exam.instructor.full_name}</span>
+                  </p>
+                )}
+                {exam.stationLabel && exam.stationLabel !== '—' && (
+                  <p className="flex items-center gap-1.5">
+                    <MapPin size={12} className="shrink-0" />
+                    <span style={{ color: P.text }}>{exam.stationLabel}</span>
+                  </p>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </Card>
+  );
 }
 
 /* ── Daily tips (cycled by day of week) ── */
@@ -457,7 +576,6 @@ export function StudentHub({ setActiveTab }) {
   const { user, profile, role, has_hardware, can_exam, full_name } = useAuth();
   const displayName = full_name || profile?.full_name || user?.email?.split('@')[0] || 'Student';
 
-  const [showExam, setShowExam]           = useState(false);
   const [stats, setStats]                 = useState({ total: 0, avgScore: null, streak: 0, upcoming: 0 });
   const [recentSessions, setRecent]       = useState([]);
   const [upcomingExams, setUpcomingExams] = useState([]);
@@ -470,47 +588,32 @@ export function StudentHub({ setActiveTab }) {
     if (!user?.id) return;
     const { data: completed } = await supabase
         .from('sessions')
-        .select('id, start_time, score, status, case:cases(title, category, difficulty)')
+        .select('id, start_time, score, status, session_type, case:cases(title, category, difficulty)')
         .eq('student_id', user.id).eq('status', 'Completed')
         .order('start_time', { ascending: false });
-      const all = completed || [];
+      const practiceCompleted = (completed || []).filter(isPracticeSession);
 
       const { data: recent } = await supabase
         .from('sessions')
-        .select('id, start_time, status, score, case:cases(title, category, difficulty)')
+        .select('id, start_time, status, score, session_type, case:cases(title, category, difficulty)')
         .eq('student_id', user.id)
-        .order('start_time', { ascending: false }).limit(5);
+        .order('start_time', { ascending: false }).limit(20);
+      const practiceRecent = (recent || []).filter(isPracticeSession).slice(0, 5);
 
-      // Fetch exam sessions (instructor-assigned via Assign Exam page, stored in sessions with type='exam')
-      let examsFromSessions = [];
-      const { data: examSessions, error: examErr } = await supabase
-        .from('sessions')
-        .select(`id, start_time, status, session_type, case:cases(title), examiner:profiles!examiner_id(full_name)`)
-        .eq('student_id', user.id)
-        .eq('session_type', 'exam')
-        .eq('status', 'Scheduled')
-        .order('start_time', { ascending: true });
+      const allExamRows = await fetchStudentExamSessions(user.id);
+      const { upcoming: upcomingExamRows } = splitStudentExamSessions(allExamRows);
+      const allExams = upcomingExamRows.map((s) => ({
+        ...s,
+        exam_date: s.start_time,
+        instructor: s.examiner,
+      }));
 
-      if (!examErr && examSessions?.length) {
-        examsFromSessions = examSessions.map((s) => ({
-          id: s.id,
-          exam_date: s.start_time,
-          case_name: s.case?.title || 'Exam',
-          status: 'scheduled',
-          instructor: s.examiner,
-        }));
-      }
-
-      const allExams = [...examsFromSessions].sort(
-        (a, b) => new Date(a.exam_date || 0) - new Date(b.exam_date || 0)
-      );
-
-      const scored = all.filter(s => s.score != null && (s.session_type === 'practice'));
+      const scored = practiceCompleted.filter(s => s.score != null);
       const avgScore = scored.length
         ? (scored.reduce((a, b) => a + b.score, 0) / scored.length).toFixed(1)
         : null;
 
-      const sessionDays = new Set(all.map(s => new Date(s.start_time).toDateString()));
+      const sessionDays = new Set(practiceCompleted.map(s => new Date(s.start_time).toDateString()));
       let streak = 0;
       const cur = new Date();
       while (sessionDays.has(cur.toDateString())) {
@@ -528,7 +631,7 @@ export function StudentHub({ setActiveTab }) {
       weekStart.setHours(0, 0, 0, 0);
       weekStart.setDate(weekStart.getDate() - weekStart.getDay());
       const wData = Array(7).fill(0);
-      all.forEach((s) => {
+      practiceCompleted.forEach((s) => {
         if (!s.start_time || s.score == null) return;
         const d = new Date(s.start_time);
         if (d >= weekStart) {
@@ -538,12 +641,12 @@ export function StudentHub({ setActiveTab }) {
       });
 
       setStats({
-        total: all.length,
+        total: practiceCompleted.length,
         avgScore,
         streak,
         upcoming: allExams.length,
       });
-      setRecent(recent || []);
+      setRecent(practiceRecent);
       setUpcomingExams(allExams);
       setDomains(domainScores);
       setWeekData(wData);
@@ -567,22 +670,16 @@ export function StudentHub({ setActiveTab }) {
     return () => { supabase.removeChannel(channel); };
   }, [user?.id, loadStudentData]);
 
-  if (showExam) {
-    return (
-      <AssignedExamStart
-        onBack={() => setShowExam(false)}
-        onStart={() => { setShowExam(false); setActiveTab?.('student-dashboard'); }}
-      />
-    );
-  }
-
   const isStudent     = role === 'student';
   const showFull      = isStudent && has_hardware;
   const showExamOnly  = isStudent && !has_hardware && can_exam;
   const showNone      = isStudent && !has_hardware && !can_exam;
 
-  const nextExam     = upcomingExams?.[0];
   const hour         = new Date().getHours();
+  const goToExam = () => {
+    setActiveTab?.('student-exam');
+    window.history.pushState(null, '', '/exam');
+  };
   const greeting     = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
   const weekImproved = stats.streak > 0;
 
@@ -592,40 +689,6 @@ export function StudentHub({ setActiveTab }) {
     { icon: TrendingUp, label: 'My Sessions',    sub: 'View history & scores', color: '#34c97a', tab: 'student-history' },
     { icon: Activity,   label: 'My Profile',     sub: 'View your profile',     color: '#f59e0b', tab: 'student-profile' },
   ];
-
-  // ── Upcoming Exam card (reusable) ──
-  const UpcomingExamCard = () => (
-    <div className={cn(CARD_CLASS, 'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4')}>
-      <div className="flex items-center gap-4">
-        <div className="w-12 h-12 rounded-xl bg-amber-500/15 flex items-center justify-center shrink-0">
-          <ClipboardCheck size={24} className="text-amber-400" />
-        </div>
-        <div>
-          <h2 className="text-lg font-bold text-foreground">Upcoming Exam</h2>
-          {nextExam ? (
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {fmt(nextExam.start_time)} · {examinerName}
-            </p>
-          ) : (
-            <p className="text-sm text-muted-foreground mt-0.5">No scheduled exam at this time.</p>
-          )}
-        </div>
-      </div>
-      {nextExam && (
-        <button
-          type="button"
-          onClick={() => {
-            setActiveTab?.('student-exam');
-            window.history.pushState(null, '', '/exam');
-          }}
-          className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shrink-0"
-        >
-          Start Exam
-          <ChevronRight size={18} />
-        </button>
-      )}
-    </div>
-  );
 
   // ── No capabilities card ──
   const NoCapabilitiesCard = () => (
@@ -674,6 +737,10 @@ export function StudentHub({ setActiveTab }) {
           </div>
         </div>
 
+        {can_exam && upcomingExams.length > 0 && (
+          <ExamDashboardAlert exams={upcomingExams} onViewExam={goToExam} />
+        )}
+
         {/* ── No capabilities ── */}
         {showNone && (
           <Card className="p-10 text-center">
@@ -691,54 +758,13 @@ export function StudentHub({ setActiveTab }) {
           </Card>
         )}
 
-        {/* ── Exam only ── */}
-        {showExamOnly && (
-          <Card className="p-5 flex flex-col sm:flex-row sm:items-center gap-4 justify-between">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: '#fef3c7' }}>
-                <ClipboardCheck size={22} style={{ color: '#d97706' }} />
-              </div>
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wider mb-0.5" style={{ color: '#d97706' }}>Upcoming Exam</p>
-                {nextExam
-                  ? <><p className="font-semibold" style={{ color: P.text }}>{nextExam.case_name}</p>
-                      <p className="text-xs" style={{ color: P.muted }}>{fmt(nextExam.exam_date)}</p></>
-                  : <p className="text-sm" style={{ color: P.muted }}>No scheduled exam.</p>}
-              </div>
-            </div>
-            {nextExam && (
-              <button onClick={() => { setActiveTab?.('student-exam'); window.history.pushState(null,'','/exam'); }}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white"
-                style={{ background: '#d97706' }}>
-                View Exam <ChevronRight size={16} />
-              </button>
-            )}
-          </Card>
+        {showExamOnly && upcomingExams.length > 0 && (
+          <UpcomingExamPanel exams={upcomingExams} onViewExam={goToExam} />
         )}
 
         {/* ── Full dashboard ── */}
         {showFull && (
           <>
-            {/* Upcoming exam banner */}
-            {can_exam && nextExam && (
-              <Card className="p-4 flex items-center gap-4 justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ background: '#fef3c7' }}>
-                    <ClipboardCheck size={17} style={{ color: '#d97706' }} />
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold" style={{ color: '#d97706' }}>Upcoming Exam · {fmt(nextExam.exam_date)}</p>
-                    <p className="text-sm font-semibold" style={{ color: P.text }}>{nextExam.case_name}</p>
-                  </div>
-                </div>
-                <button onClick={() => { setActiveTab?.('student-exam'); window.history.pushState(null,'','/exam'); }}
-                  className="flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-xl"
-                  style={{ background: P.accentBg, color: P.accent }}>
-                  View <ChevronRight size={14} />
-                </button>
-              </Card>
-            )}
-
             {/* ── Main grid ── */}
             <div className="space-y-6">
 
@@ -1031,6 +1057,10 @@ export function StudentHub({ setActiveTab }) {
             loading={loading}
             onGoToProfile={() => setActiveTab?.('student-profile')}
           />
+
+          {can_exam && upcomingExams.length > 0 && (
+            <UpcomingExamPanel exams={upcomingExams} onViewExam={goToExam} />
+          )}
 
           {/* AI assistant (no card background) */}
           <div className="px-1">

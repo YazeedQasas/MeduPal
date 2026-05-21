@@ -23,6 +23,14 @@ function spaFallback() {
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), spaFallback()],
+  server: {
+    proxy: {
+      '/case-docs': {
+        target: process.env.VITE_STT_API_URL || 'http://localhost:8000',
+        changeOrigin: true,
+      },
+    },
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

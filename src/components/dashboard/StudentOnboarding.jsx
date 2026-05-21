@@ -14,7 +14,8 @@ export function StudentOnboarding({ setActiveTab }) {
   };
 
   const handleExam = () => {
-    setActiveTab?.('session-welcome-exam');
+    setActiveTab?.('student-exam');
+    window.history.pushState(null, '', '/exam');
   };
 
   return (
@@ -71,10 +72,10 @@ export function StudentOnboarding({ setActiveTab }) {
           </div>
           <h2 className="text-xl font-bold text-foreground mb-2">Assigned OSCE Exam</h2>
           <p className="text-sm text-muted-foreground mb-6 leading-relaxed">
-            Join an instructor-assigned OSCE station.
+            View your scheduled OSCE exam details. Your instructor will start the session at the station.
           </p>
           <span className="inline-flex items-center gap-2 text-sm font-semibold text-amber-400">
-            Start Exam
+            View Exam
             <ChevronRight size={18} className="group-hover:translate-x-0.5 transition-transform" />
           </span>
         </button>

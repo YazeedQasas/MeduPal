@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { TrendingUp, ChevronDown, ChevronUp, LayoutGrid } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { getSessionKind } from '../../lib/studentExamSessions';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -198,13 +199,16 @@ function useProgressData(userId) {
     if (!userId) { setLoading(false); return; }
     supabase
       .from('sessions')
-      .select('id, start_time, score, feedback_notes, case:cases(id, title, category), scores:session_scores(skill_type, score)')
+      .select('id, start_time, score, session_type, feedback_notes, case:cases(id, title, category), scores:session_scores(skill_type, score)')
       .eq('student_id', userId)
       .eq('status', 'Completed')
       .order('start_time', { ascending: false })
       .then(({ data, error: err }) => {
         if (err) setError(err.message);
-        else setSessions(transformSessions(data));
+        else {
+          const practiceOnly = (data || []).filter((s) => getSessionKind(s) === 'practice');
+          setSessions(transformSessions(practiceOnly));
+        }
         setLoading(false);
       });
   }, [userId]);

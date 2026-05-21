@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { formatExamStation } from './examStationDisplay';
 
 const DEFAULT_STATION_DURATION_MIN = 10;
 
@@ -23,6 +24,8 @@ function buildStationWindows(stations, startAt) {
       caseId: station.caseId,
       duration,
       examinerId: station.examinerId || null,
+      location: (station.location || '').trim(),
+      roomNumber: (station.roomNumber || '').trim() || null,
       start,
       end,
     };
@@ -47,16 +50,13 @@ async function fetchExamSessionsInRange(studentIds, rangeStartIso, rangeEndIso) 
   const fallbackStart = new Date(new Date(rangeStartIso).getTime() - minutesToMs(DEFAULT_STATION_DURATION_MIN)).toISOString();
   const { data, error } = await supabase
     .from('sessions')
-    .select('id, student_id, start_time, end_time, status, session_type, type')
+    .select('id, student_id, start_time, end_time, status, session_type')
     .in('student_id', studentIds)
     .neq('status', 'Cancelled')
     .gte('start_time', fallbackStart)
     .lt('start_time', rangeEndIso);
   if (error) throw error;
-  return (data || []).filter((row) => {
-    const kind = row.session_type || row.type;
-    return kind === 'exam';
-  });
+  return (data || []).filter((row) => (row.session_type || row.type) === 'exam');
 }
 
 function normalizeSessionEnd(row) {
@@ -67,6 +67,21 @@ function normalizeSessionEnd(row) {
   const start = parseDate(row.start_time);
   if (!start) return null;
   return new Date(start.getTime() + minutesToMs(DEFAULT_STATION_DURATION_MIN));
+}
+
+async function createStationsForWindows(windows) {
+  const rows = windows.map((w) => ({
+    name: w.location || 'OSCE Station',
+    location: w.location,
+    room_number: w.roomNumber,
+    status: 'Available',
+  }));
+  const { data, error } = await supabase.from('stations').insert(rows).select('id, name, location, room_number');
+  if (error) throw error;
+  if (!data?.length || data.length !== windows.length) {
+    throw new Error('Failed to create station records for this exam.');
+  }
+  return data;
 }
 
 export async function checkExamAssignmentConflicts({ students, dateTime, stations }) {
@@ -119,6 +134,9 @@ export async function assignExam({ students, dateTime, stations, onProgress }) {
   if (stations.some((s) => !s.caseId || Number(s.duration) <= 0)) {
     return { ok: false, error: 'Each station must include a case and duration greater than 0.' };
   }
+  if (stations.some((s) => !(s.location || '').trim())) {
+    return { ok: false, error: 'Each station must include a location.' };
+  }
 
   const startAt = parseDate(dateTime);
   if (!startAt) return { ok: false, error: 'Please choose a valid schedule date/time.' };
@@ -145,12 +163,22 @@ export async function assignExam({ students, dateTime, stations, onProgress }) {
     .map((p) => p.full_name || p.email || p.id);
 
   const windows = buildStationWindows(stations, startAt);
+
+  notify('Saving station rooms...');
+  let stationRows;
+  try {
+    stationRows = await createStationsForWindows(windows);
+  } catch (err) {
+    return { ok: false, error: err?.message || 'Could not save station details to the database.' };
+  }
+
   const rows = [];
   studentIds.forEach((studentId) => {
-    windows.forEach((window) => {
+    windows.forEach((window, index) => {
       rows.push({
         student_id: studentId,
         case_id: window.caseId,
+        station_id: stationRows[index].id,
         examiner_id: window.examinerId || null,
         start_time: window.start.toISOString(),
         end_time: window.end.toISOString(),
@@ -165,19 +193,65 @@ export async function assignExam({ students, dateTime, stations, onProgress }) {
   }
 
   notify('Creating exam sessions...');
-  const { error: insertError } = await supabase.from('sessions').insert(rows);
+  let insertError = null;
+  let inserted = null;
+  ({ data: inserted, error: insertError } = await supabase
+    .from('sessions')
+    .insert(rows)
+    .select('id, session_type'));
+  if (insertError) {
+    const withLegacyType = rows.map(({ session_type: _st, ...rest }) => ({ ...rest, type: 'exam' }));
+    ({ data: inserted, error: insertError } = await supabase
+      .from('sessions')
+      .insert(withLegacyType)
+      .select('id, session_type, type'));
+  }
+  if (insertError) {
+    ({ error: insertError } = await supabase.from('sessions').insert(rows));
+    if (!insertError) {
+      const { data: recent } = await supabase
+        .from('sessions')
+        .select('id, session_type')
+        .in('student_id', studentIds)
+        .eq('status', 'Scheduled')
+        .order('created_at', { ascending: false })
+        .limit(rows.length * studentIds.length);
+      inserted = recent || [];
+    }
+  }
   if (insertError) return { ok: false, error: insertError.message || 'Failed to create exam sessions.' };
 
+  const patchIds = (inserted || [])
+    .filter((row) => row.session_type !== 'exam')
+    .map((r) => r.id);
+  if (patchIds.length > 0) {
+    await supabase.from('sessions').update({ session_type: 'exam' }).in('id', patchIds);
+  }
+
+
   const label = startAt.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+  const roomLabels = [...new Set(stationRows.map((s) => formatExamStation(s)).filter((l) => l && l !== '—'))];
+  const roomHint = roomLabels.length === 1
+    ? ` Station: ${roomLabels[0]}.`
+    : roomLabels.length > 1
+      ? ` Stations: ${roomLabels.join('; ')}.`
+      : '';
   const notificationRows = studentIds.map((studentId) => ({
     type: 'warning',
-    message: `You have a new OSCE exam scheduled for ${label}.`,
-    recipient_id: studentId,
+    message: `You have a new OSCE exam scheduled for ${label}.${roomHint}`,
     source_id: `student:${studentId}`,
     is_acknowledged: false,
   }));
   notify('Sending student notifications...');
-  const { error: alertError } = await supabase.from('alerts').insert(notificationRows);
+  let alertError = null;
+  ({ error: alertError } = await supabase.from('alerts').insert(notificationRows));
+  if (alertError) {
+    const withRecipient = notificationRows.map((row, i) => ({
+      ...row,
+      recipient_id: studentIds[i],
+    }));
+    ({ error: alertError } = await supabase.from('alerts').insert(withRecipient));
+  }
 
   return {
     ok: true,
@@ -188,4 +262,3 @@ export async function assignExam({ students, dateTime, stations, onProgress }) {
     alertError: alertError?.message || '',
   };
 }
-

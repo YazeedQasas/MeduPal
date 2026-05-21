@@ -47,12 +47,16 @@ function createStation(seed = Date.now()) {
   return {
     id: `station-${seed}-${Math.random().toString(16).slice(2, 6)}`,
     caseId: '',
+    location: '',
+    roomNumber: '',
     duration: '10',
   };
 }
 
 function isStationComplete(station) {
-  return Boolean(station.caseId) && Number(station.duration) > 0;
+  return Boolean(station.caseId)
+    && Boolean((station.location || '').trim())
+    && Number(station.duration) > 0;
 }
 
 function GlassCard({ className = '', children, ...props }) {
@@ -249,7 +253,7 @@ function StationCard({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
         <div>
           <label className="block text-[11px] mb-1" style={{ color: P.muted }}>Case</label>
           <select value={station.caseId} onChange={(e) => onUpdate(station.id, { caseId: e.target.value })} className={cn(SELECT_CLASS, errors?.caseId && 'border-red-500/50')}>
@@ -260,6 +264,29 @@ function StationCard({
         </div>
 
         <div>
+          <label className="block text-[11px] mb-1" style={{ color: P.muted }}>Location</label>
+          <input
+            type="text"
+            value={station.location || ''}
+            onChange={(e) => onUpdate(station.id, { location: e.target.value })}
+            placeholder="e.g. Building B, Floor 2"
+            className={cn(INPUT_CLASS, errors?.location && 'border-red-500/50')}
+          />
+          {errors?.location && <p className="text-xs mt-1 text-red-300">{errors.location}</p>}
+        </div>
+
+        <div>
+          <label className="block text-[11px] mb-1" style={{ color: P.muted }}>Room number</label>
+          <input
+            type="text"
+            value={station.roomNumber || ''}
+            onChange={(e) => onUpdate(station.id, { roomNumber: e.target.value })}
+            placeholder="e.g. 3A"
+            className={INPUT_CLASS}
+          />
+        </div>
+
+        <div>
           <label className="block text-[11px] mb-1" style={{ color: P.muted }}>Duration (min)</label>
           <input type="number" min={1} value={station.duration} onChange={(e) => onUpdate(station.id, { duration: e.target.value })} className={cn(INPUT_CLASS, errors?.duration && 'border-red-500/50')} />
           {errors?.duration && <p className="text-xs mt-1 text-red-300">{errors.duration}</p>}
@@ -267,7 +294,7 @@ function StationCard({
 
       </div>
       <p className="text-[11px] mt-2" style={{ color: P.muted }}>
-        Examiner is automatically set to the instructor assigning this exam.
+        Saved to the stations table when you assign. Examiner is set automatically.
       </p>
 
       {errors?.duplicateCase && (
@@ -336,11 +363,12 @@ function validateStations(stations) {
   stations.forEach((s) => {
     byId[s.id] = {
       caseId: s.caseId ? '' : 'Please select a case',
+      location: (s.location || '').trim() ? '' : 'Enter a location',
       duration: Number(s.duration) > 0 ? '' : 'Duration must be greater than 0',
       duplicateCase: s.caseId && counts[s.caseId] > 1 ? 'This case is used in another station' : '',
     };
   });
-  const hasHardErrors = Object.values(byId).some((e) => e.caseId || e.duration);
+  const hasHardErrors = Object.values(byId).some((e) => e.caseId || e.location || e.duration);
   return { stations: hasHardErrors ? 'Please complete all station fields' : '', byId };
 }
 
@@ -466,7 +494,13 @@ export function AssignExamPage({ setActiveTab }) {
       if (parsed?.examDate) setExamDate(parsed.examDate);
       if (parsed?.examTime) setExamTime(parsed.examTime);
       if (Array.isArray(parsed?.selectedStudents)) setSelectedStudents(parsed.selectedStudents);
-      if (Array.isArray(parsed?.stations) && parsed.stations.length > 0) setStations(parsed.stations);
+      if (Array.isArray(parsed?.stations) && parsed.stations.length > 0) {
+        setStations(parsed.stations.map((s) => ({
+          ...s,
+          location: s.location || s.stationName || s.roomName || '',
+          roomNumber: s.roomNumber || '',
+        })));
+      }
       setRestoredDraft(true);
     } catch {
       // ignore invalid draft
@@ -612,7 +646,13 @@ export function AssignExamPage({ setActiveTab }) {
       setShowConfirm(false);
       setSubmitStage('');
       setSubmitError('');
-      setSubmitWarnings(result.warnings || []);
+      const warnings = [...(result.warnings || [])];
+      if (result.alertError) {
+        warnings.push(
+          `Exam sessions were created, but in-app notifications could not be saved (${result.alertError}). Run supabase_migration_alerts_insert_policy.sql in Supabase, then re-assign or notify students manually.`
+        );
+      }
+      setSubmitWarnings(warnings);
       setSuccessPayload({
         students: selectedStudents.length,
         stations: stations.length,

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { X, Loader2, AlertCircle, ClipboardCheck, Clock, FileText, Calendar } from 'lucide-react';
+import { X, Loader2, AlertCircle, ClipboardCheck, Clock, Calendar } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
+import { isActiveOrUpcomingExamSession } from '../../lib/studentExamSessions';
 
 function AssignedExamStart({ onBack, onStart }) {
     const { user } = useAuth();
@@ -14,15 +15,17 @@ function AssignedExamStart({ onBack, onStart }) {
         const fetchAssignedExam = async () => {
             setStatus('loading');
 
-            const { data, error } = await supabase
+            const { data: rows, error } = await supabase
                 .from('sessions')
-                .select('id, start_time, end_time, case:cases(id, title)')
+                .select('id, start_time, end_time, status, session_type')
                 .eq('student_id', user.id)
                 .eq('status', 'Scheduled')
-                .eq('session_type', 'exam')
                 .order('start_time', { ascending: true })
-                .limit(1)
-                .single();
+                .limit(20);
+
+            const data = (rows || []).find(
+                (s) => (s.session_type === 'exam' || s.type === 'exam') && isActiveOrUpcomingExamSession(s)
+            );
 
             if (error || !data) {
                 setStatus('not_found');
@@ -36,7 +39,6 @@ function AssignedExamStart({ onBack, onStart }) {
 
             setExamInfo({
                 id: data.id,
-                caseName: data.case?.title || 'Exam',
                 duration: durationMin,
                 startTime: data.start_time,
             });
@@ -112,15 +114,6 @@ function AssignedExamStart({ onBack, onStart }) {
 
                     {status === 'found' && examInfo && (
                         <div className="space-y-4">
-                            {/* Case */}
-                            <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30 border border-white/5">
-                                <FileText className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
-                                <div>
-                                    <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Case</p>
-                                    <p className="text-sm font-semibold text-foreground">{examInfo.caseName}</p>
-                                </div>
-                            </div>
-
                             {/* Scheduled time */}
                             <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30 border border-white/5">
                                 <Calendar className="w-5 h-5 text-blue-500 mt-0.5 flex-shrink-0" />

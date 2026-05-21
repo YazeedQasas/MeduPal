@@ -26,7 +26,8 @@ import httpx
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, field_validator
 
 logger = logging.getLogger(__name__)
 
@@ -275,6 +276,16 @@ class PatientReplyRequest(BaseModel):
     revealed_symptoms: list[str] = []  # symptoms already disclosed to the student this session
     conversation_summary: str = ""    # rolling summary of prior turns (injected when non-empty)
 
+    @field_validator("patient_age", mode="before")
+    @classmethod
+    def coerce_patient_age(cls, v):
+        if v is None or v == "":
+            return 0
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return 0
+
 
 class TTSRequest(BaseModel):
     text: str
@@ -360,10 +371,16 @@ def health():
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    # Vite often uses 5174+ when 5173 is busy — allow any local dev port
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_case_docs_dir = Path(__file__).resolve().parent / "case_docs"
+if _case_docs_dir.is_dir():
+    app.mount("/case-docs", StaticFiles(directory=str(_case_docs_dir)), name="case_docs")
 
 OLLAMA_BASE = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
@@ -703,12 +720,19 @@ async def patient_reply(body: PatientReplyRequest):
             "these details are what distinguish your condition from similar ones. "
             "Do not be vague. A student asking 'do you have a cough?' deserves a vivid, specific answer, not just 'yes'. "
             "Keep replies to 2–4 sentences in natural, lay language. Stay in character. "
+            "If the student only greets you (e.g. hi, hello, good morning), greet them back briefly "
+            "and say why you came today — do not answer a clinical question they did not ask. "
             "Only reveal red-flag or sensitive information when asked directly. "
             "Where natural and fitting, insert ONE of these exact expressions (and nothing else inside the asterisks): "
             "*coughs*, *sighs*, *laughs*, *gasps*, *clears throat*, *winces*, *groans*, *chuckles* — "
             "only when it genuinely fits. Use at most one per reply. Do not modify or expand them."
         )
         system = body.system_prompt.strip() + osce_rules
+        if body.chief_complaint.strip():
+            system += (
+                "\n\nYour chief complaint (why you came today — use this wording in your own voice): "
+                + body.chief_complaint.strip()
+            )
     else:
         case_key = resolve_case_key(body.case_id, body.case_title)
         persona = PATIENT_PERSONAS.get(case_key)
@@ -716,6 +740,11 @@ async def patient_reply(body: PatientReplyRequest):
         system = _build_system_prompt(
             case_key, persona, title, body.case_category or "", body.symptoms or []
         )
+        if body.chief_complaint.strip() and "Chief complaint" not in system:
+            system += (
+                "\n\nYour chief complaint (why you came today): "
+                + body.chief_complaint.strip()
+            )
 
     # Rolling summary — ground the patient in what they've already said in earlier turns
     if body.conversation_summary.strip():
@@ -887,6 +916,8 @@ class HistoryEvalRequest(BaseModel):
     case_id: str = ""
     case_title: str = ""
     patient_name: str = ""
+    patient_id: str = ""
+    chief_complaint: str = ""
 
 
 @app.post("/evaluate-history-taking")

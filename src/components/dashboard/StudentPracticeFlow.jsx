@@ -228,10 +228,16 @@ const PHYSICAL_RUBRIC_CRITERIA = [
     { key: 'communication', label: 'Communication' }
 ];
 
-function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
-    const { user } = useAuth();
+function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSession = null }) {
+    const { user, role } = useAuth();
 
-    const [currentStep, setCurrentStep] = useState(standaloneHistoryOnly ? 1 : 0);
+    const isAssignedExam = Boolean(
+        assignedSession?.sessionId && assignedSession?.sessionType === 'exam'
+    );
+
+    const skipCaseSelection = standaloneHistoryOnly || isAssignedExam;
+
+    const [currentStep, setCurrentStep] = useState(skipCaseSelection ? 1 : 0);
     const [selectedCase, setSelectedCase] = useState(null);
     const [selectedPatient, setSelectedPatient] = useState(null);
     const [revealedSymptoms, setRevealedSymptoms] = useState([]);
@@ -250,6 +256,9 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
     const [isTyping, setIsTyping] = useState(false);
     const [caseSelected, setCaseSelected] = useState(false);
     const [isRandomCase, setIsRandomCase] = useState(false);
+    const hideCaseIdentity = isAssignedExam || isRandomCase;
+    /** Exam only: null = prompt, 'show' = full history eval + PDF, 'skip' = defer evaluation */
+    const [examHistoryEvalChoice, setExamHistoryEvalChoice] = useState(null);
     const [selectedSystem, setSelectedSystem] = useState(null);
     const [caseSearch, setCaseSearch] = useState('');
     const [patientStatus, setPatientStatus] = useState(INITIAL_VITALS);
@@ -333,6 +342,22 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
     }, [fetchCases]);
 
     useEffect(() => {
+        if (!isAssignedExam || !assignedSession?.sessionId) return;
+        sessionIdRef.current = assignedSession.sessionId;
+        if (casesFromDb.length === 0) return;
+        const match =
+            casesFromDb.find((c) => c.id === assignedSession.caseId) ||
+            (assignedSession.caseTitle
+                ? casesFromDb.find((c) => c.title === assignedSession.caseTitle)
+                : null);
+        if (match) {
+            setSelectedCase(match);
+            setCaseSelected(true);
+            setIsRandomCase(false);
+        }
+    }, [isAssignedExam, assignedSession, casesFromDb]);
+
+    useEffect(() => {
         if (standaloneHistoryOnly && casesFromDb.length > 0 && !selectedCase) {
             setSelectedCase(casesFromDb[0]);
         }
@@ -351,6 +376,21 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         setHistoryEvalError(null);
         setHistoryEvalLoading(false);
         historyEvalDoneRef.current = false;
+    }, [selectedCase]);
+
+    // Assign persona when case is set (practice confirm, assigned exam, etc.)
+    useEffect(() => {
+        if (!selectedCase) return;
+        const patient = selectPatientForCase(selectedCase);
+        setSelectedPatient(patient);
+        setPatientStatus({
+            age: `${patient.age} years`,
+            weight: `${patient.weight_kg} kg`,
+            temperature: `${patient.vitals.temp}°C`,
+            heartRate: `${patient.vitals.hr} bpm`,
+            spO2: patient.vitals.spo2,
+            respiratoryRate: patient.vitals.rr,
+        });
     }, [selectedCase]);
 
     // Pre-warm mic when entering history-taking step so getUserMedia is instant on first click
@@ -382,44 +422,6 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         };
     }, [currentStep]);
 
-    // Trigger AI scoring when entering Step 2 (runs once per case)
-    useEffect(() => {
-        if (currentStep !== 2) return;
-        if (historyEvalDoneRef.current) return;
-        const apiBase = getPatientReplyApiUrl();
-        if (!apiBase) return;
-        historyEvalDoneRef.current = true;
-        setHistoryEvalLoading(true);
-        setHistoryEvalError(null);
-        const studentMsgs = messages.filter(m => m.role === 'student');
-        if (studentMsgs.length === 0) {
-            setHistoryEvalLoading(false);
-            return;
-        }
-        fetch(`${apiBase}/evaluate-history-taking`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                conversation: messages,
-                case_id: selectedCase?.id || '',
-                case_title: selectedCase?.title || '',
-                patient_name: selectedPatient?.name || '',
-            }),
-        })
-            .then(r => r.json())
-            .then(data => {
-                if (data._error) {
-                    setHistoryEvalError(`Scoring failed: ${data._error}`);
-                }
-                setHistoryEvalResult(data);
-                setHistoryEvalLoading(false);
-            })
-            .catch(err => {
-                setHistoryEvalError(`Scoring service unavailable: ${err?.message || err}`);
-                setHistoryEvalLoading(false);
-            });
-    }, [currentStep]); // eslint-disable-line react-hooks/exhaustive-deps
-
     const formatTime = (seconds) => {
         const mins = Math.floor(seconds / 60);
         const secs = seconds % 60;
@@ -430,6 +432,49 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         if (!caseObj?.title) return 'pneumonia';
         return TITLE_TO_MOCK_KEY[caseObj.title] || 'pneumonia';
     }, []);
+
+    const runHistoryEvaluation = useCallback(() => {
+        if (historyEvalDoneRef.current) return;
+        const apiBase = getPatientReplyApiUrl();
+        if (!apiBase) return;
+        historyEvalDoneRef.current = true;
+        setHistoryEvalLoading(true);
+        setHistoryEvalError(null);
+        const studentMsgs = messages.filter((m) => m.role === 'student');
+        if (studentMsgs.length === 0) {
+            setHistoryEvalLoading(false);
+            return;
+        }
+        const caseKey = getCaseMockKey(selectedCase);
+        fetch(`${apiBase}/evaluate-history-taking`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                conversation: messages,
+                case_id: selectedCase?.id || caseKey,
+                case_title: selectedCase?.title || '',
+                patient_name: selectedPatient?.name || '',
+                patient_id: selectedPatient?.id || '',
+                chief_complaint: selectedCase?.chief_complaint || CHIEF_COMPLAINTS[caseKey] || '',
+            }),
+        })
+            .then((r) => r.json())
+            .then((data) => {
+                if (data._error) setHistoryEvalError(`Scoring failed: ${data._error}`);
+                setHistoryEvalResult(data);
+                setHistoryEvalLoading(false);
+            })
+            .catch((err) => {
+                setHistoryEvalError(`Scoring service unavailable: ${err?.message || err}`);
+                setHistoryEvalLoading(false);
+            });
+    }, [messages, selectedCase, selectedPatient, getCaseMockKey]);
+
+    useEffect(() => {
+        if (currentStep !== 2) return;
+        if (isAssignedExam) return;
+        runHistoryEvaluation();
+    }, [currentStep, runHistoryEvaluation, isAssignedExam]);
 
     const handleRandomAll = () => {
         if (casesFromDb.length === 0) return;
@@ -509,10 +554,11 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         audio.play().catch(() => { setIsSpeaking(false); fallbackSpeak(text); });
     }, [getVoiceGender, fallbackSpeak]);
 
-    const handleSendMessage = useCallback(async () => {
-        if (!inputValue.trim() || isTyping) return;
+    const handleSendMessage = useCallback(async (textOverride) => {
+        const raw = typeof textOverride === 'string' ? textOverride : inputValue;
+        const transcript = raw.trim();
+        if (!transcript || isTyping) return;
 
-        const transcript = inputValue.trim();
         setLastTranscript(transcript);
 
         const studentMessage = {
@@ -529,6 +575,8 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         if (apiBase) {
             try {
                 const caseKey = getCaseMockKey(selectedCase);
+                const chiefComplaint =
+                    selectedCase?.chief_complaint || CHIEF_COMPLAINTS[caseKey] || CHIEF_COMPLAINTS.pneumonia;
                 const res = await fetch(`${apiBase}/patient-reply`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -538,12 +586,12 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                         case_title: selectedCase?.title || '',
                         case_category: selectedCase?.category || '',
                         symptoms: CASE_SYMPTOMS[caseKey] || [],
-                        chief_complaint: selectedCase?.chief_complaint || CHIEF_COMPLAINTS[caseKey] || '',
+                        chief_complaint: chiefComplaint,
 
                         // Patient identity — who the AI is playing
                         patient_id: selectedPatient?.id || '',
                         patient_name: selectedPatient?.name || 'Unknown Patient',
-                        patient_age: selectedPatient?.age || '',
+                        patient_age: Number(selectedPatient?.age) || 0,
                         patient_gender: selectedPatient?.gender || '',
                         patient_occupation: selectedPatient?.occupation || '',
                         patient_personality: selectedPatient?.personality || '',
@@ -565,16 +613,52 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                         conversation_summary: conversationSummary,
                     })
                 });
-                const data = await res.json();
+                const data = await res.json().catch(() => ({}));
                 if (res.ok && data?.revealed_symptoms) {
                     setRevealedSymptoms(data.revealed_symptoms);
                 }
-                patientResponse = (res.ok && data?.text) ? data.text : getPatientReply();
-            } catch {
-                patientResponse = getPatientReply();
+                if (res.ok && data?.text) {
+                    patientResponse = data.text;
+                } else {
+                    const detail = typeof data?.detail === 'string'
+                        ? data.detail
+                        : Array.isArray(data?.detail)
+                            ? data.detail.map((d) => d?.msg || d).join(', ')
+                            : res.statusText || 'Unknown error';
+                    setMessages((prev) => [
+                        ...prev,
+                        {
+                            role: 'alert',
+                            content: `AI patient unavailable (${res.status}): ${detail}. Check that the Python server is running on port 8000 and restart it after env changes.`,
+                            ts: Date.now(),
+                        },
+                    ]);
+                    setIsTyping(false);
+                    return;
+                }
+            } catch (err) {
+                setMessages((prev) => [
+                    ...prev,
+                    {
+                        role: 'alert',
+                        content: `Could not reach the AI server (${err?.message || err}). Start it with: cd server && .venv\\Scripts\\Activate.ps1 && python -m uvicorn main:app --reload --port 8000`,
+                        ts: Date.now(),
+                    },
+                ]);
+                setIsTyping(false);
+                return;
             }
         } else {
-            patientResponse = getPatientReply();
+            setMessages((prev) => [
+                ...prev,
+                {
+                    role: 'alert',
+                    content: 'AI server URL not configured. Add VITE_PATIENT_REPLY_URL=http://localhost:8000 to .env.local and restart npm run dev.',
+                    ts: Date.now(),
+                },
+            ]);
+            setIsTyping(false);
+            return;
         }
 
         // Strip *expressions* from displayed text — they're for TTS only
@@ -594,9 +678,10 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                 body: JSON.stringify({
                     conversation_history: updatedMessages,
                     patient_name: selectedPatient?.name || '',
-                    case_title: selectedCase?.title || '',
+                    case_title: isAssignedExam ? '' : (selectedCase?.title || ''),
                     symptoms: CASE_SYMPTOMS[caseKey] || [],
                     prior_summary: conversationSummary,
+                    patient_id: selectedPatient?.id || '',
                 }),
             })
                 .then(r => r.json())
@@ -644,14 +729,18 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
         if (micLevelLabelRef.current) micLevelLabelRef.current.textContent = '';
     }, []);
 
-    const applySttTranscript = useCallback((text) => {
-        const transcript = typeof text === 'string' ? text : '';
+    const applySttTranscript = useCallback((text, { autoSend = true } = {}) => {
+        const transcript = typeof text === 'string' ? text.trim() : '';
         setInputValue(transcript);
         setLastTranscript(transcript);
-        if (!transcript.trim()) {
+        if (!transcript) {
             reportSttIssue('No speech was detected. Please try again and speak clearly.');
+            return;
         }
-    }, [reportSttIssue]);
+        if (autoSend) {
+            handleSendMessage(transcript);
+        }
+    }, [reportSttIssue, handleSendMessage]);
 
     // Focus textarea after transcription completes (isTranscribing → false re-enables it)
     useEffect(() => {
@@ -922,6 +1011,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
 
     // Create session row if not yet created; returns session_id.
     const ensureSessionCreated = useCallback(async () => {
+        if (assignedSession?.sessionId) return assignedSession.sessionId;
         if (sessionIdRef.current) return sessionIdRef.current;
         if (!user?.id) return null;
         const insertPayload = {
@@ -961,7 +1051,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
             }
         }
         return null;
-    }, [user?.id, selectedCase?.id, sessionStartedAt]);
+    }, [user?.id, selectedCase?.id, sessionStartedAt, assignedSession?.sessionId]);
 
     // Insert/upsert skill score into session_scores. Uses upsert to avoid duplicates when re-submitting.
     const insertSessionScore = useCallback(async (sessionId, skillType, score) => {
@@ -1143,16 +1233,54 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
 
     const goBack = () => {
         if (currentStep > 0) {
-            // Going back from evaluation to history — reset so re-entering step 2 re-scores
             if (currentStep === 2) {
                 setHistoryEvalResult(null);
                 setHistoryEvalError(null);
                 setHistoryEvalLoading(false);
                 historyEvalDoneRef.current = false;
+                if (isAssignedExam) setExamHistoryEvalChoice(null);
             }
             setCurrentStep(currentStep - 1);
         }
     };
+
+    if (isAssignedExam && role === 'student') {
+        return (
+            <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-6 text-center bg-background">
+                <p className="text-lg font-semibold text-foreground">Exam run by your instructor</p>
+                <p className="text-sm text-muted-foreground max-w-md">
+                    OSCE exams are started from your instructor&apos;s Sessions page at the scheduled time.
+                    Go to your exam station when they begin the session.
+                </p>
+                <button
+                    type="button"
+                    onClick={onExit}
+                    className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
+                >
+                    Back
+                </button>
+            </div>
+        );
+    }
+
+    if (isAssignedExam && !selectedCase) {
+        return (
+            <div className="fixed inset-0 z-50 bg-background flex flex-col items-center justify-center gap-4 px-6">
+                {casesLoading ? (
+                    <p className="text-sm text-muted-foreground">Loading exam case…</p>
+                ) : (
+                    <>
+                        <p className="text-sm text-muted-foreground text-center max-w-sm">
+                            Could not load the assigned case. Check that the case still exists.
+                        </p>
+                        <button type="button" onClick={onExit} className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-primary text-primary-foreground">
+                            Back
+                        </button>
+                    </>
+                )}
+            </div>
+        );
+    }
 
     return (
         <div className="fixed inset-0 z-50 bg-background flex flex-col">
@@ -1163,8 +1291,10 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                         <Brain size={22} />
                     </div>
                     <div>
-                        <h1 className="text-lg font-bold text-foreground">Practice Session</h1>
-                        {selectedCase && (
+                        <h1 className="text-lg font-bold text-foreground">
+                            {isAssignedExam ? 'OSCE Exam' : 'Practice Session'}
+                        </h1>
+                        {selectedCase && !hideCaseIdentity && (
                             <div className="flex items-center gap-2">
                                 <p className="text-xs text-muted-foreground">
                                     {isRandomCase ? 'Case: Hidden' : `Case: ${selectedCase.title}`}
@@ -1178,6 +1308,17 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                                     {selectedCase.category}
                                 </span>
                             </div>
+                        )}
+                        {isAssignedExam && assignedSession?.studentName && (
+                            <p className="text-sm font-semibold text-foreground mt-0.5">
+                                {assignedSession.studentName}
+                            </p>
+                        )}
+                        {isAssignedExam && (
+                            <p className="text-xs text-muted-foreground">
+                                OSCE exam candidate
+                                {selectedPatient?.name ? ` · Patient: ${selectedPatient.name}` : ''}
+                            </p>
                         )}
                     </div>
                 </div>
@@ -1647,11 +1788,11 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                                     <div className="flex-1 min-w-0">
                                         <span className="text-[10px] font-bold uppercase tracking-widest block mb-0.5" style={{ color: 'rgba(110,231,183,0.6)' }}>Chief Complaint</span>
                                         <p className="text-sm italic leading-snug truncate" style={{ color: 'rgba(255,255,255,0.75)' }}>
-                                            "{selectedCase.chief_complaint || CHIEF_COMPLAINTS[getCaseMockKey(selectedCase)] || CHIEF_COMPLAINTS['pneumonia']}"
+                                            "{selectedCase?.chief_complaint || CHIEF_COMPLAINTS[getCaseMockKey(selectedCase)] || CHIEF_COMPLAINTS.pneumonia}"
                                         </p>
                                     </div>
                                     {/* Case tag */}
-                                    {!isRandomCase && (
+                                    {!hideCaseIdentity && !isRandomCase && (
                                         <div className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
                                             <span className="text-[11px] font-medium" style={{ color: 'rgba(255,255,255,0.45)' }}>{selectedCase.title}</span>
                                         </div>
@@ -2108,13 +2249,80 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                         setTimeout(() => setCopiedToClipboard(false), 2000);
                     };
 
+                    if (isAssignedExam && examHistoryEvalChoice === null) {
+                        return (
+                            <div className="h-full flex flex-col items-center justify-center p-8">
+                                <div className="max-w-md w-full bg-card border border-white/10 rounded-2xl p-8 text-center space-y-5">
+                                    <CheckCircle2 size={40} className="text-primary mx-auto" />
+                                    <div>
+                                        <h2 className="text-lg font-bold text-foreground">History evaluation</h2>
+                                        <p className="text-sm text-muted-foreground mt-2">
+                                            Proceed to the AI history evaluation?
+                                        </p>
+                                    </div>
+                                    <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setExamHistoryEvalChoice('show');
+                                                historyEvalDoneRef.current = false;
+                                                runHistoryEvaluation();
+                                            }}
+                                            className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
+                                        >
+                                            Yes, show evaluation
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setExamHistoryEvalChoice('skip')}
+                                            className="px-5 py-2.5 rounded-xl text-sm font-medium bg-muted/50 text-foreground border border-white/10 hover:bg-muted"
+                                        >
+                                            Not now
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    }
+
+                    if (isAssignedExam && examHistoryEvalChoice === 'skip') {
+                        return (
+                            <div className="h-full flex flex-col">
+                                <div className="flex-1 flex items-center justify-center p-8">
+                                    <p className="text-sm text-muted-foreground text-center max-w-md">
+                                        History evaluation deferred. Continue to the physical examination when ready.
+                                    </p>
+                                </div>
+                                <div className="flex-shrink-0 border-t border-white/5 px-6 py-4 flex justify-between">
+                                    <button
+                                        type="button"
+                                        onClick={goBack}
+                                        className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-muted/50 text-foreground border border-white/5 hover:bg-muted"
+                                    >
+                                        <ChevronLeft size={16} />
+                                        Back to history
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={goNext}
+                                        className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
+                                    >
+                                        Continue to physical exam
+                                        <ChevronRight size={16} />
+                                    </button>
+                                </div>
+                            </div>
+                        );
+                    }
+
                     return (
                         <div className="h-full flex flex-col">
-                            <div className="flex-1 flex overflow-hidden p-4 gap-4">
+                            <div className="flex-1 flex flex-col lg:flex-row overflow-hidden p-4 gap-4">
                                 {/* LEFT: Evaluation Content */}
-                                <div className="flex-[3] overflow-y-auto space-y-4 pr-2">
+                                <div className="flex-1 lg:flex-[3] overflow-y-auto space-y-4 lg:pr-2 min-h-0">
 
-                                    {/* Case title reveal */}
+                                    {/* Case title reveal (instructors see case during exam scoring) */}
+                                    {(!hideCaseIdentity || (isAssignedExam && role !== 'student')) && (
                                     <div className="pt-1 pb-2">
                                         {isRandomCase && (
                                             <p className="text-xs font-medium text-muted-foreground uppercase tracking-widest mb-1">Case Revealed</p>
@@ -2122,6 +2330,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                                         <h1 style={{ fontFamily: "'Playfair Display', serif" }} className="text-3xl font-semibold text-foreground leading-tight">{selectedCase?.title}</h1>
                                         <p className="text-sm text-muted-foreground mt-1">{selectedCase?.category}</p>
                                     </div>
+                                    )}
 
                                     {/* Header with live score badge */}
                                     <div className="bg-card border border-white/5 rounded-xl p-4">
@@ -2144,28 +2353,8 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                                                         onClick={() => {
                                                             setHistoryEvalResult(null);
                                                             setHistoryEvalError(null);
-                                                            setHistoryEvalLoading(true);
                                                             historyEvalDoneRef.current = false;
-                                                            const apiBase = getPatientReplyApiUrl();
-                                                            if (!apiBase) { setHistoryEvalLoading(false); return; }
-                                                            historyEvalDoneRef.current = true;
-                                                            fetch(`${apiBase}/evaluate-history-taking`, {
-                                                                method: 'POST',
-                                                                headers: { 'Content-Type': 'application/json' },
-                                                                body: JSON.stringify({
-                                                                    conversation: messages,
-                                                                    case_id: selectedCase?.id || '',
-                                                                    case_title: selectedCase?.title || '',
-                                                                    patient_name: selectedPatient?.name || '',
-                                                                }),
-                                                            })
-                                                                .then(r => r.json())
-                                                                .then(data => {
-                                                                    if (data._error) setHistoryEvalError(`Scoring failed: ${data._error}`);
-                                                                    setHistoryEvalResult(data);
-                                                                    setHistoryEvalLoading(false);
-                                                                })
-                                                                .catch(err => { setHistoryEvalError(`Scoring service unavailable: ${err?.message || err}`); setHistoryEvalLoading(false); });
+                                                            runHistoryEvaluation();
                                                         }}
                                                         className="text-xs px-2.5 py-1.5 rounded-lg bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted border border-white/5 transition-colors"
                                                     >
@@ -2388,8 +2577,8 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                                     </div>
                                 </div>
 
-                                {/* RIGHT: Session Snapshot */}
-                                <div className="hidden lg:flex flex-[2] flex-col gap-4 min-w-0">
+                                {/* RIGHT: Session snapshot */}
+                                <div className="flex flex-col gap-4 min-w-0 w-full lg:w-auto lg:flex-[2] shrink-0">
                                     <div className="bg-card border border-white/5 rounded-xl p-4">
                                         <h3 className="font-semibold text-foreground text-sm mb-3 flex items-center gap-2">
                                             <FileText size={14} className="text-primary" />
@@ -2399,8 +2588,10 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                                             <div className="flex justify-between items-center">
                                                 <span className="text-xs text-muted-foreground">Case:</span>
                                                 <div className="flex items-center gap-2">
-                                                    <span className="text-sm font-medium text-foreground">{selectedCase?.title}</span>
-                                                    {selectedCase && (
+                                                    <span className="text-sm font-medium text-foreground">
+                                                        {hideCaseIdentity ? 'Assigned case' : selectedCase?.title}
+                                                    </span>
+                                                    {selectedCase && !hideCaseIdentity && (
                                                         <span className={cn(
                                                             "text-[10px] px-1.5 py-0.5 rounded font-medium",
                                                             selectedCase.category === 'Cardiac'
@@ -2883,7 +3074,9 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                                                     </span>
                                                 </div>
                                                 <p className="text-xs text-muted-foreground mb-3">
-                                                    Required for {selectedCase?.title}: {requirements.label}
+                                                    {hideCaseIdentity
+                                                        ? `Required examination areas: ${requirements.label}`
+                                                        : `Required for ${selectedCase?.title}: ${requirements.label}`}
                                                 </p>
                                                 <div className="space-y-2">
                                                     {requirements.zones.map((zoneId) => {
@@ -3096,6 +3289,8 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                                             Session Snapshot
                                         </h3>
                                         <div className="space-y-2">
+                                            {!hideCaseIdentity && (
+                                            <>
                                             <div className="flex items-center justify-between">
                                                 <span className="text-xs text-muted-foreground">Case</span>
                                                 <span className="text-xs font-medium text-foreground">{selectedCase?.title || 'N/A'}</span>
@@ -3106,6 +3301,8 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false }) {
                                                     {selectedCase?.category || 'N/A'}
                                                 </span>
                                             </div>
+                                            </>
+                                            )}
                                             <div className="flex items-center justify-between">
                                                 <span className="text-xs text-muted-foreground">Session Time</span>
                                                 <span className="text-xs font-medium text-foreground flex items-center gap-1">

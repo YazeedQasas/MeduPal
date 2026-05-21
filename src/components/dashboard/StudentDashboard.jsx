@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
+import { getSessionKind } from '../../lib/studentExamSessions';
+
+const isPracticeSession = (row) => getSessionKind(row) === 'practice';
 import {
   BookOpen, Clock, Award, TrendingUp, ChevronRight,
   Play, Calendar, Target, Flame, CheckCircle2, AlertCircle,
@@ -102,7 +105,7 @@ export function StudentDashboard({ setActiveTab }) {
         .eq('status', 'Completed')
         .order('start_time', { ascending: false });
 
-      const allCompleted = completed || [];
+      const practiceCompleted = (completed || []).filter(isPracticeSession);
 
       /* ── recent 5 (any status) ── */
       const { data: recent } = await supabase
@@ -122,13 +125,13 @@ export function StudentDashboard({ setActiveTab }) {
         .limit(4);
 
       /* ── compute avg score (only practice; students cannot see exam scores) ── */
-      const scored = allCompleted.filter(s => s.score != null && (s.session_type === 'practice'));
+      const scored = practiceCompleted.filter(s => s.score != null);
       const avgScore = scored.length
         ? (scored.reduce((a, b) => a + b.score, 0) / scored.length).toFixed(1)
         : null;
 
-      /* ── streak: consecutive days with ≥1 completed session (back from today) ── */
-      const sessionDays = new Set(allCompleted.map(s => new Date(s.start_time).toDateString()));
+      /* ── streak: consecutive days with ≥1 practice session (back from today) ── */
+      const sessionDays = new Set(practiceCompleted.map(s => new Date(s.start_time).toDateString()));
       let streak = 0;
       const cur = new Date();
       while (sessionDays.has(cur.toDateString())) {
@@ -144,12 +147,12 @@ export function StudentDashboard({ setActiveTab }) {
       }));
 
       setStats({
-        total:    allCompleted.length,
+        total:    practiceCompleted.length,
         avgScore,
         streak,
         upcoming: (upcoming || []).length,
       });
-      setRecent(recent || []);
+      setRecent((recent || []).filter(isPracticeSession).slice(0, 5));
       setUpcoming(upcoming || []);
       setDomains(domainScores);
       setLoading(false);

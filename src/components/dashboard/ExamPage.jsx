@@ -2,10 +2,17 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   Calendar, Clock, User, Timer, TrendingUp,
   FileCheck, AlertCircle, BookOpen, Lightbulb,
-  CheckCircle2, ChevronRight, BarChart2,
+  CheckCircle2, ChevronRight, BarChart2, MapPin,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase'; // used in fetchExams
+import { autoCompleteExpiredSessions } from '../../lib/joinSession';
+import { formatExamStation } from '../../lib/examStationDisplay';
+import {
+  fetchStudentExamSessions,
+  splitStudentExamSessions,
+  getStudentExamLoadIssue,
+} from '../../lib/studentExamSessions';
 import { cn } from '../../lib/utils';
 
 // ─── Static educational content ───────────────────────────────────────────────
@@ -158,7 +165,7 @@ function Countdown({ startTime }) {
 
 // ─── Overview tab ─────────────────────────────────────────────────────────────
 
-function OverviewTab({ upcomingExams }) {
+function OverviewTab({ upcomingExams, loadIssue }) {
   const next = upcomingExams[0] ?? null;
 
   if (!next) {
@@ -168,14 +175,27 @@ function OverviewTab({ upcomingExams }) {
           <Calendar size={22} className="text-muted-foreground" />
         </div>
         <p className="text-base font-semibold text-foreground">No upcoming exam</p>
-        <p className="text-sm text-muted-foreground mt-1 max-w-xs">
-          Your instructor will assign an exam when you&apos;re ready.
-        </p>
+        {loadIssue === 'sessions_not_visible' ? (
+          <p className="text-sm text-amber-400/90 mt-2 max-w-md">
+            You have an exam notification, but session details are not loading. Your instructor needs to run{' '}
+            <code className="text-xs bg-white/10 px-1 py-0.5 rounded">supabase_migration_sessions_student_select.sql</code>{' '}
+            in the Supabase SQL editor, then refresh this page.
+          </p>
+        ) : (
+          <p className="text-sm text-muted-foreground mt-1 max-w-xs">
+            Your instructor will assign an exam when you&apos;re ready.
+          </p>
+        )}
       </div>
     );
   }
 
   const isToday = new Date(next.start_time).toDateString() === new Date().toDateString();
+  const inProgress = upcomingExams.some((s) => s.status === 'In Progress');
+  const activeRoom = upcomingExams
+    .filter((s) => s.status === 'In Progress')
+    .map((s) => s.stationLabel)
+    .find((label) => label && label !== '—');
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
@@ -183,8 +203,18 @@ function OverviewTab({ upcomingExams }) {
       {/* Left: stations list + countdown */}
       <div className="lg:col-span-3 space-y-4">
 
+        {inProgress && (
+          <div className="rounded-2xl border border-blue-500/25 bg-blue-500/5 p-4 flex items-center gap-3">
+            <AlertCircle size={16} className="text-blue-400 shrink-0" />
+            <p className="text-sm text-blue-300/90">
+              Your examiner has started the exam. Please go to your assigned room
+              {activeRoom ? ` (${activeRoom})` : ''} — they will run the session from their console.
+            </p>
+          </div>
+        )}
+
         {/* Countdown / today banner */}
-        {isToday ? (
+        {!inProgress && (isToday ? (
           <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/5 p-4 flex items-center gap-3">
             <AlertCircle size={16} className="text-emerald-400 shrink-0" />
             <p className="text-sm font-semibold text-emerald-400">Your exam is today — make sure you&apos;re on time.</p>
@@ -196,7 +226,7 @@ function OverviewTab({ upcomingExams }) {
             </p>
             <Countdown startTime={next.start_time} />
           </div>
-        )}
+        ))}
 
         {/* Stations */}
         <div className="rounded-2xl border border-white/[0.08] bg-white/[0.04] backdrop-blur-xl shadow-[0_4px_24px_rgba(0,0,0,0.35)] overflow-hidden">
@@ -219,12 +249,18 @@ function OverviewTab({ upcomingExams }) {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-foreground truncate">
-                      {session.case?.title || 'Station'}
+                      Station {idx + 1}
                     </p>
                     <p className="text-xs text-muted-foreground mt-0.5">
                       <span className="font-medium" style={{ color: 'rgba(255,255,255,0.55)' }}>{fmtDateSmart(session.start_time)}</span>
                       {' · '}{fmtTime(session.start_time)}{duration ? ` (${duration})` : ''}
                     </p>
+                    {session.stationLabel && session.stationLabel !== '—' && (
+                      <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                        <MapPin size={11} className="shrink-0 text-primary/80" />
+                        {session.stationLabel}
+                      </p>
+                    )}
                   </div>
                   <span className={cn('text-[11px] font-semibold px-2 py-0.5 rounded-full border shrink-0', statusCls)}>
                     {session.status}
@@ -292,11 +328,13 @@ function HistoryTab({ pastExams }) {
   // Compute per-category averages from real session data
   const domainMap = {};
   scored.forEach((e) => {
-    const cat = e.case?.category || 'General';
+    const label = e.start_time
+      ? new Date(e.start_time).toLocaleDateString([], { month: 'short', year: '2-digit' })
+      : 'Session';
     const pct = e.score <= 10 ? e.score * 10 : e.score;
-    if (!domainMap[cat]) domainMap[cat] = { total: 0, count: 0 };
-    domainMap[cat].total += pct;
-    domainMap[cat].count += 1;
+    if (!domainMap[label]) domainMap[label] = { total: 0, count: 0 };
+    domainMap[label].total += pct;
+    domainMap[label].count += 1;
   });
   const domainRows = Object.entries(domainMap)
     .map(([label, { total, count }]) => ({ label, score: Math.round(total / count) }))
@@ -354,7 +392,9 @@ function HistoryTab({ pastExams }) {
                     {pct != null ? `${pct}%` : '—'}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-foreground truncate">{exam.case?.title || 'Exam'}</p>
+                    <p className="text-sm font-medium text-foreground truncate">
+                      {exam.stationLabel && exam.stationLabel !== '—' ? exam.stationLabel : `OSCE · ${fmtDate(exam.start_time)}`}
+                    </p>
                     <p className="text-xs text-muted-foreground mt-0.5">
                       {fmtDate(exam.start_time)}{exam.examiner?.full_name ? ` · ${exam.examiner.full_name}` : ''}
                     </p>
@@ -372,7 +412,7 @@ function HistoryTab({ pastExams }) {
         {domainRows.length > 0 && (
           <div className="lg:col-span-2 rounded-2xl border border-white/[0.08] bg-white/[0.04] backdrop-blur-xl shadow-[0_4px_24px_rgba(0,0,0,0.35)] p-5">
             <p className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
-              <TrendingUp size={14} className="text-primary" /> By Category
+              <TrendingUp size={14} className="text-primary" /> By Session Date
             </p>
             <div className="space-y-4">
               {domainRows.map(({ label, score }) => (
@@ -464,40 +504,25 @@ function PreparationTab() {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export function ExamPage({ setActiveTab: _setActiveTab }) {
-  const { user, role, can_exam } = useAuth();
+  const { user, role, can_exam, full_name, profile } = useAuth();
+  const displayName = full_name || profile?.full_name || user?.email?.split('@')[0] || 'Student';
   const [activeTab,      setLocalTab]      = useState('overview');
   const [upcomingExams,  setUpcomingExams]  = useState([]);
   const [pastExams,      setPastExams]      = useState([]);
   const [loading,        setLoading]        = useState(true);
+  const [loadIssue,      setLoadIssue]      = useState(null);
 
   const fetchExams = useCallback(async () => {
     if (!user?.id || role !== 'student') { setLoading(false); return; }
 
-    const select = 'id, start_time, end_time, status, session_type, score, case:cases(id, title, category), examiner:profiles!examiner_id(full_name)';
+    await autoCompleteExpiredSessions();
 
-    const [upcomingRes, pastRes] = await Promise.all([
-      supabase
-        .from('sessions')
-        .select(select)
-        .eq('student_id', user.id)
-        .eq('session_type', 'exam')
-        .in('status', ['Scheduled', 'In Progress'])
-        .order('start_time', { ascending: true }),
-      supabase
-        .from('sessions')
-        .select(select)
-        .eq('student_id', user.id)
-        .eq('session_type', 'exam')
-        .in('status', ['Completed', 'Cancelled'])
-        .order('start_time', { ascending: false })
-        .limit(20),
-    ]);
+    const all = await fetchStudentExamSessions(user.id);
+    const { upcoming, past } = splitStudentExamSessions(all);
 
-    if (upcomingRes.error) console.error('[ExamPage] upcoming query error:', upcomingRes.error);
-    if (pastRes.error)     console.error('[ExamPage] past query error:',     pastRes.error);
-
-    setUpcomingExams(upcomingRes.data || []);
-    setPastExams(pastRes.data || []);
+    setUpcomingExams(upcoming);
+    setPastExams(past.slice(0, 20));
+    setLoadIssue(upcoming.length === 0 ? await getStudentExamLoadIssue(user.id) : null);
     setLoading(false);
   }, [user?.id, role]);
 
@@ -550,13 +575,14 @@ export function ExamPage({ setActiveTab: _setActiveTab }) {
   return (
     <div className="w-full">
       <div className="mb-5">
+        <p className="text-xs font-semibold uppercase tracking-widest text-primary mb-1">{displayName}</p>
         <h1 className="text-2xl font-bold text-foreground">My Exam</h1>
         <p className="text-sm text-muted-foreground mt-1">Your scheduled OSCE examination and performance</p>
       </div>
 
       <TabBar active={activeTab} onChange={setLocalTab} pastCount={pastExams.length} />
 
-      {activeTab === 'overview'    && <OverviewTab    upcomingExams={upcomingExams} />}
+      {activeTab === 'overview'    && <OverviewTab    upcomingExams={upcomingExams} loadIssue={loadIssue} />}
       {activeTab === 'history'     && <HistoryTab     pastExams={pastExams} />}
       {activeTab === 'preparation' && <PreparationTab />}
     </div>

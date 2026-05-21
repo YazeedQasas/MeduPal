@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { Bell, AlertTriangle, CheckCircle2, Info, AlertCircle, ChevronRight, Inbox } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
+import { isActiveOrUpcomingExamSession } from '../../lib/studentExamSessions';
 
 const seenKey = (uid) => `seen_notifications_${uid}`;
 
@@ -61,14 +62,19 @@ export function StudentNotificationsPage() {
             supabase.from('alerts').select('id, type, message, created_at').eq('recipient_id', user.id).order('created_at', { ascending: false }).limit(20),
             supabase.from('alerts').select('id, type, message, created_at').eq('user_id', user.id).order('created_at', { ascending: false }).limit(20),
             supabase.from('alerts').select('id, type, message, created_at').eq('source_id', `student:${user.id}`).order('created_at', { ascending: false }).limit(20),
-            supabase.from('sessions').select('id, start_time, created_at, status, session_type').eq('student_id', user.id).in('status', ['Scheduled', 'In Progress', 'scheduled', 'in_progress']).eq('session_type', 'exam').order('created_at', { ascending: false }).limit(10),
+            supabase.from('sessions').select('id, start_time, end_time, created_at, status, session_type').eq('student_id', user.id).in('status', ['Scheduled', 'In Progress', 'scheduled', 'in_progress']).order('created_at', { ascending: false }).limit(20),
         ]);
 
         let merged = [];
         if (!recipientRes.error) merged = merged.concat(recipientRes.data || []);
         if (!userRes.error)      merged = merged.concat(userRes.data || []);
         if (!sourceRes.error)    merged = merged.concat(sourceRes.data || []);
-        if (!sessionsRes.error)  merged = merged.concat((sessionsRes.data || []).map(formatSession));
+        if (!sessionsRes.error) {
+            const examSessions = (sessionsRes.data || []).filter(
+                (s) => (s.session_type === 'exam' || s.type === 'exam') && isActiveOrUpcomingExamSession(s)
+            );
+            merged = merged.concat(examSessions.map(formatSession));
+        }
 
         try {
             const localRaw = localStorage.getItem('local_student_alerts_v1');

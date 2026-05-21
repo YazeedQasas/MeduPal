@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Bell, Search } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
+import { isActiveOrUpcomingExamSession } from '../../lib/studentExamSessions';
 
 const seenKey = (uid) => `seen_notifications_${uid}`;
 
@@ -37,14 +38,15 @@ export function Header({ setActiveTab }) {
         const loadSessionNotifications = async (studentId) => {
             const sessionsRes = await supabase
                 .from('sessions')
-                .select('id, start_time, created_at, status, session_type')
+                .select('id, start_time, end_time, created_at, status, session_type')
                 .eq('student_id', studentId)
                 .in('status', ['Scheduled', 'In Progress', 'scheduled', 'in_progress'])
-                .eq('session_type', 'exam')
                 .order('created_at', { ascending: false })
-                .limit(8);
+                .limit(20);
 
-            const rows = sessionsRes.data || [];
+            const rows = (sessionsRes.data || []).filter(
+                (s) => (s.session_type === 'exam' || s.type === 'exam') && isActiveOrUpcomingExamSession(s)
+            ).slice(0, 8);
             return rows.map((s) => ({
                 id: `session-${s.id}`,
                 type: 'warning',

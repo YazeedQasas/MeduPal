@@ -149,7 +149,14 @@ export async function sendAudioToSttApi(audioBlob) {
   const ext = audioBlob.type.includes('webm') ? '.webm' : '.mp4';
   formData.append('file', audioBlob, `audio${ext}`);
 
-  const res = await fetch(url, { method: 'POST', body: formData, headers: {} });
+  let res;
+  try {
+    res = await fetch(url, { method: 'POST', body: formData, headers: {} });
+  } catch (err) {
+    throw new Error(
+      `Cannot reach STT server at ${base}. Start uvicorn on port 8000 and ensure Vite port is allowed (CORS). ${err?.message || err}`
+    );
+  }
   if (!res.ok) {
     const errText = await res.text();
     throw new Error(`STT failed: ${res.status} ${errText}`);
