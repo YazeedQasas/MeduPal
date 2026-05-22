@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { FileText, Calendar, Award } from 'lucide-react';
+import { FileText, Calendar, Award, ChevronRight } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
 import { cn } from '../../lib/utils';
+import { pickHistoryEval, studentCanSeeHistoryScore } from '../../lib/historyEvaluations';
+import { HistoryEvalDetailModal } from './HistoryEvalDetailModal';
 
 const TABS = [
   { id: 'all', label: 'All Sessions' },
@@ -29,8 +31,8 @@ function fmtDate(iso) {
 }
 
 function getSessionKind(row) {
-  if (row?.session_type === 'exam' || row?.type === 'exam') return 'exam';
-  return row?.session_type || row?.type || 'practice';
+  if (row?.session_type === 'exam') return 'exam';
+  return row?.session_type || 'practice';
 }
 
 function formatSessionScore(score) {
@@ -46,6 +48,7 @@ export function StudentHistory() {
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('all');
+  const [detailSession, setDetailSession] = useState(null);
 
   const loadSessions = useCallback(async () => {
     if (!user?.id) {
@@ -58,7 +61,13 @@ export function StudentHistory() {
 
     const { data, error: qErr } = await supabase
       .from('sessions')
-      .select('id, start_time, end_time, status, score, session_type, case:cases(title)')
+      .select(`
+        id, start_time, end_time, status, score, session_type,
+        case:cases(title),
+        history_eval:history_evaluations(
+          evaluation_type, final_percent, ai_percent, released_to_student, review_status, items_covered, total_items
+        )
+      `)
       .eq('student_id', user.id)
       .eq('status', 'Completed')
       .order('start_time', { ascending: false });
@@ -80,11 +89,24 @@ export function StudentHistory() {
 
   return (
     <div className="w-full space-y-6 pb-8">
+      {detailSession && (
+        <HistoryEvalDetailModal
+          sessionId={detailSession.id}
+          caseTitle={detailSession.title}
+          onClose={() => setDetailSession(null)}
+        />
+      )}
+
       <div>
         <h1 className="text-2xl font-bold text-foreground">Session History</h1>
         <p className="text-muted-foreground text-sm mt-1">
           {TODAY_LABEL} - {SUBTITLE_SUFFIX[activeTab]}
         </p>
+        {activeTab !== 'exam' && (
+          <p className="text-xs text-muted-foreground mt-1">
+            Tap a practice session to view your checklist breakdown.
+          </p>
+        )}
       </div>
 
       <div className="rounded-2xl border border-white/[0.08] bg-[#111111] overflow-hidden">
@@ -117,19 +139,27 @@ export function StudentHistory() {
               {filteredSessions.map((s) => {
                 const isPractice = getSessionKind(s) === 'practice';
                 const isExam = getSessionKind(s) === 'exam';
-                const scoreLabel = formatSessionScore(s.score);
-                const canShowScore = isPractice && scoreLabel != null;
+                const historyEval = pickHistoryEval(s.history_eval);
+                const kind = getSessionKind(s);
+                const canShowHistoryScore = studentCanSeeHistoryScore(kind, historyEval);
+                const histPct = historyEval?.final_percent ?? historyEval?.ai_percent;
+                const scoreLabel = canShowHistoryScore && histPct != null
+                  ? `${histPct}%`
+                  : isPractice
+                    ? formatSessionScore(s.score)
+                    : null;
+                const canShowScore = scoreLabel != null && (isPractice || historyEval?.released_to_student);
+                const examPending = isExam && historyEval && !historyEval.released_to_student;
+                const examReleased = isExam && historyEval?.released_to_student;
+                const isClickable = isPractice || examReleased;
 
-                return (
-                  <div
-                    key={s.id}
-                    className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                  >
-                    <div className="flex items-start gap-4">
+                const card = (
+                  <>
+                    <div className="flex items-start gap-4 flex-1 min-w-0">
                       <div className="w-10 h-10 rounded-lg bg-primary/15 flex items-center justify-center shrink-0">
                         <FileText size={20} className="text-primary" />
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <p className="font-medium text-foreground">
                           {isExam ? 'Exam session' : s.case?.title || 'Practice session'}
                         </p>
@@ -147,14 +177,68 @@ export function StudentHistory() {
                         >
                           {isExam ? 'Exam' : 'Practice'}
                         </span>
+                        {isClickable && (
+                          <p className="text-[10px] text-primary/80 mt-1.5">View score details</p>
+                        )}
                       </div>
                     </div>
-                    {canShowScore && (
-                      <div className="flex items-center gap-2 shrink-0">
-                        <Award size={16} className="text-amber-400" />
-                        <span className="font-semibold text-foreground">{scoreLabel}</span>
+                    {examPending && (
+                      <div className="flex flex-col items-end shrink-0 text-right">
+                        <span className="text-xs font-medium text-amber-400/90">History score</span>
+                        <span className="text-sm text-muted-foreground">Pending examiner review</span>
                       </div>
                     )}
+                    {canShowScore && (
+                      <div className="flex items-center gap-2 shrink-0">
+                        <div className="flex flex-col items-end gap-0.5">
+                          <div className="flex items-center gap-2">
+                            <Award size={16} className="text-amber-400" />
+                            <span className="font-semibold text-foreground">{scoreLabel}</span>
+                          </div>
+                          {isExam && historyEval && (
+                            <span className="text-[10px] text-muted-foreground">History-taking</span>
+                          )}
+                        </div>
+                        {isClickable && (
+                          <ChevronRight size={18} className="text-muted-foreground" />
+                        )}
+                      </div>
+                    )}
+                    {isClickable && !canShowScore && (
+                      <ChevronRight size={18} className="text-muted-foreground shrink-0" />
+                    )}
+                  </>
+                );
+
+                if (isClickable) {
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() =>
+                        setDetailSession({
+                          id: s.id,
+                          title: isExam ? 'Exam session' : s.case?.title || 'Practice session',
+                        })
+                      }
+                      className={cn(
+                        'w-full text-left rounded-xl border border-white/[0.08] bg-white/[0.03] p-4',
+                        'flex flex-col sm:flex-row sm:items-center justify-between gap-4',
+                        'hover:bg-white/[0.06] hover:border-primary/25 transition-colors cursor-pointer',
+                        'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40'
+                      )}
+                    >
+                      {card}
+                    </button>
+                  );
+                }
+
+                return (
+                  <div
+                    key={s.id}
+                    className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                  >
+                    {card}
                   </div>
                 );
               })}

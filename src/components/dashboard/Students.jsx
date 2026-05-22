@@ -219,6 +219,7 @@ export function Students() {
         return (
             <StudentProfile
                 student={selectedStudent}
+                instructorView={isInstructor}
                 onBack={() => setSelectedStudent(null)}
             />
         );

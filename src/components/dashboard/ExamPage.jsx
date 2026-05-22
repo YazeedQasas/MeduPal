@@ -14,6 +14,8 @@ import {
   getStudentExamLoadIssue,
 } from '../../lib/studentExamSessions';
 import { cn } from '../../lib/utils';
+import StudentPracticeFlow from './StudentPracticeFlow';
+import { displayHistoryPercent, fetchHistoryEvaluationsForSessions } from '../../lib/historyEvaluations';
 
 // ─── Static educational content ───────────────────────────────────────────────
 
@@ -165,7 +167,7 @@ function Countdown({ startTime }) {
 
 // ─── Overview tab ─────────────────────────────────────────────────────────────
 
-function OverviewTab({ upcomingExams, loadIssue }) {
+function OverviewTab({ upcomingExams, loadIssue, onStartDigital }) {
   const next = upcomingExams[0] ?? null;
 
   if (!next) {
@@ -204,12 +206,26 @@ function OverviewTab({ upcomingExams, loadIssue }) {
       <div className="lg:col-span-3 space-y-4">
 
         {inProgress && (
-          <div className="rounded-2xl border border-blue-500/25 bg-blue-500/5 p-4 flex items-center gap-3">
-            <AlertCircle size={16} className="text-blue-400 shrink-0" />
-            <p className="text-sm text-blue-300/90">
-              Your examiner has started the exam. Please go to your assigned room
-              {activeRoom ? ` (${activeRoom})` : ''} — they will run the session from their console.
-            </p>
+          <div className="rounded-2xl border border-blue-500/25 bg-blue-500/5 p-4 space-y-3">
+            <div className="flex items-center gap-3">
+              <AlertCircle size={16} className="text-blue-400 shrink-0" />
+              <p className="text-sm text-blue-300/90">
+                Your examiner has started the exam.
+                {activeRoom ? ` Room: ${activeRoom}.` : ''} Complete history-taking in the app below (or with your examiner at the station).
+              </p>
+            </div>
+            {onStartDigital && (
+              <button
+                type="button"
+                onClick={() => {
+                  const active = upcomingExams.find((s) => s.status === 'In Progress') || next;
+                  if (active) onStartDigital(active);
+                }}
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                Start history-taking (digital)
+              </button>
+            )}
           </div>
         )}
 
@@ -320,7 +336,7 @@ function OverviewTab({ upcomingExams, loadIssue }) {
 
 // ─── History tab ──────────────────────────────────────────────────────────────
 
-function HistoryTab({ pastExams }) {
+function HistoryTab({ pastExams, historyEvalBySession }) {
   const scored = pastExams.filter(e => e.score != null);
   const avg    = scored.length ? scored.reduce((s, e) => s + (e.score <= 10 ? e.score * 10 : e.score), 0) / scored.length : null;
   const best   = scored.length ? Math.max(...scored.map(e => e.score <= 10 ? e.score * 10 : e.score)) : null;
@@ -382,7 +398,16 @@ function HistoryTab({ pastExams }) {
           <div className="divide-y divide-white/[0.06]">
             {pastExams.map(exam => {
               const statusCls = STATUS_COLOR[exam.status] || STATUS_COLOR.Completed;
-              const pct = exam.score != null ? (exam.score <= 10 ? exam.score * 10 : exam.score) : null;
+              const histEval = historyEvalBySession?.[exam.id];
+              const releasedPct = histEval?.released_to_student
+                ? displayHistoryPercent(histEval)
+                : null;
+              const pct = releasedPct != null
+                ? releasedPct
+                : exam.score != null
+                  ? (exam.score <= 10 ? exam.score * 10 : exam.score)
+                  : null;
+              const pendingReview = histEval && !histEval.released_to_student;
               return (
                 <div key={exam.id} className="flex items-center gap-4 px-5 py-4">
                   <div className={cn(
@@ -399,9 +424,14 @@ function HistoryTab({ pastExams }) {
                       {fmtDate(exam.start_time)}{exam.examiner?.full_name ? ` · ${exam.examiner.full_name}` : ''}
                     </p>
                   </div>
-                  <span className={cn('text-xs font-semibold px-2 py-0.5 rounded-full border shrink-0', statusCls)}>
-                    {exam.status}
-                  </span>
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <span className={cn('text-xs font-semibold px-2 py-0.5 rounded-full border', statusCls)}>
+                      {exam.status}
+                    </span>
+                    {pendingReview && (
+                      <span className="text-[10px] text-amber-400">Awaiting release</span>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -509,6 +539,8 @@ export function ExamPage({ setActiveTab: _setActiveTab }) {
   const [activeTab,      setLocalTab]      = useState('overview');
   const [upcomingExams,  setUpcomingExams]  = useState([]);
   const [pastExams,      setPastExams]      = useState([]);
+  const [historyEvalBySession, setHistoryEvalBySession] = useState({});
+  const [digitalSession, setDigitalSession] = useState(null);
   const [loading,        setLoading]        = useState(true);
   const [loadIssue,      setLoadIssue]      = useState(null);
 
@@ -521,7 +553,9 @@ export function ExamPage({ setActiveTab: _setActiveTab }) {
     const { upcoming, past } = splitStudentExamSessions(all);
 
     setUpcomingExams(upcoming);
-    setPastExams(past.slice(0, 20));
+    const pastSlice = past.slice(0, 20);
+    setPastExams(pastSlice);
+    setHistoryEvalBySession(await fetchHistoryEvaluationsForSessions(pastSlice.map((p) => p.id)));
     setLoadIssue(upcoming.length === 0 ? await getStudentExamLoadIssue(user.id) : null);
     setLoading(false);
   }, [user?.id, role]);
@@ -572,6 +606,22 @@ export function ExamPage({ setActiveTab: _setActiveTab }) {
     );
   }
 
+  if (digitalSession) {
+    return (
+      <StudentPracticeFlow
+        assignedSession={{
+          sessionId: digitalSession.id,
+          sessionType: 'exam',
+          caseId: digitalSession.case_id || null,
+        }}
+        onExit={() => {
+          setDigitalSession(null);
+          fetchExams();
+        }}
+      />
+    );
+  }
+
   return (
     <div className="w-full">
       <div className="mb-5">
@@ -582,8 +632,16 @@ export function ExamPage({ setActiveTab: _setActiveTab }) {
 
       <TabBar active={activeTab} onChange={setLocalTab} pastCount={pastExams.length} />
 
-      {activeTab === 'overview'    && <OverviewTab    upcomingExams={upcomingExams} loadIssue={loadIssue} />}
-      {activeTab === 'history'     && <HistoryTab     pastExams={pastExams} />}
+      {activeTab === 'overview'    && (
+        <OverviewTab
+          upcomingExams={upcomingExams}
+          loadIssue={loadIssue}
+          onStartDigital={(session) => setDigitalSession(session)}
+        />
+      )}
+      {activeTab === 'history'     && (
+        <HistoryTab pastExams={pastExams} historyEvalBySession={historyEvalBySession} />
+      )}
       {activeTab === 'preparation' && <PreparationTab />}
     </div>
   );

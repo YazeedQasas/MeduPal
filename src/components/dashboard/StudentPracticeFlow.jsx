@@ -42,6 +42,7 @@ import {
     recordAudioForStt,
     sendAudioToSttApi
 } from '../../lib/sttFasterWhisper';
+import { upsertHistoryEvaluation } from '../../lib/historyEvaluations';
 
 const STEPS = [
     { id: 0, label: 'Case Selection', icon: Brain },
@@ -282,6 +283,8 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
     const [historyEvalLoading, setHistoryEvalLoading] = useState(false);
     const [historyEvalResult, setHistoryEvalResult] = useState(null);
     const [historyEvalError, setHistoryEvalError] = useState(null);
+    const [historyEvalSaveError, setHistoryEvalSaveError] = useState(null);
+    const [historyEvalSaved, setHistoryEvalSaved] = useState(false);
     const historyEvalDoneRef = useRef(false);
     
     // Physical Exam step states
@@ -433,6 +436,89 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
         return TITLE_TO_MOCK_KEY[caseObj.title] || 'pneumonia';
     }, []);
 
+    const ensureSessionCreated = useCallback(async () => {
+        if (assignedSession?.sessionId) return assignedSession.sessionId;
+        if (sessionIdRef.current) return sessionIdRef.current;
+        if (!user?.id) return null;
+        const insertPayload = {
+            station_id: null,
+            case_id: selectedCase?.id || null,
+            student_id: user.id,
+            examiner_id: user.id,
+            start_time: sessionStartedAt,
+            end_time: null,
+            status: 'In Progress',
+            session_type: 'practice',
+            score: null,
+            feedback_notes: null
+        };
+        try {
+            const { data: created, error } = await supabase
+                .from('sessions')
+                .insert([insertPayload])
+                .select('id')
+                .single();
+            if (error) throw error;
+            if (created?.id) {
+                sessionIdRef.current = created.id;
+                return created.id;
+            }
+        } catch (err) {
+            const { session_type: _t, ...rest } = insertPayload;
+            const { data: created, error } = await supabase
+                .from('sessions')
+                .insert([{ ...rest, type: 'practice' }])
+                .select('id')
+                .single();
+            if (error) throw error;
+            if (created?.id) {
+                sessionIdRef.current = created.id;
+                return created.id;
+            }
+        }
+        return null;
+    }, [user?.id, selectedCase?.id, sessionStartedAt, assignedSession?.sessionId]);
+
+    const persistHistoryEvaluation = useCallback(
+        async (result) => {
+            if (!result?.sections) {
+                setHistoryEvalSaveError('No checklist data to save.');
+                return false;
+            }
+            if (!user?.id) {
+                setHistoryEvalSaveError('Sign in to save your score.');
+                return false;
+            }
+            const sessionId = await ensureSessionCreated();
+            if (!sessionId) {
+                setHistoryEvalSaveError('Could not link to a session record.');
+                return false;
+            }
+            const { error } = await upsertHistoryEvaluation({
+                sessionId,
+                isExam: isAssignedExam,
+                caseId: selectedCase?.id ?? null,
+                checklistKey: getCaseMockKey(selectedCase),
+                result,
+            });
+            if (error) {
+                const msg = error.message || String(error);
+                setHistoryEvalSaveError(
+                    msg.includes('row-level security')
+                        ? `${msg} — run supabase_migration_history_evaluations_fix.sql in Supabase.`
+                        : msg
+                );
+                setHistoryEvalSaved(false);
+                console.error('[history_evaluations]', error);
+                return false;
+            }
+            setHistoryEvalSaveError(null);
+            setHistoryEvalSaved(true);
+            return true;
+        },
+        [user?.id, isAssignedExam, selectedCase, getCaseMockKey, ensureSessionCreated]
+    );
+
     const runHistoryEvaluation = useCallback(() => {
         if (historyEvalDoneRef.current) return;
         const apiBase = getPatientReplyApiUrl();
@@ -459,22 +545,30 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
             }),
         })
             .then((r) => r.json())
-            .then((data) => {
+            .then(async (data) => {
                 if (data._error) setHistoryEvalError(`Scoring failed: ${data._error}`);
                 setHistoryEvalResult(data);
                 setHistoryEvalLoading(false);
+                if (!data._error && data.sections) await persistHistoryEvaluation(data);
             })
             .catch((err) => {
                 setHistoryEvalError(`Scoring service unavailable: ${err?.message || err}`);
                 setHistoryEvalLoading(false);
             });
-    }, [messages, selectedCase, selectedPatient, getCaseMockKey]);
+    }, [messages, selectedCase, selectedPatient, getCaseMockKey, persistHistoryEvaluation]);
 
     useEffect(() => {
         if (currentStep !== 2) return;
         if (isAssignedExam) return;
         runHistoryEvaluation();
     }, [currentStep, runHistoryEvaluation, isAssignedExam]);
+
+    // Create session early so history scores can be saved
+    useEffect(() => {
+        if (!user?.id || !caseSelected) return;
+        if (currentStep < 1 || currentStep > 4) return;
+        ensureSessionCreated().catch(() => {});
+    }, [user?.id, caseSelected, currentStep, ensureSessionCreated]);
 
     const handleRandomAll = () => {
         if (casesFromDb.length === 0) return;
@@ -1009,50 +1103,6 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
         return Math.min(10, Math.round(score * 10) / 10);
     }, [selectedCase, getCaseMockKey, examLog]);
 
-    // Create session row if not yet created; returns session_id.
-    const ensureSessionCreated = useCallback(async () => {
-        if (assignedSession?.sessionId) return assignedSession.sessionId;
-        if (sessionIdRef.current) return sessionIdRef.current;
-        if (!user?.id) return null;
-        const insertPayload = {
-            station_id: null,
-            case_id: selectedCase?.id || null,
-            student_id: user.id,
-            examiner_id: user.id,
-            start_time: sessionStartedAt,
-            end_time: null,
-            status: 'In Progress',
-            session_type: 'practice',
-            score: null,
-            feedback_notes: null
-        };
-        try {
-            const { data: created, error } = await supabase
-                .from('sessions')
-                .insert([insertPayload])
-                .select('id')
-                .single();
-            if (error) throw error;
-            if (created?.id) {
-                sessionIdRef.current = created.id;
-                return created.id;
-            }
-        } catch (err) {
-            const { session_type: _t, ...rest } = insertPayload;
-            const { data: created, error } = await supabase
-                .from('sessions')
-                .insert([{ ...rest, type: 'practice' }])
-                .select('id')
-                .single();
-            if (error) throw error;
-            if (created?.id) {
-                sessionIdRef.current = created.id;
-                return created.id;
-            }
-        }
-        return null;
-    }, [user?.id, selectedCase?.id, sessionStartedAt, assignedSession?.sessionId]);
-
     // Insert/upsert skill score into session_scores. Uses upsert to avoid duplicates when re-submitting.
     const insertSessionScore = useCallback(async (sessionId, skillType, score) => {
         if (!sessionId || !skillType) return;
@@ -1116,8 +1166,12 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
             if (!sessionId) sessionId = sessionIdRef.current;
             if (!sessionId) throw new Error('Failed to create or retrieve session row.');
 
-            // 2) Insert skill scores into session_scores (same session_id)
-            await insertSessionScore(sessionId, 'history_taking', historyScore);
+            // 2) Persist history checklist + skill scores (same session_id)
+            if (historyEvalResult?.sections) {
+                await persistHistoryEvaluation(historyEvalResult);
+            } else {
+                await insertSessionScore(sessionId, 'history_taking', historyScore);
+            }
             await insertSessionScore(sessionId, 'physical_examination', physicalScore);
 
             // 3) Fetch all scores for this session
@@ -1217,15 +1271,11 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
     };
 
     const goNext = async () => {
-        if (currentStep === 2 && user?.id) {
+        if (currentStep === 2 && user?.id && historyEvalResult?.sections) {
             try {
-                const sid = await ensureSessionCreated();
-                if (sid) {
-                    const historyScore = computeHistoryScore();
-                    await insertSessionScore(sid, 'history_taking', historyScore);
-                }
+                await persistHistoryEvaluation(historyEvalResult);
             } catch (err) {
-                console.error('Failed to save history score:', err);
+                console.error('Failed to save history evaluation:', err);
             }
         }
         if (currentStep < STEPS.length - 1) setCurrentStep(currentStep + 1);
@@ -2200,7 +2250,9 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
                     const evalScore = historyEvalResult
                         ? Math.round((historyEvalResult.items_covered / historyEvalResult.total_items) * 100)
                         : null;
-                    
+                    const isExamStudent = isAssignedExam && role === 'student';
+                    const showEvalPercentToStudent = !isExamStudent;
+
                     const copyEvaluationSummary = async () => {
                         const diagnosisName = casesFromDb.find(c => c.id === selectedDiagnosis)?.title || 'Not selected';
                         const r = historyEvalResult;
@@ -2332,6 +2384,12 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
                                     </div>
                                     )}
 
+                                    {isExamStudent && historyEvalResult && !historyEvalLoading && (
+                                        <div className="rounded-xl border border-primary/25 bg-primary/10 px-4 py-3 text-sm text-foreground/90">
+                                            Your history-taking has been recorded. Your examiner will review the checklist and send your official score when ready.
+                                        </div>
+                                    )}
+
                                     {/* Header with live score badge */}
                                     <div className="bg-card border border-white/5 rounded-xl p-4">
                                         <div className="flex items-center justify-between">
@@ -2347,7 +2405,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
                                                 </div>
                                             </div>
                                             <div className="flex items-center gap-2">
-                                                {!historyEvalLoading && (
+                                                {!historyEvalLoading && !isExamStudent && (
                                                     <button
                                                         type="button"
                                                         onClick={() => {
@@ -2361,7 +2419,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
                                                         Re-score
                                                     </button>
                                                 )}
-                                                {evalScore != null && !historyEvalLoading && (
+                                                {evalScore != null && !historyEvalLoading && showEvalPercentToStudent && (
                                                     <div className={cn(
                                                         "flex flex-col items-center justify-center w-14 h-14 rounded-full border-2 font-bold text-lg",
                                                         evalScore >= 70 ? "border-emerald-500 text-emerald-400" :
@@ -2369,6 +2427,11 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
                                                     )}>
                                                         {evalScore}
                                                         <span className="text-[10px] font-normal text-muted-foreground leading-none">%</span>
+                                                    </div>
+                                                )}
+                                                {evalScore != null && !historyEvalLoading && isExamStudent && (
+                                                    <div className="text-xs text-muted-foreground text-right max-w-[120px]">
+                                                        Score pending examiner review
                                                     </div>
                                                 )}
                                             </div>
@@ -2391,8 +2454,26 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
                                         </div>
                                     )}
 
-                                    {/* Real OSCE checklist sections */}
-                                    {historyEvalResult && !historyEvalLoading && historyEvalResult.sections?.map(section => {
+                                    {historyEvalSaveError && !historyEvalLoading && (
+                                        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 flex items-start gap-3">
+                                            <AlertTriangle size={16} className="text-red-400 mt-0.5 shrink-0" />
+                                            <p className="text-sm text-red-300">Could not save score: {historyEvalSaveError}</p>
+                                        </div>
+                                    )}
+
+                                    {historyEvalSaved && !historyEvalSaveError && !historyEvalLoading && historyEvalResult && (
+                                        <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 flex items-start gap-3">
+                                            <CheckCircle2 size={16} className="text-emerald-400 mt-0.5 shrink-0" />
+                                            <p className="text-sm text-emerald-300">
+                                                {isExamStudent
+                                                    ? 'History-taking score saved. Your examiner will review and send your official result.'
+                                                    : `History-taking score saved (${evalScore ?? '—'}%). View it under My Sessions → History.`}
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    {/* Real OSCE checklist sections (instructors/admins see full detail on exam) */}
+                                    {historyEvalResult && !historyEvalLoading && showEvalPercentToStudent && historyEvalResult.sections?.map(section => {
                                         const sectionCovered = section.items.filter(i => i.covered).length;
                                         const sectionTotal = section.items.length;
                                         return (
@@ -2447,7 +2528,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
                                     })}
 
                                     {/* Structure / order feedback */}
-                                    {historyEvalResult && !historyEvalLoading && (
+                                    {historyEvalResult && !historyEvalLoading && showEvalPercentToStudent && (
                                         <div className={cn(
                                             "rounded-xl border p-4 flex items-start gap-3",
                                             historyEvalResult.structure_followed
@@ -2469,7 +2550,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
                                     )}
 
                                     {/* AI Feedback */}
-                                    {historyEvalResult && !historyEvalLoading && (
+                                    {historyEvalResult && !historyEvalLoading && showEvalPercentToStudent && (
                                         <div className="bg-card border border-white/5 rounded-xl p-4 space-y-3">
                                             <h3 className="font-semibold text-foreground text-sm">Examiner Feedback</h3>
                                             <p className="text-sm text-muted-foreground leading-relaxed">{historyEvalResult.feedback}</p>
@@ -3422,9 +3503,25 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
                             </p>
                             
                             {/* Description */}
-                            <p className="text-sm text-muted-foreground mb-8">
-                                Your practice session has been recorded successfully.
+                            <p className="text-sm text-muted-foreground mb-4">
+                                Your {isAssignedExam ? 'exam' : 'practice'} session has been recorded successfully.
                             </p>
+                            {historyEvalResult?.total_items > 0 && !isAssignedExam && (
+                                <div className="mb-6 inline-flex flex-col items-center gap-1 px-6 py-4 rounded-xl bg-muted/30 border border-white/10">
+                                    <span className="text-xs text-muted-foreground uppercase tracking-wider">History-taking</span>
+                                    <span className="text-3xl font-bold text-primary tabular-nums">
+                                        {Math.round((historyEvalResult.items_covered / historyEvalResult.total_items) * 100)}%
+                                    </span>
+                                    <span className="text-xs text-muted-foreground">
+                                        {historyEvalResult.items_covered}/{historyEvalResult.total_items} checklist items
+                                    </span>
+                                </div>
+                            )}
+                            {isAssignedExam && role === 'student' && (historyEvalSaved || historyEvalResult) && (
+                                <p className="text-sm text-muted-foreground mb-6">
+                                    History score submitted for examiner review.
+                                </p>
+                            )}
                             {saveError && (
                                 <p className="text-sm text-destructive mb-4">
                                     {saveError}

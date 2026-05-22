@@ -1,7 +1,7 @@
 import { supabase } from './supabase';
 import { formatExamStation } from './examStationDisplay';
 
-const CORE_FIELDS = 'id, start_time, end_time, status, score, session_type, examiner_id, station_id';
+const CORE_FIELDS = 'id, start_time, end_time, status, score, session_type, examiner_id, station_id, case_id';
 
 const STUDENT_EXAM_SELECT = `
   ${CORE_FIELDS},
@@ -75,6 +75,7 @@ async function studentHasExamAlert(studentId) {
 export function mapStudentExamSession(row) {
   return {
     id: row.id,
+    case_id: row.case_id,
     start_time: row.start_time,
     end_time: row.end_time,
     status: row.status,

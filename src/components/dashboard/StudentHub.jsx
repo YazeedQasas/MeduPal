@@ -58,6 +58,19 @@ function fmtExamDuration(start, end) {
   return mins > 0 ? `${mins} min` : null;
 }
 
+/** Sessions.score may be 0–10 or legacy 0–100 from practice saves */
+function scoreOutOf10(raw) {
+  if (raw == null || Number.isNaN(Number(raw))) return null;
+  const n = Number(raw);
+  return n <= 10 ? n : n / 10;
+}
+
+function scoreToPercent(raw) {
+  const n = scoreOutOf10(raw);
+  if (n == null) return null;
+  return Math.round(Math.min(10, n) * 10);
+}
+
 function ExamDashboardAlert({ exams, onViewExam }) {
   if (!exams?.length) return null;
   const inProgress = exams.some((e) => e.status === 'In Progress');
@@ -286,7 +299,7 @@ function SessionItem({ session, idx, expanded, onToggle }) {
   const cat     = session.case?.category || '';
   const diff    = session.case?.difficulty || '';
   const status  = session.status || 'Completed';
-  const score   = session.score;
+  const score10 = scoreOutOf10(session.score);
   const ago     = timeAgo(session.start_time);
   const color   = CASE_COLORS[idx % CASE_COLORS.length];
   const initial = title.charAt(0).toUpperCase();
@@ -316,8 +329,8 @@ function SessionItem({ session, idx, expanded, onToggle }) {
               {status}
             </span>
           </div>
-          {score != null && (
-            <p className="text-xs mt-0.5" style={{ color: P.muted }}>{score.toFixed(1)} / 10</p>
+          {score10 != null && (
+            <p className="text-xs mt-0.5" style={{ color: P.muted }}>{score10.toFixed(1)} / 10</p>
           )}
         </div>
         <div className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center"
@@ -431,7 +444,8 @@ function AiAssistantWidget() {
 function StudentProfileCard({ displayName, stats, loading, onGoToProfile }) {
   const initials = displayName.slice(0, 2).toUpperCase();
   const avgScore = stats.avgScore ? parseFloat(stats.avgScore) : null;
-  const scorePct = avgScore ? avgScore / 10 : 0;
+  const avgPct = avgScore != null ? scoreToPercent(avgScore) : null;
+  const scorePct = avgScore != null ? Math.min(1, avgScore / 10) : 0;
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
 
@@ -491,9 +505,10 @@ function StudentProfileCard({ displayName, stats, loading, onGoToProfile }) {
           onClick={() => onGoToProfile?.()}
           className="relative w-24 h-24 mb-3 rounded-full"
           style={{ outline: 'none' }}
-          aria-label="Go to profile"
+          aria-label={avgPct != null ? `Go to profile — practice average ${avgPct}%` : 'Go to profile'}
+          title={avgPct != null ? `Practice average score: ${avgPct}%` : undefined}
         >
-          <svg className="absolute inset-0" width="96" height="96" viewBox="0 0 96 96">
+          <svg className="absolute inset-0" width="96" height="96" viewBox="0 0 96 96" aria-hidden>
             {/* track */}
             <circle cx="48" cy="48" r={R} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth={STROKE} />
             {/* progress */}
@@ -539,7 +554,7 @@ function StudentProfileCard({ displayName, stats, loading, onGoToProfile }) {
           <div className="flex items-center gap-1">
             <ClipboardCheck size={13} style={{ color: P.accent }} />
             <span className="text-sm font-bold" style={{ color: P.text }}>
-              {loading ? '—' : avgScore ? `${Math.round(avgScore * 10)}%` : '—'}
+              {loading ? '—' : avgPct != null ? `${avgPct}%` : '—'}
             </span>
           </div>
           <span className="text-[9px] uppercase tracking-wider" style={{ color: P.muted }}>Avg Score</span>
@@ -610,7 +625,7 @@ export function StudentHub({ setActiveTab }) {
 
       const scored = practiceCompleted.filter(s => s.score != null);
       const avgScore = scored.length
-        ? (scored.reduce((a, b) => a + b.score, 0) / scored.length).toFixed(1)
+        ? (scored.reduce((a, b) => a + scoreOutOf10(b.score), 0) / scored.length).toFixed(1)
         : null;
 
       const sessionDays = new Set(practiceCompleted.map(s => new Date(s.start_time).toDateString()));
@@ -636,7 +651,8 @@ export function StudentHub({ setActiveTab }) {
         const d = new Date(s.start_time);
         if (d >= weekStart) {
           const idx = d.getDay();
-          wData[idx] = Math.max(wData[idx], Math.round(s.score * 10));
+          const pts = scoreToPercent(s.score);
+          if (pts != null) wData[idx] = Math.max(wData[idx], pts);
         }
       });
 
@@ -795,8 +811,8 @@ export function StudentHub({ setActiveTab }) {
                   <LollipopChart data={weekData} todayIdx={new Date().getDay()} />
 
                   {(() => {
-                    const rawScore     = parseFloat(stats.avgScore) || 0;
-                    const displayScore = loading ? '—' : rawScore ? `${Math.round(rawScore * 10)}%` : '—';
+                    const avgPctOverview = stats.avgScore != null ? scoreToPercent(parseFloat(stats.avgScore)) : null;
+                    const displayScore = loading ? '—' : avgPctOverview != null ? `${avgPctOverview}%` : '—';
                     return (
                       <div className="mt-4 flex items-end gap-4">
                         <div>
@@ -954,7 +970,7 @@ export function StudentHub({ setActiveTab }) {
                         label:    'Average Score',
                         value:    loading ? '—' : a ? a.toFixed(1) : '—',
                         unit:     '/ 10.0',
-                        sub:      a ? `${Math.round(a * 10)}% accuracy across sessions` : 'Complete a session to score',
+                        sub:      a ? `${scoreToPercent(a)}% accuracy across practice sessions` : 'Complete a session to score',
                         color:    '#60a5fa',
                         progress: a / 10,
                       },

@@ -376,9 +376,10 @@ function AppContent() {
         }
         return (
           <DashboardShell>
-            <div className="p-6">
+            <div className="p-4 sm:p-6 w-full max-w-[min(100%,1800px)] mx-auto min-h-0">
               <StudentProfile
                 student={instructorViewingStudent}
+                instructorView
                 onBack={() => {
                   setInstructorViewingStudent(null);
                   setActiveTab("dashboard");

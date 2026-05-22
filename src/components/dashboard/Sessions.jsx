@@ -23,6 +23,12 @@ import { CreateSessionForm } from './CreateSessionForm';
 import SessionTypeSelect from './SessionTypeSelect';
 import SessionWorkspace from './SessionWorkspace';
 import StudentPracticeFlow from './StudentPracticeFlow';
+import { HistoryEvalReview } from './HistoryEvalReview';
+import {
+    pickHistoryEval,
+    historyEvalStatusLabel,
+    fetchHistoryEvaluationsForSessions,
+} from '../../lib/historyEvaluations';
 import {
     canJoinExamSession,
     canInstructorStartExam,
@@ -50,6 +56,7 @@ function Sessions() {
     const [showPractice, setShowPractice] = useState(false);
     const [examLaunch, setExamLaunch] = useState(null);
     const [sessionActionBusy, setSessionActionBusy] = useState(null);
+    const [reviewSession, setReviewSession] = useState(null);
 
     const fetchMyAdvisees = useCallback(async () => {
         if (!isInstructorOnly) {
@@ -87,7 +94,16 @@ function Sessions() {
                 student:profiles!student_id(full_name),
                 case:cases(title),
                 station:stations(name, room_number, location),
-                examiner:profiles!examiner_id(full_name)
+                examiner:profiles!examiner_id(full_name),
+                history_eval:history_evaluations(
+                    evaluation_type,
+                    final_percent,
+                    ai_percent,
+                    review_status,
+                    released_to_student,
+                    items_covered,
+                    total_items
+                )
             `)
             .order('start_time', { ascending: false });
 
@@ -99,6 +115,11 @@ function Sessions() {
         const { data } = await query;
 
         if (data) {
+            const examIds = data
+                .filter((s) => (s.session_type ?? s.type) === 'exam')
+                .map((s) => s.id);
+            const evalMap = await fetchHistoryEvaluationsForSessions(examIds);
+
             const formatted = data.map(s => ({
                 id: s.id.split('-')[0],
                 fullId: s.id,
@@ -117,6 +138,7 @@ function Sessions() {
                 roomName: formatExamStation(s.station, s.room_name),
                 startTime: s.start_time,
                 endTime: s.end_time,
+                historyEval: pickHistoryEval(s.history_eval) || evalMap[s.id] || null,
             }));
             setSessions(formatted);
 
@@ -261,6 +283,15 @@ function Sessions() {
 
     return (
         <div className="space-y-6 relative">
+            {reviewSession && (
+                <HistoryEvalReview
+                    sessionId={reviewSession.fullId}
+                    studentName={reviewSession.student}
+                    caseTitle={reviewSession.caseTitle}
+                    onClose={() => setReviewSession(null)}
+                    onUpdated={fetchSessions}
+                />
+            )}
             {showTypeSelect && (
                 <SessionTypeSelect
                     onClose={() => setShowTypeSelect(false)}
@@ -415,14 +446,31 @@ function Sessions() {
                                         </div>
                                     </td>
                                     <td className="px-6 py-4 text-right">
-                                        {session.score ? (
+                                        {session.sessionType === 'exam' && session.historyEval ? (
+                                            <div className="inline-flex flex-col items-end gap-0.5">
+                                                <span className={cn(
+                                                    "text-sm font-bold",
+                                                    session.historyEval.released_to_student
+                                                        ? (session.historyEval.final_percent >= 70 ? "text-emerald-500" :
+                                                            session.historyEval.final_percent >= 50 ? "text-amber-500" : "text-destructive")
+                                                        : "text-muted-foreground"
+                                                )}>
+                                                    {session.historyEval.released_to_student
+                                                        ? `${session.historyEval.final_percent}%`
+                                                        : `${session.historyEval.final_percent}% (draft)`}
+                                                </span>
+                                                <span className="text-[10px] text-muted-foreground">
+                                                    {historyEvalStatusLabel(session.historyEval)}
+                                                </span>
+                                            </div>
+                                        ) : session.score ? (
                                             <div className="inline-flex flex-col items-end">
                                                 <div className={cn(
                                                     "text-sm font-bold",
                                                     session.score >= 80 ? "text-emerald-500" :
                                                         session.score >= 50 ? "text-amber-500" : "text-destructive"
                                                 )}>
-                                                    {session.score}%
+                                                    {session.score <= 10 ? `${session.score}/10` : `${session.score}%`}
                                                 </div>
                                                 <div className="w-16 h-1 bg-muted rounded-full mt-1 overflow-hidden">
                                                     <div
@@ -431,10 +479,14 @@ function Sessions() {
                                                             session.score >= 80 ? "bg-emerald-500" :
                                                                 session.score >= 50 ? "bg-amber-500" : "bg-destructive"
                                                         )}
-                                                        style={{ width: `${session.score}%` }}
+                                                        style={{ width: `${session.score <= 10 ? session.score * 10 : session.score}%` }}
                                                     />
                                                 </div>
                                             </div>
+                                        ) : session.historyEval ? (
+                                            <span className="text-sm font-semibold text-foreground">
+                                                {session.historyEval.final_percent}%
+                                            </span>
                                         ) : (
                                             <span className="text-sm text-muted-foreground">—</span>
                                         )}
@@ -459,6 +511,21 @@ function Sessions() {
                                                     className="text-primary hover:text-primary/80 text-xs font-bold px-3 py-1 border border-primary/20 rounded hover:bg-primary/10 transition-colors disabled:opacity-50"
                                                 >
                                                     {sessionActionBusy === session.fullId ? '…' : 'JOIN'}
+                                                </button>
+                                            )}
+                                            {isInstructor && session.sessionType === 'exam' && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setReviewSession(session)}
+                                                    className={cn(
+                                                        "text-xs font-bold px-3 py-1 border rounded transition-colors",
+                                                        session.historyEval
+                                                            ? "text-emerald-400 hover:text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/10"
+                                                            : "text-muted-foreground border-white/10 hover:bg-muted/30"
+                                                    )}
+                                                    title={session.historyEval ? 'Review history score' : 'No history score saved yet'}
+                                                >
+                                                    {session.historyEval ? 'REVIEW' : 'REVIEW'}
                                                 </button>
                                             )}
                                             <button

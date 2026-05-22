@@ -2,6 +2,11 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
 import { assignExam } from '../../lib/assignExam';
+import {
+  aggregateHistoryEvalInsights,
+  fetchHistoryEvaluationsForSessions,
+} from '../../lib/historyEvaluations';
+import { getSessionKind } from '../../lib/studentExamSessions';
 import { ActiveStations } from './ActiveStations';
 import { QuickActions } from './QuickActions';
 import {
@@ -9,8 +14,6 @@ import {
   Area,
   BarChart,
   Bar,
-  PieChart,
-  Pie,
   Cell,
   LineChart,
   Line,
@@ -40,7 +43,6 @@ import {
   Play,
   Plus,
   Maximize2,
-  Award,
   FileText,
   UserX,
   Sparkles,
@@ -48,7 +50,6 @@ import {
   ClipboardCheck,
   CheckCircle2,
 } from 'lucide-react';
-import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 
 /* StudentHub-aligned page palette */
@@ -222,14 +223,14 @@ function InstructorProfileCard({ displayName, stats, loading, onGoToProfile }) {
 }
 
 /** Compact “today’s plan” strip — replaces a large greeting (StudentHub-style date + tailored copy) */
-function InstructorTodaysPlanCard({ dateLine, firstName, summaryLine, focusTip, onAssignExam }) {
+function InstructorTodaysPlanCard({ dateLine, firstName, summaryLine, focusTip, onAssignExam, className }) {
   return (
     <div
-      className="rounded-xl border px-3.5 py-2.5 sm:px-4 sm:py-3"
+      className={`rounded-2xl border px-3.5 py-2.5 sm:px-4 sm:py-3 h-full flex flex-col ${className || ''}`}
       style={{ background: P.card, borderColor: P.border, boxShadow: P.shadow }}
     >
-      <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-        <div className="min-w-0 space-y-1">
+      <div className="flex flex-col flex-1 gap-2.5 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+        <div className="min-w-0 space-y-1 flex-1">
           <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: P.accent }}>
             {dateLine}
           </p>
@@ -272,6 +273,137 @@ function ProgressRing({ value, size = 40, stroke = 3, color = T.accent }) {
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round" strokeDasharray={circ} strokeDashoffset={offset} style={{ transition: 'stroke-dashoffset 0.4s ease' }} />
     </svg>
   );
+}
+
+/** Ranked cohort insights (history eval strengths / gaps) */
+function RankedInsightBars({ items, barColor, emptyMessage }) {
+  const max = items.length ? Math.max(...items.map((i) => i.count), 1) : 1;
+  if (!items.length) {
+    return (
+      <p className="text-xs py-6 text-center" style={{ color: P.muted }}>
+        {emptyMessage}
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-2.5">
+      {items.map((item) => (
+        <div key={item.label}>
+          <div className="flex justify-between gap-2 mb-1">
+            <p className="text-xs leading-snug line-clamp-2 flex-1" style={{ color: P.text }} title={item.label}>
+              {item.label}
+            </p>
+            <span className="text-[10px] tabular-nums shrink-0" style={{ color: P.muted }}>
+              {item.count}×
+            </span>
+          </div>
+          <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
+            <div
+              className="h-full rounded-full transition-all"
+              style={{ width: `${Math.round((item.count / max) * 100)}%`, background: barColor }}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const truncateChartLabel = (value, max = 14) => {
+  const s = String(value || '');
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+};
+
+function gapSeverityColor(gap) {
+  if (gap >= 50) return { bar: '#f87171', text: '#fca5a5', bg: 'rgba(248,113,113,0.12)' };
+  if (gap >= 30) return { bar: '#fcd34d', text: '#fde68a', bg: 'rgba(252,211,77,0.12)' };
+  return { bar: '#6ee7b7', text: '#a7f3d0', bg: 'rgba(110,231,183,0.12)' };
+}
+
+/** Domain competency — achievement vs gap to 100% target */
+function CompetencyGapsPanel({ domains, emptyMessage }) {
+  if (!domains?.length) {
+    return (
+      <p className="text-xs py-6 text-center" style={{ color: P.muted }}>
+        {emptyMessage}
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-3 h-full flex flex-col justify-center">
+      {domains.map((item, index) => {
+        const colors = gapSeverityColor(item.gap);
+        return (
+          <div
+            key={item.domain}
+            className="rounded-xl px-3 py-2.5"
+            style={{ background: colors.bg, border: `1px solid ${colors.bar}33` }}
+          >
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <div className="min-w-0 flex items-center gap-2">
+                <span
+                  className="w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold shrink-0 tabular-nums"
+                  style={{ background: `${colors.bar}22`, color: colors.text }}
+                >
+                  {index + 1}
+                </span>
+                <p className="text-xs font-medium truncate" style={{ color: P.text }} title={item.domain}>
+                  {item.domain}
+                </p>
+              </div>
+              <span className="text-[10px] shrink-0 tabular-nums" style={{ color: P.muted }}>
+                {item.count} session{item.count === 1 ? '' : 's'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <span className="text-[10px] uppercase tracking-wider" style={{ color: P.muted }}>
+                Cohort avg
+              </span>
+              <span className="text-sm font-bold tabular-nums" style={{ color: colors.text }}>
+                {item.avg}%
+              </span>
+            </div>
+            <div className="h-2 rounded-full overflow-hidden flex" style={{ background: 'rgba(255,255,255,0.08)' }}>
+              <div
+                className="h-full rounded-l-full transition-all"
+                style={{ width: `${item.avg}%`, background: P.accent }}
+                title={`${item.avg}% achieved`}
+              />
+              <div
+                className="h-full transition-all"
+                style={{ width: `${item.gap}%`, background: colors.bar }}
+                title={`${item.gap}% gap to target`}
+              />
+            </div>
+            <p className="text-[10px] mt-1.5 tabular-nums" style={{ color: colors.text }}>
+              {item.gap}% below target
+            </p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+const COHORT_SESSION_SELECT =
+  'id, start_time, end_time, status, case_id, student_id, score, session_type, case:cases(title, category)';
+
+function scorePercentFromSession(session, historyEvalBySessionId) {
+  if (session?.score != null && session.score !== '') {
+    const n = Number(session.score);
+    if (!Number.isNaN(n)) return n <= 10 ? n * 10 : n;
+  }
+  const ev = historyEvalBySessionId?.[session.id];
+  if (ev) return ev.final_percent ?? ev.ai_percent ?? null;
+  return null;
+}
+
+function mergeCohortSessions(examinerRows, adviseeRows) {
+  const byId = new Map();
+  [...(examinerRows || []), ...(adviseeRows || [])].forEach((row) => {
+    if (row?.id) byId.set(row.id, row);
+  });
+  return [...byId.values()];
 }
 
 /* Pill action button (Operations style) */
@@ -325,7 +457,6 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
   const [studentsWithExams, setStudentsWithExams] = useState(new Set());
   const [leaderboard, setLeaderboard] = useState([]);
   const [assignmentsTrend, setAssignmentsTrend] = useState([]);
-  const [studentActivity, setStudentActivity] = useState([]);
   const [popularCases, setPopularCases] = useState([]);
   const [calendarData, setCalendarData] = useState({});
   const [recentAssignments, setRecentAssignments] = useState([]);
@@ -339,6 +470,13 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
   const [selectedUpcomingId, setSelectedUpcomingId] = useState(null);
   const [avgThisWeek, setAvgThisWeek] = useState(0);
   const [avgLastWeek, setAvgLastWeek] = useState(0);
+  const [historyEvalInsights, setHistoryEvalInsights] = useState({
+    evalCount: 0,
+    avgChecklistPct: null,
+    topStrengths: [],
+    topGaps: [],
+    topMissedItems: [],
+  });
 
   // Assign Exam panel state
   const [selectedStudents, setSelectedStudents] = useState([]);
@@ -354,7 +492,6 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
   const [opsTab, setOpsTab] = useState('ongoing');
   const [selectedSession, setSelectedSession] = useState(null);
   /** Right rail: toggle quick actions vs student status (same slot below profile) */
-  const [instructorRailTab, setInstructorRailTab] = useState('actions');
 
   const formatTime = (iso) => {
     const d = new Date(iso);
@@ -400,25 +537,30 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
       .order('title');
     setCases(casesData || []);
 
-    // Sessions (upcoming, exams for stats)
-    const examFilter = { examiner_id: user.id };
-    let sessionsRaw = [];
-    const { data: byType } = await supabase
+    // Cohort sessions: instructor exams + all advisee practice/exam (charts & analytics)
+    const { data: examinerSessions, error: examinerErr } = await supabase
       .from('sessions')
-      .select('id, start_time, status, case_id, student_id, score, case:cases(title, category)')
-      .eq('examiner_id', user.id)
-      .eq('session_type', 'exam');
-    sessionsRaw = byType || [];
-    if (sessionsRaw.length === 0) {
-      const { data: byLegacy } = await supabase
+      .select(COHORT_SESSION_SELECT)
+      .eq('examiner_id', user.id);
+    if (examinerErr) console.warn('[InstructorDashboard] examiner sessions:', examinerErr.message);
+
+    let adviseeSessions = [];
+    if (studentIds.length > 0) {
+      const { data: adviseeData, error: adviseeErr } = await supabase
         .from('sessions')
-        .select('id, start_time, status, case_id, student_id, score, case:cases(title, category)')
-        .eq('examiner_id', user.id)
-        .eq('type', 'exam');
-      sessionsRaw = byLegacy || [];
+        .select(COHORT_SESSION_SELECT)
+        .in('student_id', studentIds);
+      if (adviseeErr) console.warn('[InstructorDashboard] advisee sessions:', adviseeErr.message);
+      adviseeSessions = adviseeData || [];
     }
 
-    const allSessions = sessionsRaw;
+    const cohortSessions = mergeCohortSessions(examinerSessions, adviseeSessions);
+    const examSessions = cohortSessions.filter((s) => getSessionKind(s) === 'exam');
+
+    const cohortSessionIds = cohortSessions.map((s) => s.id);
+    const historyEvalBySessionId = await fetchHistoryEvaluationsForSessions(cohortSessionIds);
+    const historyEvalRows = Object.values(historyEvalBySessionId || {});
+    setHistoryEvalInsights(aggregateHistoryEvalInsights(historyEvalRows));
 
     const { data: sessionsWithStudent } = await supabase
       .from('sessions')
@@ -439,10 +581,10 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
     }));
     setUpcomingSessions(upcomingFormatted);
 
-    const studentsWithExamsSet = new Set(allSessions.map((s) => s.student_id).filter(Boolean));
+    const studentsWithExamsSet = new Set(examSessions.map((s) => s.student_id).filter(Boolean));
     setStudentsWithExams(studentsWithExamsSet);
 
-    const allStudentIds = [...new Set(allSessions.map((s) => s.student_id).filter(Boolean))];
+    const allStudentIds = [...new Set(cohortSessions.map((s) => s.student_id).filter(Boolean))];
     let nameMap = {};
     if (allStudentIds.length > 0) {
       const { data: studentProfiles } = await supabase
@@ -452,12 +594,16 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
       nameMap = Object.fromEntries((studentProfiles || []).map((p) => [p.id, p.full_name || 'Unknown']));
     }
 
-    // Leaderboard (completed sessions with score)
-    const completedWithScore = allSessions.filter((s) => s.status === 'Completed' && s.score != null);
+    // Leaderboard (completed sessions with exam score or history evaluation %)
+    const completedWithScore = cohortSessions.filter(
+      (s) => s.status === 'Completed' && scorePercentFromSession(s, historyEvalBySessionId) != null
+    );
     const avgByStudent = {};
     completedWithScore.forEach((s) => {
+      const pct = scorePercentFromSession(s, historyEvalBySessionId);
+      if (pct == null || !s.student_id) return;
       if (!avgByStudent[s.student_id]) avgByStudent[s.student_id] = { sum: 0, count: 0 };
-      avgByStudent[s.student_id].sum += s.score <= 10 ? s.score * 10 : s.score;
+      avgByStudent[s.student_id].sum += pct;
       avgByStudent[s.student_id].count++;
     });
     const leaderboardData = Object.entries(avgByStudent)
@@ -471,20 +617,18 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
       .slice(0, 5);
     setLeaderboard(leaderboardData);
 
-    const noShowCount = allSessions.filter((s) => /no[\s-]?show/i.test(String(s.status || ''))).length;
-    const completedCount = allSessions.filter((s) => s.status === 'Completed').length;
-    setCompletionRate(allSessions.length ? Math.round((completedCount / allSessions.length) * 100) : 0);
-    setNoShowRate(allSessions.length ? Math.round((noShowCount / allSessions.length) * 100) : 0);
-    const passCount = completedWithScore.filter((s) => {
-      const pct = s.score <= 10 ? s.score * 10 : s.score;
-      return pct >= 50;
-    }).length;
+    const noShowCount = cohortSessions.filter((s) => /no[\s-]?show/i.test(String(s.status || ''))).length;
+    const completedCount = cohortSessions.filter((s) => s.status === 'Completed').length;
+    setCompletionRate(cohortSessions.length ? Math.round((completedCount / cohortSessions.length) * 100) : 0);
+    setNoShowRate(cohortSessions.length ? Math.round((noShowCount / cohortSessions.length) * 100) : 0);
+    const passCount = completedWithScore.filter((s) => scorePercentFromSession(s, historyEvalBySessionId) >= 50).length;
     setPassRate(completedWithScore.length ? Math.round((passCount / completedWithScore.length) * 100) : 0);
 
     const domainScores = {};
     completedWithScore.forEach((s) => {
       const domain = s.case?.category || 'General';
-      const pct = s.score <= 10 ? s.score * 10 : s.score;
+      const pct = scorePercentFromSession(s, historyEvalBySessionId);
+      if (pct == null) return;
       if (!domainScores[domain]) domainScores[domain] = { total: 0, count: 0 };
       domainScores[domain].total += pct;
       domainScores[domain].count += 1;
@@ -492,7 +636,7 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
     const gaps = Object.entries(domainScores)
       .map(([domain, v]) => {
         const avg = v.count ? Math.round(v.total / v.count) : 0;
-        return { domain, avg, gap: Math.max(0, 100 - avg) };
+        return { domain, avg, gap: Math.max(0, 100 - avg), count: v.count };
       })
       .sort((a, b) => b.gap - a.gap)
       .slice(0, 4);
@@ -505,7 +649,7 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
       d.setDate(d.getDate() - (13 - i));
       dayCounts[d.toISOString().split('T')[0]] = 0;
     }
-    allSessions.forEach((s) => {
+    cohortSessions.forEach((s) => {
       const key = s.start_time ? new Date(s.start_time).toISOString().split('T')[0] : null;
       if (key && dayCounts[key] !== undefined) dayCounts[key]++;
     });
@@ -515,20 +659,9 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
         .map(([date, count]) => ({ date: date.slice(5), count }))
     );
 
-    // Student activity
-    const sc = {};
-    allSessions.forEach((s) => {
-      sc[s.student_id] = (sc[s.student_id] || 0) + 1;
-    });
-    const sa = Object.entries(sc)
-      .map(([id, count]) => ({ id, name: nameMap[id] || 'Unknown', count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 6);
-    setStudentActivity(sa);
-
-    // Popular cases
+    // Popular cases (from DB session → case title)
     const pc = {};
-    allSessions.forEach((s) => {
+    cohortSessions.forEach((s) => {
       const name = s.case?.title || 'Unknown';
       pc[name] = (pc[name] || 0) + 1;
     });
@@ -542,7 +675,8 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
     // Performance distribution (0-20, 20-40, 40-60, 60-80, 80-100)
     const buckets = { '0-20': 0, '21-40': 0, '41-60': 0, '61-80': 0, '81-100': 0 };
     completedWithScore.forEach((s) => {
-      const pct = s.score <= 10 ? s.score * 10 : s.score;
+      const pct = scorePercentFromSession(s, historyEvalBySessionId);
+      if (pct == null) return;
       if (pct <= 20) buckets['0-20']++;
       else if (pct <= 40) buckets['21-40']++;
       else if (pct <= 60) buckets['41-60']++;
@@ -567,7 +701,10 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
         return t >= start.getTime() && t < end.getTime();
       });
       const avg = weekSessions.length
-        ? Math.round(weekSessions.reduce((a, x) => a + (x.score <= 10 ? x.score * 10 : x.score), 0) / weekSessions.length)
+        ? Math.round(
+            weekSessions.reduce((a, x) => a + (scorePercentFromSession(x, historyEvalBySessionId) || 0), 0) /
+              weekSessions.length
+          )
         : 0;
       weeklyAvg[start.toISOString().slice(0, 10)] = avg;
     }
@@ -579,7 +716,7 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
 
     // Last activity per student (advisor students)
     const lastByStudent = {};
-    allSessions.forEach((s) => {
+    cohortSessions.forEach((s) => {
       if (!s.student_id || !s.start_time) return;
       const t = new Date(s.start_time).getTime();
       if (!lastByStudent[s.student_id] || lastByStudent[s.student_id] < t) {
@@ -604,10 +741,16 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
       }
     );
     const twAvg = thisWeekSessions.length
-      ? Math.round(thisWeekSessions.reduce((a, x) => a + (x.score <= 10 ? x.score * 10 : x.score), 0) / thisWeekSessions.length)
+      ? Math.round(
+          thisWeekSessions.reduce((a, x) => a + (scorePercentFromSession(x, historyEvalBySessionId) || 0), 0) /
+            thisWeekSessions.length
+        )
       : 0;
     const lwAvg = lastWeekSessions.length
-      ? Math.round(lastWeekSessions.reduce((a, x) => a + (x.score <= 10 ? x.score * 10 : x.score), 0) / lastWeekSessions.length)
+      ? Math.round(
+          lastWeekSessions.reduce((a, x) => a + (scorePercentFromSession(x, historyEvalBySessionId) || 0), 0) /
+            lastWeekSessions.length
+        )
       : 0;
     setAvgThisWeek(twAvg);
     setAvgLastWeek(lwAvg);
@@ -615,7 +758,7 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
     // Calendar data (exams per day this month)
     const cal = {};
     const thisMonth = now.getMonth();
-    allSessions
+    cohortSessions
       .filter((s) => s.start_time && new Date(s.start_time) >= now)
       .forEach((s) => {
         const d = new Date(s.start_time);
@@ -627,7 +770,7 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
     setCalendarData(cal);
 
     // Recent assignments
-    const recent = allSessions
+    const recent = examSessions
       .filter((s) => s.start_time && new Date(s.start_time) >= now)
       .sort((a, b) => new Date(a.start_time) - new Date(b.start_time))
       .slice(0, 5);
@@ -732,12 +875,6 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
   const selectedSessionData = selectedSession ? [...upcomingSessions, ...completedList].find((s) => s.id === selectedSession) : opsList[0];
   const INPUT_CLASS = 'w-full px-3 py-2 rounded-lg text-sm bg-white/5 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 transition-all';
 
-  const pieData = popularCases.map((c, i) => ({
-    name: c.name.length > 12 ? c.name.slice(0, 12) + '…' : c.name,
-    value: c.count,
-    fill: CHART_COLORS[i % CHART_COLORS.length],
-  }));
-
   const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
   const firstDay = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getDay();
 
@@ -830,50 +967,6 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
     transition: { duration: 0.4, ease: 'easeOut', delay },
   });
 
-  const studentStatusBuckets = (() => {
-    const now = Date.now();
-    let active = 0;
-    let warning = 0;
-    let inactive = 0;
-    advisorStudents.forEach((s) => {
-      const last = studentLastActivity[s.id];
-      if (!last) {
-        inactive += 1;
-        return;
-      }
-      const days = Math.floor((now - last) / (24 * 60 * 60 * 1000));
-      if (days <= 2) active += 1;
-      else if (days <= 7) warning += 1;
-      else inactive += 1;
-    });
-    return { active, warning, inactive };
-  })();
-
-  const sessionTypeData = [
-    {
-      name: 'Practice',
-      value: Math.max(0, (assignmentsTrend.reduce((sum, item) => sum + (item.count || 0), 0)) - scheduledSessions.length),
-      fill: '#60a5fa',
-    },
-    { name: 'Exam', value: Math.max(0, scheduledSessions.length), fill: '#6ee7b7' },
-    { name: 'Review', value: Math.max(0, recentAssignments.length), fill: '#f59e0b' },
-  ].filter((item) => item.value > 0);
-
-  const latestActivities = [
-    ...recentAssignments.slice(0, 4).map((entry) => ({
-      id: `assign-${entry.date}`,
-      title: `Assigned ${entry.title}`,
-      when: formatTime(entry.date),
-      action: 'Assignment',
-    })),
-    ...upcomingSessions.slice(0, 3).map((entry) => ({
-      id: `upcoming-${entry.id}`,
-      title: `Scheduled ${entry.title} for ${entry.student}`,
-      when: formatTime(entry.startTime),
-      action: 'Session',
-    })),
-  ].slice(0, 6);
-
   const firstName = (displayName || 'Instructor').trim().split(/\s+/)[0];
   const dateLine = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
   const todayStart = new Date();
@@ -908,20 +1001,58 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
     <div className="w-full max-w-[min(100%,1800px)] mx-auto min-h-0 h-full">
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_min(380px,36vw)] gap-6 lg:gap-8 lg:items-start min-h-0">
         <div className="space-y-6 min-h-0 min-w-0 max-lg:order-2">
-      <InstructorTodaysPlanCard
-        dateLine={dateLine}
-        firstName={firstName}
-        summaryLine={planSummaryLine}
-        focusTip={focusTip}
-        onAssignExam={() => navigateInstructorTab('assign-exam')}
-      />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-stretch">
+        <InstructorTodaysPlanCard
+          dateLine={dateLine}
+          firstName={firstName}
+          summaryLine={planSummaryLine}
+          focusTip={focusTip}
+          onAssignExam={() => navigateInstructorTab('assign-exam')}
+        />
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div
+          className="rounded-2xl border overflow-hidden flex flex-col min-h-0 h-full"
+          style={{ background: P.card, borderColor: P.border, boxShadow: P.shadow }}
+        >
+          <div className="px-5 py-4 border-b flex items-center justify-between shrink-0" style={{ borderColor: P.border }}>
+            <h2 className="text-sm font-semibold" style={{ color: P.text }}>Upcoming Sessions</h2>
+            <button type="button" className="text-xs" style={{ color: P.accent }} onClick={() => navigateInstructorTab('sessions')}>
+              View all
+            </button>
+          </div>
+          <div className="divide-y flex-1 min-h-0 overflow-y-auto" style={{ borderColor: P.border }}>
+            {upcomingSessions.length === 0 ? (
+              <div className="p-5 text-sm" style={{ color: P.muted }}>No upcoming sessions.</div>
+            ) : (
+              upcomingSessions.slice(0, 6).map((session) => (
+                <div key={session.id} className="px-5 py-3 flex items-center justify-between gap-3 hover:bg-white/5 transition-colors">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate" style={{ color: P.text }}>{session.title}</p>
+                    <p className="text-xs truncate" style={{ color: P.muted }}>
+                      {formatTime(session.startTime)} · {session.student}
+                    </p>
+                  </div>
+                  <span
+                    className="text-[11px] px-2 py-1 rounded-full shrink-0"
+                    style={{
+                      background: session.status === 'In Progress' ? 'rgba(96,165,250,0.18)' : 'rgba(110,231,183,0.16)',
+                      color: session.status === 'In Progress' ? '#60a5fa' : '#6ee7b7',
+                    }}
+                  >
+                    {session.status}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {[
           { label: 'Total Assigned Students', value: advisorStudents.length, icon: Users, color: '#60a5fa', sub: 'Current advisees' },
           { label: 'Upcoming Sessions', value: scheduledSessions.length, icon: Calendar, color: '#a78bfa', sub: 'Today and next' },
           { label: 'Pending Requests', value: studentsWithoutExam.length, icon: AlertCircle, color: '#f59e0b', sub: 'Need exam assignment' },
-          { label: 'Instructor Performance', value: avgPerformance > 0 ? `${avgPerformance}%` : '—', icon: Award, color: '#6ee7b7', sub: 'Cohort average score' },
         ].map((item) => (
           <motion.div
             key={item.label}
@@ -947,33 +1078,28 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="rounded-2xl p-5 border lg:col-span-1" style={{ background: P.card, borderColor: P.border, boxShadow: P.shadow }}>
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold" style={{ color: P.text }}>Sessions Over Time</h3>
-            <span className="text-xs" style={{ color: P.muted }}>Weekly</span>
+            <h3 className="text-sm font-semibold" style={{ color: P.text }}>Competency Gaps by Domain</h3>
+            <span className="text-xs" style={{ color: P.muted }}>Gap to 100%</span>
           </div>
-          <div className="h-52">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={assignmentsTrend}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                <XAxis dataKey="date" stroke="#71717a" />
-                <YAxis stroke="#71717a" />
-                <Tooltip contentStyle={{ background: '#111', border: `1px solid ${P.border}`, borderRadius: 10 }} />
-                <Line type="monotone" dataKey="count" stroke={P.accent} strokeWidth={2.5} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
+          <div className="min-h-[13rem] max-h-56 overflow-y-auto">
+            <CompetencyGapsPanel
+              domains={competencyGaps}
+              emptyMessage="Complete scored sessions to see domain gaps."
+            />
           </div>
         </div>
 
         <div className="rounded-2xl p-5 border lg:col-span-1" style={{ background: P.card, borderColor: P.border, boxShadow: P.shadow }}>
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold" style={{ color: P.text }}>Performance Distribution</h3>
-            <span className="text-xs" style={{ color: P.muted }}>Students</span>
+            <span className="text-xs" style={{ color: P.muted }}>Completed cohort</span>
           </div>
           <div className="h-52">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={performanceDistribution}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
                 <XAxis dataKey="range" stroke="#71717a" />
-                <YAxis stroke="#71717a" />
+                <YAxis stroke="#71717a" allowDecimals={false} />
                 <Tooltip contentStyle={{ background: '#111', border: `1px solid ${P.border}`, borderRadius: 10 }} />
                 <Bar dataKey="count" radius={[6, 6, 0, 0]}>
                   {performanceDistribution.map((entry, idx) => (
@@ -987,113 +1113,191 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
 
         <div className="rounded-2xl p-5 border lg:col-span-1" style={{ background: P.card, borderColor: P.border, boxShadow: P.shadow }}>
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold" style={{ color: P.text }}>Session Types</h3>
-            <span className="text-xs" style={{ color: P.muted }}>Mix</span>
+            <h3 className="text-sm font-semibold" style={{ color: P.text }}>Popular Cases</h3>
+            <span className="text-xs" style={{ color: P.muted }}>By session count</span>
           </div>
           <div className="h-52">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie data={sessionTypeData.length ? sessionTypeData : [{ name: 'No data', value: 1, fill: '#3f3f46' }]} dataKey="value" nameKey="name" innerRadius={45} outerRadius={74} paddingAngle={3}>
-                  {(sessionTypeData.length ? sessionTypeData : [{ name: 'No data', value: 1, fill: '#3f3f46' }]).map((entry, idx) => (
-                    <Cell key={`${entry.name}-${idx}`} fill={entry.fill} />
-                  ))}
-                </Pie>
-                <Tooltip contentStyle={{ background: '#111', border: `1px solid ${P.border}`, borderRadius: 10 }} />
-              </PieChart>
-            </ResponsiveContainer>
+            {popularCases.length === 0 ? (
+              <p className="text-xs h-full flex items-center justify-center" style={{ color: P.muted }}>
+                No case usage data yet.
+              </p>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={popularCases} layout="vertical" margin={{ left: 4, right: 12, top: 4, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
+                  <XAxis type="number" stroke="#71717a" tick={{ fontSize: 10 }} allowDecimals={false} />
+                  <YAxis
+                    type="category"
+                    dataKey="name"
+                    width={96}
+                    stroke="#71717a"
+                    tick={{ fontSize: 10 }}
+                    tickFormatter={(v) => truncateChartLabel(v, 12)}
+                  />
+                  <Tooltip
+                    contentStyle={{ background: '#111', border: `1px solid ${P.border}`, borderRadius: 10 }}
+                    formatter={(value, _name, props) => [`${value} session(s)`, props.payload.name]}
+                  />
+                  <Bar dataKey="count" radius={[0, 6, 6, 0]}>
+                    {popularCases.map((entry, idx) => (
+                      <Cell key={`${entry.name}-${idx}`} fill={CHART_COLORS[idx % CHART_COLORS.length]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
       </div>
 
-          <div className="rounded-2xl border overflow-hidden" style={{ background: P.card, borderColor: P.border, boxShadow: P.shadow }}>
-            <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: P.border }}>
-              <h2 className="text-sm font-semibold" style={{ color: P.text }}>Assigned Students</h2>
-              <button className="text-xs" style={{ color: P.accent }} onClick={() => navigateInstructorTab('students')}>Open students</button>
-            </div>
-            <div className="max-h-72 overflow-y-auto">
-              {advisorStudents.length === 0 ? (
-                <div className="p-5 text-sm" style={{ color: P.muted }}>No assigned students yet.</div>
-              ) : (
-                advisorStudents.map((student) => {
-                  const last = studentLastActivity[student.id];
-                  const days = last ? Math.floor((Date.now() - last) / (24 * 60 * 60 * 1000)) : null;
-                  const status = days == null ? 'Inactive' : days <= 2 ? 'Active' : days <= 7 ? 'At Risk' : 'Inactive';
-                  const statusColor = status === 'Active' ? '#6ee7b7' : status === 'At Risk' ? '#fcd34d' : '#f87171';
-                  const progress = leaderboard.find((l) => l.id === student.id)?.score ?? 0;
-                  return (
-                    <button
-                      key={student.id}
-                      className="w-full px-5 py-3 flex items-center gap-3 text-left transition-colors hover:bg-white/5"
-                      onClick={() => onViewStudentProfile?.(student)}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div
+          className="rounded-2xl p-5 border lg:col-span-2"
+          style={{ background: P.card, borderColor: P.border, boxShadow: P.shadow }}
+        >
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold" style={{ color: P.text }}>Sessions Over Time</h3>
+            <span className="text-xs" style={{ color: P.muted }}>Last 14 days</span>
+          </div>
+          <div className="h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={assignmentsTrend}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                <XAxis dataKey="date" stroke="#71717a" />
+                <YAxis stroke="#71717a" allowDecimals={false} />
+                <Tooltip contentStyle={{ background: '#111', border: `1px solid ${P.border}`, borderRadius: 10 }} />
+                <Line type="monotone" dataKey="count" stroke={P.accent} strokeWidth={2.5} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div
+          className="rounded-2xl p-5 border lg:col-span-1"
+          style={{ background: P.card, borderColor: P.border, boxShadow: P.shadow }}
+        >
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold flex items-center gap-1.5" style={{ color: P.text }}>
+              <Trophy size={14} style={{ color: '#f59e0b' }} />
+              Top Performers
+            </h3>
+            <span className="text-xs" style={{ color: P.muted }}>Cohort average</span>
+          </div>
+          {leaderboard.length === 0 ? (
+            <p className="text-xs py-10 text-center" style={{ color: P.muted }}>
+              No completed exam scores yet.
+            </p>
+          ) : (
+            <ol className="space-y-3">
+              {leaderboard.map((entry, index) => {
+                const rankStyles = [
+                  { ring: '#f59e0b', bg: 'rgba(245,158,11,0.15)', label: '#fcd34d' },
+                  { ring: '#94a3b8', bg: 'rgba(148,163,184,0.15)', label: '#cbd5e1' },
+                  { ring: '#d97706', bg: 'rgba(217,119,6,0.12)', label: '#fdba74' },
+                ];
+                const style = rankStyles[index] || { ring: P.border, bg: 'rgba(255,255,255,0.06)', label: P.muted };
+                return (
+                  <li
+                    key={entry.id}
+                    className="flex items-center gap-3 rounded-xl px-3 py-2.5"
+                    style={{ background: style.bg, border: `1px solid ${style.ring}33` }}
+                  >
+                    <span
+                      className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0"
+                      style={{ color: style.label, background: `${style.ring}22` }}
                     >
-                      <div className="w-9 h-9 rounded-xl flex items-center justify-center text-xs font-semibold" style={{ background: 'rgba(255,255,255,0.08)', color: P.text }}>
-                        {(student.full_name || student.email || 'S').slice(0, 1).toUpperCase()}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate" style={{ color: P.text }}>{student.full_name || student.email || 'Student'}</p>
-                        <p className="text-xs truncate" style={{ color: P.muted }}>
-                          Last activity: {last ? formatTime(new Date(last).toISOString()) : 'No record'}
-                        </p>
-                        <div className="h-1.5 mt-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
-                          <div className="h-full rounded-full" style={{ width: `${Math.min(100, progress)}%`, background: 'linear-gradient(90deg, #60a5fa, #6ee7b7)' }} />
-                        </div>
-                      </div>
-                      <span className="text-[11px] px-2 py-1 rounded-full" style={{ color: statusColor, background: `${statusColor}22` }}>
-                        {status}
-                      </span>
-                    </button>
-                  );
-                })
-              )}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border overflow-hidden" style={{ background: P.card, borderColor: P.border, boxShadow: P.shadow }}>
-            <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: P.border }}>
-              <h2 className="text-sm font-semibold" style={{ color: P.text }}>Upcoming Sessions</h2>
-              <button className="text-xs" style={{ color: P.accent }} onClick={() => navigateInstructorTab('sessions')}>View all</button>
-            </div>
-            <div className="divide-y" style={{ borderColor: P.border }}>
-              {upcomingSessions.length === 0 ? (
-                <div className="p-5 text-sm" style={{ color: P.muted }}>No upcoming sessions.</div>
-              ) : (
-                upcomingSessions.slice(0, 6).map((session) => (
-                  <div key={session.id} className="px-5 py-3 flex items-center justify-between gap-3 hover:bg-white/5 transition-colors">
-                    <div>
-                      <p className="text-sm font-medium" style={{ color: P.text }}>{session.title}</p>
-                      <p className="text-xs" style={{ color: P.muted }}>{formatTime(session.startTime)} · {session.student}</p>
-                    </div>
-                    <span className="text-[11px] px-2 py-1 rounded-full" style={{ background: session.status === 'In Progress' ? 'rgba(96,165,250,0.18)' : 'rgba(110,231,183,0.16)', color: session.status === 'In Progress' ? '#60a5fa' : '#6ee7b7' }}>
-                      {session.status}
+                      {index + 1}
                     </span>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border overflow-hidden" style={{ background: P.card, borderColor: P.border, boxShadow: P.shadow }}>
-            <div className="px-5 py-4 border-b" style={{ borderColor: P.border }}>
-              <h2 className="text-sm font-semibold" style={{ color: P.text }}>Recent Activity</h2>
-            </div>
-            <div className="divide-y" style={{ borderColor: P.border }}>
-              {latestActivities.length === 0 ? (
-                <div className="p-5 text-sm" style={{ color: P.muted }}>No recent activity yet.</div>
-              ) : (
-                latestActivities.map((activity) => (
-                  <div key={activity.id} className="px-5 py-3 flex items-center justify-between gap-3 hover:bg-white/5 transition-colors">
-                    <div className="min-w-0">
-                      <p className="text-sm truncate" style={{ color: P.text }}>{activity.title}</p>
-                      <p className="text-xs" style={{ color: P.muted }}>{activity.when}</p>
+                    <div className="w-9 h-9 rounded-xl flex items-center justify-center text-xs font-semibold shrink-0" style={{ background: 'rgba(255,255,255,0.08)', color: P.text }}>
+                      {(entry.name || '?').slice(0, 1).toUpperCase()}
                     </div>
-                    <span className="text-[11px] px-2 py-1 rounded-full" style={{ background: 'rgba(167,139,250,0.16)', color: '#c4b5fd' }}>
-                      {activity.action}
-                    </span>
-                  </div>
-                ))
-              )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate" style={{ color: P.text }}>
+                        {entry.name}
+                      </p>
+                      <p className="text-[11px]" style={{ color: P.muted }}>
+                        {entry.count} scored session{entry.count === 1 ? '' : 's'}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-lg font-bold tabular-nums leading-none" style={{ color: '#60a5fa' }}>
+                        {entry.score}%
+                      </p>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-2xl p-5 border" style={{ background: P.card, borderColor: P.border, boxShadow: P.shadow }}>
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 mb-4">
+          <div>
+            <h3 className="text-sm font-semibold flex items-center gap-1.5" style={{ color: P.text }}>
+              <ClipboardCheck size={14} style={{ color: P.accent }} />
+              History &amp; Evaluation Quality
+            </h3>
+            <p className="text-xs mt-1" style={{ color: P.muted }}>
+              What your advisees do well and miss most often across history-taking evaluations.
+            </p>
+          </div>
+          <div className="flex items-center gap-3 shrink-0">
+            <span className="text-xs px-2.5 py-1 rounded-full" style={{ background: P.accentBg, color: P.accent }}>
+              {historyEvalInsights.evalCount} evaluation{historyEvalInsights.evalCount === 1 ? '' : 's'}
+            </span>
+            {historyEvalInsights.avgChecklistPct != null && (
+              <span className="text-xs px-2.5 py-1 rounded-full" style={{ background: 'rgba(96,165,250,0.15)', color: '#93c5fd' }}>
+                {historyEvalInsights.avgChecklistPct}% cohort avg
+              </span>
+            )}
+          </div>
+        </div>
+
+        {historyEvalInsights.evalCount === 0 ? (
+          <p className="text-sm py-8 text-center" style={{ color: P.muted }}>
+            No history evaluations yet. Insights appear after advisees complete history-taking practice or exams.
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider mb-3 flex items-center gap-1.5" style={{ color: '#6ee7b7' }}>
+                <CheckCircle2 size={12} />
+                Doing well
+              </p>
+              <RankedInsightBars
+                items={historyEvalInsights.topStrengths}
+                barColor="#6ee7b7"
+                emptyMessage="No recurring strengths logged yet."
+              />
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider mb-3 flex items-center gap-1.5" style={{ color: '#fcd34d' }}>
+                <AlertCircle size={12} />
+                Needs improvement
+              </p>
+              <RankedInsightBars
+                items={historyEvalInsights.topGaps}
+                barColor="#fcd34d"
+                emptyMessage="No recurring improvement themes yet."
+              />
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider mb-3 flex items-center gap-1.5" style={{ color: '#f87171' }}>
+                <UserX size={12} />
+                Most missed checklist items
+              </p>
+              <RankedInsightBars
+                items={historyEvalInsights.topMissedItems}
+                barColor="#f87171"
+                emptyMessage="No checklist gaps aggregated yet."
+              />
             </div>
           </div>
+        )}
+      </div>
+
         </div>
 
         <aside className="space-y-6 max-lg:order-1 lg:sticky lg:top-4 lg:self-start z-[1]">
@@ -1105,61 +1309,22 @@ export function InstructorDashboard({ setActiveTab, onViewStudentProfile }) {
           />
 
           <div className="rounded-2xl border overflow-hidden" style={{ background: P.card, borderColor: P.border, boxShadow: P.shadow }}>
-            <div className="flex p-1 gap-0.5" style={{ borderBottom: `1px solid ${P.border}` }}>
-              <button
-                type="button"
-                onClick={() => setInstructorRailTab('actions')}
-                className={cn(
-                  'flex-1 rounded-lg py-2 px-2 text-xs font-semibold transition-colors',
-                  instructorRailTab === 'actions' ? 'bg-white/[0.08]' : 'hover:bg-white/[0.04]'
-                )}
-                style={{ color: instructorRailTab === 'actions' ? P.text : P.muted }}
-              >
-                Quick actions
-              </button>
-              <button
-                type="button"
-                onClick={() => setInstructorRailTab('status')}
-                className={cn(
-                  'flex-1 rounded-lg py-2 px-2 text-xs font-semibold transition-colors',
-                  instructorRailTab === 'status' ? 'bg-white/[0.08]' : 'hover:bg-white/[0.04]'
-                )}
-                style={{ color: instructorRailTab === 'status' ? P.text : P.muted }}
-              >
-                Student status
-              </button>
+            <div className="px-4 py-3 border-b" style={{ borderColor: P.border }}>
+              <p className="text-sm font-semibold" style={{ color: P.text }}>Quick actions</p>
             </div>
             <div className="p-4">
-              {instructorRailTab === 'actions' ? (
-                <QuickActions
-                  onAssignExam={() => navigateInstructorTab('assign-exam')}
-                  onManageStudents={() => navigateInstructorTab('students')}
-                  onViewAnalytics={() => navigateInstructorTab('cases')}
-                  onRunDiagnostics={() => navigateInstructorTab('hardware')}
-                  onOpenSettings={() => navigateInstructorTab('settings')}
-                  onOpenProfile={() => navigateInstructorTab('profile')}
-                  variant="glass"
-                  layout="grid"
-                  embedded
-                  highlightAssign={shouldHighlightAssign}
-                />
-              ) : (
-                <div className="space-y-2.5 pt-0.5">
-                  <p className="text-[11px] uppercase tracking-wider mb-2" style={{ color: P.muted }}>
-                    Roster breakdown
-                  </p>
-                  {[
-                    { label: 'Active', value: studentStatusBuckets.active, color: '#6ee7b7' },
-                    { label: 'At Risk', value: studentStatusBuckets.warning, color: '#fcd34d' },
-                    { label: 'Inactive', value: studentStatusBuckets.inactive, color: '#f87171' },
-                  ].map((item) => (
-                    <div key={item.label} className="flex items-center justify-between gap-2">
-                      <span className="text-xs" style={{ color: P.muted }}>{item.label}</span>
-                      <span className="text-sm font-semibold tabular-nums" style={{ color: item.color }}>{item.value}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <QuickActions
+                onAssignExam={() => navigateInstructorTab('assign-exam')}
+                onManageStudents={() => navigateInstructorTab('students')}
+                onViewAnalytics={() => navigateInstructorTab('cases')}
+                onRunDiagnostics={() => navigateInstructorTab('hardware')}
+                onOpenSettings={() => navigateInstructorTab('settings')}
+                onOpenProfile={() => navigateInstructorTab('profile')}
+                variant="glass"
+                layout="grid"
+                embedded
+                highlightAssign={shouldHighlightAssign}
+              />
             </div>
           </div>
         </aside>
