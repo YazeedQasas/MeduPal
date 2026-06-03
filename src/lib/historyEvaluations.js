@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { syncHistoryScoreFromEvaluation } from './sessionScores';
 
 export const HISTORY_EVAL_TYPE = 'history_taking';
 
@@ -129,17 +130,10 @@ export async function upsertHistoryEvaluation({ sessionId, isExam, caseId, check
   return { data, error: null };
 }
 
-/** Sync session_scores.history_taking from checklist percent (0–100 → 0–10). */
+/** history_evaluations % → session_scores.history_taking + sessions.score rollup. */
 export async function syncHistorySessionScore(sessionId, percent) {
   if (!sessionId || percent == null) return;
-  const scoreOutOf10 = Math.min(10, Math.max(0, Math.round(percent / 10)));
-  const { error } = await supabase
-    .from('session_scores')
-    .upsert(
-      { session_id: sessionId, skill_type: 'history_taking', score: scoreOutOf10 },
-      { onConflict: 'session_id,skill_type' }
-    );
-  if (error) console.warn('[session_scores] history_taking sync:', error.message);
+  await syncHistoryScoreFromEvaluation(sessionId, percent);
 }
 
 export async function fetchHistoryEvaluation(sessionId) {
@@ -250,8 +244,8 @@ export async function releaseHistoryEvaluationToStudent(sessionId) {
 
   if (error) return { data: null, error };
 
-  const sessionScore = Math.round(evalRow.final_percent ?? 0);
-  await supabase.from('sessions').update({ score: sessionScore }).eq('id', sessionId);
+  const finalPercent = Math.round(evalRow.final_percent ?? evalRow.ai_percent ?? 0);
+  await syncHistoryScoreFromEvaluation(sessionId, finalPercent);
 
   return { data, error: null };
 }

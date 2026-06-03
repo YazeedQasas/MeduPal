@@ -4,10 +4,13 @@ Patient replies via Groq (OpenAI-compatible API), with Ollama fallback. Run: pyt
 """
 import asyncio
 import io
+import json
 import logging
 import os
 import random
 import shutil
+import subprocess
+import sys
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -29,17 +32,21 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
+
+_SERVER_DIR = Path(__file__).resolve().parent
 
 
 def _get_env_from_file(filename: str, key: str) -> str:
     """
     Read a KEY=value pair from a dotenv-style file.
-    Supports optional surrounding single/double quotes.
+    Checks server/.env first, then project root .env.
     """
     try:
-        env_path = Path(__file__).resolve().parent.parent / filename
-        if not env_path.is_file():
+        candidates = (_SERVER_DIR / filename, _SERVER_DIR.parent / filename)
+        env_path = next((p for p in candidates if p.is_file()), None)
+        if not env_path:
             return ""
         for raw_line in env_path.read_text(encoding="utf-8").splitlines():
             line = raw_line.strip()
@@ -350,9 +357,22 @@ def get_model():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _check_ffmpeg()
-    # Pre-warm Kokoro in background so first TTS request is instant
+    gkey = _groq_api_key()
+    if gkey:
+        chain = (
+            f"Groq ({GROQ_MODEL}) → Ollama ({OLLAMA_MODEL}) → canned replies"
+            if not _use_groq_only()
+            else f"Groq only ({GROQ_MODEL})"
+        )
+        logger.info("Chat fallback chain: %s", chain)
+    else:
+        logger.warning(
+            "GROQ_API_KEY not set — chat: Ollama (%s) → canned; STT: local Whisper",
+            OLLAMA_MODEL,
+        )
     import asyncio
-    asyncio.get_event_loop().run_in_executor(None, _get_kokoro)
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, _warm_tts_backend)
     yield
     global _model
     _model = None
@@ -362,8 +382,49 @@ app = FastAPI(title="Medupal STT", lifespan=lifespan)
 
 @app.get("/health")
 def health():
-    """Health check; verifies FFmpeg is available."""
-    return {"ok": True, "ffmpeg": bool(shutil.which("ffmpeg"))}
+    """Health check; verifies FFmpeg and AI provider config."""
+    gkey = _groq_api_key()
+    return {
+        "ok": True,
+        "ffmpeg": bool(shutil.which("ffmpeg")),
+        "ai": {
+            "groq_configured": bool(gkey),
+            "groq_model": GROQ_MODEL if gkey else None,
+            "ollama_model": OLLAMA_MODEL,
+            "ollama_url": OLLAMA_BASE,
+            "chat_fallback": (
+                ["groq", "ollama", "canned_replies"]
+                if gkey and not _use_groq_only()
+                else (["groq", "canned_replies"] if gkey else ["ollama", "canned_replies"])
+            ),
+            "groq_only": _use_groq_only(),
+        },
+        "stt": "groq_whisper → local_whisper" if gkey else "local_whisper",
+        "python": sys.version.split()[0],
+        "tts": {
+            "prefer": TTS_PREFER,
+            "default_backend": _tts_backend_name(),
+            "edge_voices": {
+                "female": EDGE_TTS_VOICE_FEMALE,
+                "male": EDGE_TTS_VOICE_MALE,
+            },
+            "openai_configured": bool(OPENAI_API_KEY),
+        },
+    }
+
+
+def _tts_backend_name() -> str:
+    if OPENAI_API_KEY:
+        return "openai (when /tts called)"
+    if TTS_PREFER == "edge":
+        return "edge-tts"
+    if TTS_PREFER == "kokoro":
+        if _kokoro_in_process() or _kokoro_subprocess_ready():
+            return "kokoro"
+        return "edge-tts (kokoro unavailable)"
+    if _kokoro_in_process() or _kokoro_subprocess_ready():
+        return "kokoro then edge-tts"
+    return "edge-tts"
 
 
 
@@ -386,12 +447,29 @@ OLLAMA_BASE = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
 OLLAMA_TIMEOUT = float(os.environ.get("OLLAMA_TIMEOUT", "90"))
 
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
-GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
+def _groq_api_key() -> str:
+    return (
+        os.environ.get("GROQ_API_KEY", "").strip()
+        or _get_env_from_file(".env", "GROQ_API_KEY")
+        or _get_env_from_file(".env.local", "GROQ_API_KEY")
+    )
+
+
+def _use_groq_only() -> bool:
+    """When true and Groq key is set, skip Ollama / Whisper fallbacks (not recommended for dev)."""
+    if not _groq_api_key():
+        return False
+    flag = os.environ.get("GROQ_ONLY", "false").strip().lower()
+    return flag in ("1", "true", "yes", "on")
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 TTS_VOICE = os.environ.get("TTS_VOICE", "nova")
 TTS_MODEL = os.environ.get("TTS_MODEL", "tts-1-hd")
+# edge = Microsoft neural (recommended) | kokoro = local | auto = kokoro then edge
+TTS_PREFER = os.environ.get("TTS_PREFER", "edge").strip().lower()
+EDGE_TTS_VOICE_FEMALE = os.environ.get("EDGE_TTS_VOICE_FEMALE", "en-US-AriaNeural")
+EDGE_TTS_VOICE_MALE = os.environ.get("EDGE_TTS_VOICE_MALE", "en-US-AndrewNeural")
+EDGE_TTS_RATE = os.environ.get("EDGE_TTS_RATE", "-5%")
 
 # ElevenLabs TTS
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "").strip()
@@ -496,19 +574,17 @@ GROQ_TIMEOUT = float(os.getenv("GROQ_TIMEOUT", "60"))
 
 async def _groq_chat(messages: list[dict]) -> str:
     """Call Groq chat completions. Returns assistant text or empty string. Raises on auth/HTTP failure."""
-    api_key = (
-        os.getenv("GROQ_API_KEY", "").strip()
-        or _get_env_from_file(".env.local", "GROQ_API_KEY")
-        or _get_env_from_file(".env", "GROQ_API_KEY")
-    )
+    api_key = _groq_api_key()
     if not api_key:
-        raise ValueError("GROQ_API_KEY is not set. Set it to use Groq; Ollama will be used as fallback.")
+        raise ValueError("GROQ_API_KEY is not set in server/.env")
     async with httpx.AsyncClient(timeout=GROQ_TIMEOUT) as client:
         r = await client.post(
             GROQ_CHAT_URL,
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json={"model": GROQ_MODEL, "messages": messages},
         )
+        if r.status_code >= 400:
+            logger.error("Groq chat HTTP %s: %s", r.status_code, r.text[:500])
         r.raise_for_status()
         data = r.json()
     choices = data.get("choices") or []
@@ -539,13 +615,20 @@ async def _ollama_chat(
     try:
         async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT) as client:
             r = await client.post(url, json=payload)
+            if r.status_code >= 400:
+                logger.warning("Ollama HTTP %s: %s", r.status_code, r.text[:300])
             r.raise_for_status()
             data = r.json()
             msg = data.get("message")
             if msg and isinstance(msg.get("content"), str):
                 return msg["content"].strip()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(
+            "Ollama unavailable (%s @ %s): %s",
+            OLLAMA_MODEL,
+            OLLAMA_BASE,
+            e,
+        )
     return None
 
 
@@ -553,16 +636,33 @@ async def _chat(
     system: str,
     current_question: str,
     conversation_history: list[dict] | None = None,
-) -> str | None:
-    """Try Groq first, fall back to local Ollama."""
+) -> tuple[str | None, str | None]:
+    """Groq → Ollama → caller may use canned replies. Returns (text, reply_source)."""
     messages = _build_ollama_messages(system, conversation_history, current_question)
-    try:
-        text = await _groq_chat(messages)
-        if text:
-            return text
-    except Exception as e:
-        logger.warning("Groq failed: %s; falling back to Ollama.", e)
-    return await _ollama_chat(system, current_question, conversation_history=conversation_history)
+    if _groq_api_key() and not _use_groq_only():
+        try:
+            text = await _groq_chat(messages)
+            if text:
+                logger.info("Patient reply source: groq")
+                return text, "groq"
+            logger.warning("Groq returned empty content; trying Ollama")
+        except Exception as e:
+            logger.warning("Groq chat failed (%s); trying Ollama", e)
+    elif _groq_api_key() and _use_groq_only():
+        try:
+            text = await _groq_chat(messages)
+            if text:
+                logger.info("Patient reply source: groq")
+                return text, "groq"
+        except Exception as e:
+            logger.error("Groq chat failed (GROQ_ONLY=true): %s", e)
+        return None, None
+
+    text = await _ollama_chat(system, current_question, conversation_history=conversation_history)
+    if text:
+        logger.info("Patient reply source: ollama (%s)", OLLAMA_MODEL)
+        return text, "ollama"
+    return None, None
 
 
 import re as _re
@@ -588,10 +688,101 @@ def _normalize_expressions(t: str) -> str:
     return _re.sub(r'\*([^*]+)\*', replace_expr, t)
 
 
+_server_dir = Path(__file__).resolve().parent
 _kokoro_pipeline = None
+_kokoro_unavailable = False  # True after in-process init failure
+_kokoro_subprocess_ok: bool | None = None
+_tts_backend_logged = False
+
+
+def _log_tts_backend_once(msg: str) -> None:
+    global _tts_backend_logged
+    if not _tts_backend_logged:
+        logger.info(msg)
+        _tts_backend_logged = True
+
+
+def _kokoro_subprocess_python() -> str | None:
+    """Python 3.10–3.12 interpreter with kokoro (see server/setup-kokoro.ps1)."""
+    env_py = os.environ.get("KOKORO_PYTHON", "").strip()
+    candidates: list[Path] = []
+    if env_py:
+        candidates.append(Path(env_py))
+    if sys.platform == "win32":
+        candidates.append(_server_dir / ".venv-kokoro" / "Scripts" / "python.exe")
+    else:
+        candidates.append(_server_dir / ".venv-kokoro" / "bin" / "python")
+    for p in candidates:
+        if p.is_file():
+            return str(p)
+    return None
+
+
+def _kokoro_subprocess_ready() -> bool:
+    global _kokoro_subprocess_ok
+    if _kokoro_subprocess_ok is not None:
+        return _kokoro_subprocess_ok
+    py = _kokoro_subprocess_python()
+    if not py:
+        _kokoro_subprocess_ok = False
+        return False
+    try:
+        r = subprocess.run(
+            [py, "-c", "import kokoro"],
+            capture_output=True,
+            timeout=90,
+        )
+        _kokoro_subprocess_ok = r.returncode == 0
+        if _kokoro_subprocess_ok:
+            logger.info("Kokoro subprocess ready: %s", py)
+    except Exception as e:
+        logger.warning("Kokoro subprocess probe failed: %s", e)
+        _kokoro_subprocess_ok = False
+    return _kokoro_subprocess_ok
+
+
+def _kokoro_in_process() -> bool:
+    if _kokoro_unavailable:
+        return False
+    try:
+        import kokoro  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def _kokoro_usable() -> bool:
+    return _kokoro_in_process() or _kokoro_subprocess_ready()
+
+
+def _warm_tts_backend() -> None:
+    """Load Kokoro if possible; otherwise edge-tts will be used (no crash on startup)."""
+    if _kokoro_in_process():
+        try:
+            _get_kokoro()
+            _log_tts_backend_once("TTS backend: Kokoro (in-process)")
+        except Exception as e:
+            logger.warning("Kokoro pre-warm failed (%s); trying subprocess or edge-tts.", e)
+    if _kokoro_subprocess_ready():
+        _log_tts_backend_once(
+            f"TTS backend: Kokoro (subprocess via {_kokoro_subprocess_python()})"
+        )
+        return
+    if not _tts_backend_logged:
+        _log_tts_backend_once(
+            f"TTS backend: edge-tts (Python {sys.version.split()[0]} — Kokoro needs 3.10–3.12; run server/setup-kokoro.ps1)"
+        )
+
+
+def _kokoro_available() -> bool:
+    """In-process Kokoro only (same interpreter as uvicorn)."""
+    return _kokoro_in_process()
+
 
 def _get_kokoro():
-    global _kokoro_pipeline
+    global _kokoro_pipeline, _kokoro_unavailable
+    if _kokoro_unavailable:
+        raise RuntimeError("Kokoro is not available")
     if _kokoro_pipeline is None:
         import warnings
         from kokoro import KPipeline
@@ -620,18 +811,33 @@ def _kokoro_tts(text: str, voice: str) -> bytes:
     return buf.getvalue()
 
 
-async def _tts_stream(text: str, gender: str):
+async def _edge_tts_stream(text: str, gender: str):
+    """Cloud TTS via Microsoft Edge neural voices (natural, works on Python 3.13)."""
+    import edge_tts
+    from fastapi.responses import StreamingResponse
+
+    gender = (gender or "female").strip().lower()
+    edge_voice = EDGE_TTS_VOICE_MALE if gender == "male" else EDGE_TTS_VOICE_FEMALE
+    communicate = edge_tts.Communicate(text, edge_voice, rate=EDGE_TTS_RATE)
+
+    async def generate():
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                yield chunk["data"]
+
+    return StreamingResponse(generate(), media_type="audio/mpeg")
+
+
+async def _kokoro_tts_stream(text: str, gender: str):
     import asyncio
     import io
     import soundfile as sf
     import numpy as np
     from fastapi.responses import StreamingResponse
 
-    text = _re.sub(r'\*[^*]+\*', '', text.strip()[:4096]).strip()
     gender = (gender or "female").strip().lower()
     voice = 'af_heart' if gender == 'female' else 'am_adam'
 
-    # Split into sentences so we can stream chunk-by-chunk
     sentences = [s.strip() for s in _re.split(r'(?<=[.!?])\s+', text) if s.strip()]
     if not sentences:
         sentences = [text]
@@ -655,9 +861,115 @@ async def _tts_stream(text: str, gender: str):
                 if wav:
                     yield wav
             except Exception as e:
-                print(f"[Kokoro sentence error] {e}")
+                logger.warning("[Kokoro sentence error] %s", e)
 
     return StreamingResponse(generate(), media_type="audio/wav")
+
+
+def _kokoro_subprocess_wav(text: str, gender: str) -> bytes:
+    py = _kokoro_subprocess_python()
+    if not py:
+        raise RuntimeError("Kokoro subprocess python not configured")
+    worker = _server_dir / "kokoro_tts_worker.py"
+    payload = json.dumps({"text": text, "gender": gender})
+    r = subprocess.run(
+        [py, str(worker)],
+        input=payload.encode("utf-8"),
+        capture_output=True,
+        timeout=180,
+    )
+    if r.returncode != 0:
+        err = (r.stderr or b"").decode("utf-8", errors="replace")[:500]
+        raise RuntimeError(err or f"kokoro worker exit {r.returncode}")
+    return r.stdout
+
+
+async def _kokoro_subprocess_tts_stream(text: str, gender: str):
+    import asyncio
+    from fastapi.responses import StreamingResponse
+
+    sentences = [s.strip() for s in _re.split(r'(?<=[.!?])\s+', text) if s.strip()]
+    if not sentences:
+        sentences = [text]
+    loop = asyncio.get_event_loop()
+
+    async def generate():
+        for sentence in sentences:
+            try:
+                wav = await loop.run_in_executor(
+                    None, _kokoro_subprocess_wav, sentence, gender
+                )
+                if wav:
+                    yield wav
+            except Exception as e:
+                logger.warning("[Kokoro subprocess sentence error] %s", e)
+
+    return StreamingResponse(generate(), media_type="audio/wav")
+
+
+async def _openai_tts_bytes(text: str, gender: str) -> bytes:
+    """OpenAI TTS — very natural when OPENAI_API_KEY is set."""
+    voice = os.environ.get("TTS_VOICE_MALE", "onyx") if (gender or "").lower() == "male" else TTS_VOICE
+    async with httpx.AsyncClient(timeout=60) as client:
+        r = await client.post(
+            "https://api.openai.com/v1/audio/speech",
+            headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+            json={"model": TTS_MODEL, "voice": voice, "input": text[:4096]},
+        )
+        r.raise_for_status()
+        return r.content
+
+
+async def _tts_stream(text: str, gender: str):
+    from fastapi.responses import Response
+
+    text = _re.sub(r'\*[^*]+\*', '', text.strip()[:4096]).strip()
+    if not text:
+        return Response(content=b"", media_type="audio/mpeg")
+
+    prefer = TTS_PREFER
+
+    if OPENAI_API_KEY:
+        try:
+            audio = await _openai_tts_bytes(text, gender)
+            return Response(content=audio, media_type="audio/mpeg", headers={"X-TTS-Backend": "openai"})
+        except Exception as e:
+            logger.warning("OpenAI TTS failed (%s); using edge-tts.", e)
+
+    if prefer == "edge":
+        resp = await _edge_tts_stream(text, gender)
+        resp.headers["X-TTS-Backend"] = "edge-tts"
+        return resp
+
+    if prefer == "kokoro":
+        try:
+            if _kokoro_in_process():
+                resp = await _kokoro_tts_stream(text, gender)
+                resp.headers["X-TTS-Backend"] = "kokoro"
+                return resp
+            if _kokoro_subprocess_ready():
+                resp = await _kokoro_subprocess_tts_stream(text, gender)
+                resp.headers["X-TTS-Backend"] = "kokoro-subprocess"
+                return resp
+        except Exception as e:
+            logger.warning("Kokoro TTS failed (%s); falling back to edge-tts.", e)
+
+    # auto: kokoro if available, else edge
+    try:
+        if _kokoro_in_process():
+            resp = await _kokoro_tts_stream(text, gender)
+            resp.headers["X-TTS-Backend"] = "kokoro"
+            return resp
+        if _kokoro_subprocess_ready():
+            resp = await _kokoro_subprocess_tts_stream(text, gender)
+            resp.headers["X-TTS-Backend"] = "kokoro-subprocess"
+            return resp
+    except Exception as e:
+        logger.warning("Kokoro TTS failed (%s); falling back to edge-tts.", e)
+
+    resp = await _edge_tts_stream(text, gender)
+    resp.headers["X-TTS-Backend"] = "edge-tts"
+    return resp
 
 
 @app.post("/tts")
@@ -779,14 +1091,28 @@ async def patient_reply(body: PatientReplyRequest):
         )
         system = system + rag_block
 
-    text = await _chat(system, current_question, conversation_history=body.conversation_history)
+    text, reply_source = await _chat(
+        system, current_question, conversation_history=body.conversation_history
+    )
 
     if not text:
         case_key = resolve_case_key(body.case_id, body.case_title)
         text = _fallback_reply(case_key)
+        reply_source = "canned"
+        logger.info("Patient reply source: canned (case=%s)", case_key)
 
     updated_revealed = _extract_revealed_symptoms(text, body.symptoms, body.revealed_symptoms)
-    return {"text": text, "revealed_symptoms": updated_revealed}
+    payload = {
+        "text": text,
+        "revealed_symptoms": updated_revealed,
+        "reply_source": reply_source,
+    }
+    from fastapi.responses import JSONResponse
+
+    return JSONResponse(
+        content=payload,
+        headers={"X-Reply-Source": reply_source or "unknown"},
+    )
 
 
 class SummariseRequest(BaseModel):
@@ -842,7 +1168,8 @@ async def summarise_session(body: SummariseRequest):
         f"Summary:"
     )
 
-    summary = await _chat(prompt, "", conversation_history=None) or body.prior_summary
+    summary_text, _ = await _chat(prompt, "", conversation_history=None)
+    summary = summary_text or body.prior_summary
     return {"summary": summary.strip()}
 
 
@@ -869,20 +1196,16 @@ def _load_checklist(case_type: str) -> dict:
     return data
 
 
-SCORING_MODEL = os.getenv("SCORING_MODEL", "llama-3.3-70b-versatile")
+SCORING_MODEL = os.getenv("SCORING_MODEL") or os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 
 async def _groq_chat_json(messages: list[dict]) -> str:
     """Call Groq for scoring using a capable model; extract JSON from response."""
     import re as _re2
-    api_key = (
-        os.getenv("GROQ_API_KEY", "").strip()
-        or _get_env_from_file(".env.local", "GROQ_API_KEY")
-        or _get_env_from_file(".env", "GROQ_API_KEY")
-    )
+    api_key = _groq_api_key()
     if not api_key:
-        raise ValueError("GROQ_API_KEY not set")
-    logger.info("[scoring] using model=%s", SCORING_MODEL)
+        raise ValueError("GROQ_API_KEY not set in server/.env")
+    logger.info("[scoring] Groq model=%s", SCORING_MODEL)
     async with httpx.AsyncClient(timeout=90) as client:
         r = await client.post(
             GROQ_CHAT_URL,
@@ -893,6 +1216,8 @@ async def _groq_chat_json(messages: list[dict]) -> str:
                 "temperature": 0.1,
             },
         )
+        if r.status_code >= 400:
+            logger.error("[scoring] Groq HTTP %s: %s", r.status_code, r.text[:500])
         r.raise_for_status()
         data = r.json()
     choices = data.get("choices") or []
@@ -1087,11 +1412,7 @@ async def evaluate_history_taking(body: HistoryEvalRequest):
 
 async def _groq_stt(content: bytes, filename: str) -> str:
     """Transcribe audio via Groq Whisper API. Raises on failure."""
-    api_key = (
-        os.getenv("GROQ_API_KEY", "").strip()
-        or _get_env_from_file(".env.local", "GROQ_API_KEY")
-        or _get_env_from_file(".env", "GROQ_API_KEY")
-    )
+    api_key = _groq_api_key()
     if not api_key:
         raise ValueError("GROQ_API_KEY not set")
     async with httpx.AsyncClient(timeout=30) as client:
@@ -1117,19 +1438,27 @@ async def stt(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to read upload: {e}")
 
-    if not content:
+    if not content or len(content) < 500:
+        logger.warning("[STT] upload too small (%s bytes)", len(content or 0))
         return {"text": ""}
 
-    # Try Groq cloud first (fast)
-    try:
-        text = await _groq_stt(content, f"audio{suffix}")
-        return {"text": text}
-    except ValueError:
-        pass  # no API key — fall through to local
-    except Exception as e:
-        print(f"[STT] Groq failed, falling back to local Whisper: {e}")
+    logger.info("[STT] received %s bytes (%s)", len(content), file.filename or "audio")
 
-    # Local Whisper fallback
+    # Groq Whisper (preferred when API key is set)
+    if _groq_api_key():
+        try:
+            text = await _groq_stt(content, f"audio{suffix}")
+            logger.info("[STT] Groq transcript (%d chars): %s", len(text), text[:120] if text else "")
+            return {"text": text}
+        except Exception as e:
+            logger.error("[STT] Groq Whisper failed: %s", e)
+            if _use_groq_only():
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Groq STT failed: {e}. Check GROQ_API_KEY in server/.env.",
+                ) from e
+
+    # Local Whisper fallback (no Groq key, or GROQ_ONLY=false)
     tmp = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -1138,8 +1467,17 @@ async def stt(file: UploadFile = File(...)):
         tmp = tmp_path
 
         model = get_model()
-        result = model.transcribe(tmp_path, language="en", task="transcribe", fp16=False, beam_size=1)
+        result = model.transcribe(
+            tmp_path,
+            language="en",
+            task="transcribe",
+            fp16=False,
+            beam_size=5,
+            best_of=3,
+            temperature=0,
+        )
         text = (result.get("text") or "").strip()
+        logger.info("[STT] local Whisper transcript (%d chars): %s", len(text), text[:120] if text else "")
         return {"text": text}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

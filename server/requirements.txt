@@ -4,5 +4,6 @@ httpx>=0.27.0
 openai-whisper>=20231117
 python-multipart==0.0.17
 edge-tts>=6.1.9
-kokoro>=0.9.4
 soundfile
+# Kokoro TTS: not installable on Python 3.13. Use server/setup-kokoro.ps1 to create
+# .venv-kokoro (Python 3.12); the main server calls it via subprocess automatically.

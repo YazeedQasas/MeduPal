@@ -35,7 +35,9 @@ const P = {
 
 const INPUT_CLASS =
   'w-full px-3 py-2.5 rounded-xl text-sm bg-white/5 border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/50 transition-all duration-200';
-const SELECT_CLASS = `${INPUT_CLASS} [color-scheme:dark]`;
+const SELECT_CLASS =
+  'assign-exam-select w-full px-3 py-2.5 rounded-xl text-sm bg-black border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/50 transition-all duration-200 [color-scheme:dark]';
+const OPTION_CLASS = 'bg-black text-white';
 
 const STATION_TEMPLATES = [
   { id: 'quick-4', label: 'Quick OSCE (4 stations)', count: 4, duration: 8 },
@@ -257,8 +259,10 @@ function StationCard({
         <div>
           <label className="block text-[11px] mb-1" style={{ color: P.muted }}>Case</label>
           <select value={station.caseId} onChange={(e) => onUpdate(station.id, { caseId: e.target.value })} className={cn(SELECT_CLASS, errors?.caseId && 'border-red-500/50')}>
-            <option value="">Select case</option>
-            {caseOptions.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
+            <option value="" className={OPTION_CLASS}>Select case</option>
+            {caseOptions.map((c) => (
+              <option key={c.id} value={c.id} className={OPTION_CLASS}>{c.title}</option>
+            ))}
           </select>
           {errors?.caseId && <p className="text-xs mt-1 text-red-300">{errors.caseId}</p>}
         </div>
@@ -703,6 +707,13 @@ export function AssignExamPage({ setActiveTab }) {
 
   return (
     <div className="w-full min-h-screen px-4 sm:px-6 lg:px-8 pb-24">
+      <style>{`
+        .assign-exam-select,
+        .assign-exam-select option {
+          background-color: #000000;
+          color: #ffffff;
+        }
+      `}</style>
       <div className="max-w-[1450px] mx-auto space-y-5">
         <header className="pt-4 pb-1 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
@@ -804,11 +815,11 @@ export function AssignExamPage({ setActiveTab }) {
                         onChange={(e) => {
                           if (e.target.value) applyTemplate(e.target.value);
                         }}
-                        className="text-xs rounded-lg px-2 py-1.5 bg-white/5 border border-white/10 text-white [color-scheme:dark]"
+                        className="assign-exam-select text-xs rounded-lg px-2 py-1.5 bg-black border border-white/10 text-white [color-scheme:dark]"
                       >
-                        <option value="">Use template...</option>
+                        <option value="" className={OPTION_CLASS}>Use template...</option>
                         {STATION_TEMPLATES.map((tpl) => (
-                          <option key={tpl.id} value={tpl.id}>{tpl.label}</option>
+                          <option key={tpl.id} value={tpl.id} className={OPTION_CLASS}>{tpl.label}</option>
                         ))}
                       </select>
                       <button

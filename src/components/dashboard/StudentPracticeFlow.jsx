@@ -30,6 +30,7 @@ import {
     Shuffle,
     ArrowLeft,
     Search,
+    RotateCcw,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { supabase } from '../../lib/supabase';
@@ -39,10 +40,16 @@ import {
     getPatientReplyApiUrl,
     getSttApiUrl,
     isFasterWhisperSttEnabled,
+    primeAudioContext,
     recordAudioForStt,
-    sendAudioToSttApi
+    sendAudioToSttApi,
 } from '../../lib/sttFasterWhisper';
 import { upsertHistoryEvaluation } from '../../lib/historyEvaluations';
+import {
+    syncHistoryScoreFromEvaluation,
+    syncPhysicalScore,
+    recomputeSessionTotalScore,
+} from '../../lib/sessionScores';
 
 const STEPS = [
     { id: 0, label: 'Case Selection', icon: Brain },
@@ -267,11 +274,15 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
     const [showHint, setShowHint] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
     const [isTranscribing, setIsTranscribing] = useState(false);
+    /** Voice STT finished — user can edit textarea before Send */
+    const [sttReviewReady, setSttReviewReady] = useState(false);
     const micLevelBarRef = useRef(null);
     const micLevelLabelRef = useRef(null);
     const [voiceEnabled, setVoiceEnabled] = useState(true);
     const [isSpeaking, setIsSpeaking] = useState(false);
     const [lastTranscript, setLastTranscript] = useState('');
+    /** Last patient reply provider: groq | ollama | canned (from /patient-reply) */
+    const [lastReplySource, setLastReplySource] = useState(null);
     
     // Evaluation step states
     const [selectedDiagnosis, setSelectedDiagnosis] = useState('');
@@ -316,7 +327,6 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
     const mockRecordingTimeoutRef = useRef(null);
     const fwRecordingRef = useRef(null);
     const chatInputRef = useRef(null);
-    const prewarmStreamRef = useRef(null);
     const sessionIdRef = useRef(null);
     const spacebarPTTRef = useRef(false);
 
@@ -395,18 +405,6 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
             respiratoryRate: patient.vitals.rr,
         });
     }, [selectedCase]);
-
-    // Pre-warm mic when entering history-taking step so getUserMedia is instant on first click
-    useEffect(() => {
-        if (currentStep !== 1 || !isFasterWhisperSttEnabled()) return;
-        navigator.mediaDevices.getUserMedia({ audio: true })
-            .then(s => { prewarmStreamRef.current = s; })
-            .catch(() => {});
-        return () => {
-            prewarmStreamRef.current?.getTracks().forEach(t => t.stop());
-            prewarmStreamRef.current = null;
-        };
-    }, [currentStep]);
 
     useEffect(() => {
         if (currentStep === 1) {
@@ -638,14 +636,25 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
 
     const playTTS = useCallback((text, patient) => {
         const apiBase = getPatientReplyApiUrl();
-        if (!apiBase) { fallbackSpeak(text); return; }
         const gender = getVoiceGender(patient);
-        const url = `${apiBase}/tts?text=${encodeURIComponent(text.trim())}&voice=${gender}`;
+        const clean = text.replace(/\*[^*]+\*/g, '').replace(/\s+/g, ' ').trim();
+        if (!clean) return;
+        if (!apiBase) {
+            fallbackSpeak(clean, gender);
+            return;
+        }
+        const url = `${apiBase}/tts?text=${encodeURIComponent(clean)}&voice=${gender}`;
         const audio = new Audio(url);
         setIsSpeaking(true);
         audio.onended = () => setIsSpeaking(false);
-        audio.onerror = () => { setIsSpeaking(false); fallbackSpeak(text); };
-        audio.play().catch(() => { setIsSpeaking(false); fallbackSpeak(text); });
+        audio.onerror = () => {
+            setIsSpeaking(false);
+            fallbackSpeak(clean, gender);
+        };
+        audio.play().catch(() => {
+            setIsSpeaking(false);
+            fallbackSpeak(clean, gender);
+        });
     }, [getVoiceGender, fallbackSpeak]);
 
     const handleSendMessage = useCallback(async (textOverride) => {
@@ -653,6 +662,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
         const transcript = raw.trim();
         if (!transcript || isTyping) return;
 
+        setSttReviewReady(false);
         setLastTranscript(transcript);
 
         const studentMessage = {
@@ -665,6 +675,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
         setIsTyping(true);
 
         let patientResponse;
+        let replySourceForMessage = null;
         const apiBase = getPatientReplyApiUrl();
         if (apiBase) {
             try {
@@ -713,6 +724,11 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
                 }
                 if (res.ok && data?.text) {
                     patientResponse = data.text;
+                    const src = data.reply_source || res.headers.get('X-Reply-Source');
+                    if (src) {
+                        replySourceForMessage = src;
+                        setLastReplySource(src);
+                    }
                 } else {
                     const detail = typeof data?.detail === 'string'
                         ? data.detail
@@ -760,7 +776,12 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
 
         // Show text immediately
         const updatedMessages = [...messages, studentMessage, { role: 'patient', content: displayText, ts: Date.now() }];
-        setMessages(prev => [...prev, { role: 'patient', content: displayText, ts: Date.now() }]);
+        setMessages(prev => [...prev, {
+            role: 'patient',
+            content: displayText,
+            ts: Date.now(),
+            reply_source: replySourceForMessage,
+        }]);
 
         // Rolling summary — fire every 6 patient turns in the background
         patientTurnCount.current += 1;
@@ -786,10 +807,9 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
 
         if (voiceEnabled) {
             window.speechSynthesis.cancel();
-            setIsSpeaking(true);
-            fallbackSpeak(patientResponse, getVoiceGender(selectedPatient));
+            playTTS(patientResponse, selectedPatient);
         }
-    }, [inputValue, isTyping, getPatientReply, fallbackSpeak, voiceEnabled, selectedCase, selectedPatient, messages, getCaseMockKey, revealedSymptoms, conversationSummary]);
+    }, [inputValue, isTyping, getPatientReply, playTTS, voiceEnabled, selectedCase, selectedPatient, messages, getCaseMockKey, revealedSymptoms, conversationSummary]);
 
     const handleKeyDown = useCallback((e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -812,10 +832,14 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
     }, [selectedCase, getCaseMockKey]);
 
     const reportSttIssue = useCallback((message, error = null) => {
-        if (error) {
-            console.error('[STT] Error response:', error);
-        }
-        setMessages(prev => [...prev, { role: 'alert', content: message, ts: Date.now() }]);
+        if (error) console.error('[STT]', error);
+        const detail = error?.message ? ` ${error.message}` : '';
+        const content = `${message}${detail}`.trim();
+        setMessages((prev) => {
+            const last = prev[prev.length - 1];
+            if (last?.role === 'alert' && last.content === content) return prev;
+            return [...prev, { role: 'alert', content, ts: Date.now() }];
+        });
     }, []);
 
     const stopMicLevelMonitor = useCallback(() => {
@@ -823,23 +847,29 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
         if (micLevelLabelRef.current) micLevelLabelRef.current.textContent = '';
     }, []);
 
-    const applySttTranscript = useCallback((text, { autoSend = true } = {}) => {
+    const applySttTranscript = useCallback((text, { autoSend = false } = {}) => {
         const transcript = typeof text === 'string' ? text.trim() : '';
         setInputValue(transcript);
-        setLastTranscript(transcript);
         if (!transcript) {
+            setSttReviewReady(false);
             reportSttIssue('No speech was detected. Please try again and speak clearly.');
             return;
         }
         if (autoSend) {
             handleSendMessage(transcript);
+        } else {
+            setSttReviewReady(true);
         }
     }, [reportSttIssue, handleSendMessage]);
 
-    // Focus textarea after transcription completes (isTranscribing → false re-enables it)
+    // Focus textarea after voice transcription for review/edit
     useEffect(() => {
-        if (!isTranscribing) chatInputRef.current?.focus();
-    }, [isTranscribing]);
+        if (!isTranscribing && sttReviewReady && chatInputRef.current) {
+            chatInputRef.current.focus();
+            const len = chatInputRef.current.value.length;
+            chatInputRef.current.setSelectionRange(len, len);
+        }
+    }, [isTranscribing, sttReviewReady]);
 
     const toggleRecording = useCallback(() => {
         if (isRecording) {
@@ -851,16 +881,13 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
                 setIsRecording(false);
                 setIsTranscribing(true);
                 controller.stop()
-                    .then((blob) => {
-                        prewarmStreamRef.current = controller.stream;
-                        return sendAudioToSttApi(blob);
-                    })
+                    .then((blob) => sendAudioToSttApi(blob))
                     .then(({ text }) => {
                         applySttTranscript(text);
                         setIsTranscribing(false);
                     })
                     .catch((error) => {
-                        reportSttIssue('Speech transcription failed. Check your STT server and try again.', error);
+                        reportSttIssue('Speech transcription failed.', error);
                         setIsTranscribing(false);
                     });
                 return;
@@ -875,31 +902,13 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
             return;
         }
 
+        if (sttReviewReady) setInputValue('');
+        setSttReviewReady(false);
+
         // Starting: prefer Faster-Whisper STT when API URL is set
         if (isFasterWhisperSttEnabled()) {
-            setIsRecording(true);
-            const handleAutoStop = () => {
-                const ctrl = fwRecordingRef.current;
-                if (!ctrl) return;
-                fwRecordingRef.current = null;
-                stopMicLevelMonitor();
-                setIsRecording(false);
-                setIsTranscribing(true);
-                ctrl.stop()
-                    .then((blob) => {
-                        prewarmStreamRef.current = ctrl.stream;
-                        return sendAudioToSttApi(blob);
-                    })
-                    .then(({ text }) => {
-                        applySttTranscript(text);
-                        setIsTranscribing(false);
-                    })
-                    .catch((error) => {
-                        reportSttIssue('Speech transcription failed. Check your STT server and try again.', error);
-                        setIsTranscribing(false);
-                    });
-            };
-            const onLevel = (level) => {
+            primeAudioContext();
+            const onLevel = (level, meta) => {
                 if (micLevelBarRef.current) {
                     micLevelBarRef.current.style.width = `${level}%`;
                     micLevelBarRef.current.style.background =
@@ -907,19 +916,28 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
                         level > 20 ? '#6ee7b7' : 'rgba(255,255,255,0.2)';
                 }
                 if (micLevelLabelRef.current) {
+                    const device = meta?.deviceLabel ? ` · ${meta.deviceLabel}` : '';
                     micLevelLabelRef.current.textContent =
-                        level < 5 ? 'No signal' : level < 20 ? 'Low' : level < 60 ? 'Good' : 'Strong';
+                        level < 3
+                            ? `No signal — check mic${device}`
+                            : level < 20
+                                ? `Low${device}`
+                                : level < 60
+                                    ? `Good${device}`
+                                    : `Strong${device}`;
                 }
             };
-            const controller = recordAudioForStt(handleAutoStop, onLevel);
-            const existingStream = prewarmStreamRef.current;
-            prewarmStreamRef.current = null;
-            controller.start(existingStream)
-                .then(() => { fwRecordingRef.current = controller; })
+            const controller = recordAudioForStt(onLevel);
+            controller.start()
+                .then(() => {
+                    fwRecordingRef.current = controller;
+                    setIsRecording(true);
+                })
                 .catch((error) => {
+                    fwRecordingRef.current = null;
                     stopMicLevelMonitor();
                     setIsRecording(false);
-                    reportSttIssue('Microphone access failed. Please allow microphone permissions and retry.', error);
+                    reportSttIssue('Microphone access failed.', error);
                 });
             return;
         }
@@ -937,15 +955,12 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
 
                 recognitionRef.current.onresult = (event) => {
                     const transcript = event.results[0][0].transcript;
-                    setInputValue(transcript);
-                    setLastTranscript(transcript);
+                    applySttTranscript(transcript);
                     setIsRecording(false);
                 };
 
                 recognitionRef.current.onerror = () => {
-                    const mockText = getMockTranscript();
-                    setInputValue(mockText);
-                    setLastTranscript(mockText);
+                    applySttTranscript(getMockTranscript());
                     setIsRecording(false);
                 };
 
@@ -956,21 +971,24 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
                 recognitionRef.current.start();
             } catch {
                 mockRecordingTimeoutRef.current = setTimeout(() => {
-                    const mockText = getMockTranscript();
-                    setInputValue(mockText);
-                    setLastTranscript(mockText);
+                    applySttTranscript(getMockTranscript());
                     setIsRecording(false);
                 }, 1500);
             }
         } else {
             mockRecordingTimeoutRef.current = setTimeout(() => {
-                const mockText = getMockTranscript();
-                setInputValue(mockText);
-                setLastTranscript(mockText);
+                applySttTranscript(getMockTranscript());
                 setIsRecording(false);
             }, 1500);
         }
-    }, [isRecording, getMockTranscript, applySttTranscript, reportSttIssue, stopMicLevelMonitor]);
+    }, [isRecording, sttReviewReady, getMockTranscript, applySttTranscript, reportSttIssue, stopMicLevelMonitor]);
+
+    const handleReRecord = useCallback(() => {
+        setSttReviewReady(false);
+        setInputValue('');
+        if (isRecording || isTranscribing || isTyping || isSpeaking) return;
+        toggleRecording();
+    }, [isRecording, isTranscribing, isTyping, isSpeaking, toggleRecording]);
 
     // Spacebar push-to-talk: hold Space to record, release to stop (only when not typing in the input)
     useEffect(() => {
@@ -1103,15 +1121,6 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
         return Math.min(10, Math.round(score * 10) / 10);
     }, [selectedCase, getCaseMockKey, examLog]);
 
-    // Insert/upsert skill score into session_scores. Uses upsert to avoid duplicates when re-submitting.
-    const insertSessionScore = useCallback(async (sessionId, skillType, score) => {
-        if (!sessionId || !skillType) return;
-        const row = { session_id: sessionId, skill_type: skillType, score: Math.round(score) };
-        await supabase
-            .from('session_scores')
-            .upsert(row, { onConflict: 'session_id,skill_type' });
-    }, []);
-
     const handleFinishSession = async () => {
         if (isSavingSession) return;
         setIsSavingSession(true);
@@ -1166,34 +1175,28 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
             if (!sessionId) sessionId = sessionIdRef.current;
             if (!sessionId) throw new Error('Failed to create or retrieve session row.');
 
-            // 2) Persist history checklist + skill scores (same session_id)
+            // 2) history_evaluations → session_scores.history_taking (via persist or fallback)
             if (historyEvalResult?.sections) {
                 await persistHistoryEvaluation(historyEvalResult);
             } else {
-                await insertSessionScore(sessionId, 'history_taking', historyScore);
+                const historyPercent = historyEvalResult?.items_covered != null && historyEvalResult?.total_items
+                    ? Math.round((historyEvalResult.items_covered / historyEvalResult.total_items) * 100)
+                    : Math.round(historyScore * 10);
+                await syncHistoryScoreFromEvaluation(sessionId, historyPercent);
             }
-            await insertSessionScore(sessionId, 'physical_examination', physicalScore);
 
-            // 3) Fetch all scores for this session
-            const { data: scoreRows } = await supabase
-                .from('session_scores')
-                .select('score')
-                .eq('session_id', sessionId);
+            // 3) Physical exam → session_scores.physical_examination
+            await syncPhysicalScore(sessionId, physicalScore);
 
-            // 4) Calculate total/average score (only aggregate same session_id)
-            const scores = (scoreRows || []).map((r) => r.score).filter((n) => n != null);
-            const avgScore = scores.length > 0
-                ? scores.reduce((sum, s) => sum + s, 0) / scores.length
-                : ((historyScore + physicalScore) / 2); // fallback if fetch empty
-            // Scale 0–10 → 0–100 for sessions.score
-            const sessionScore = Math.round(avgScore * 10);
+            // 4) Sum history + physical (0–10 each) → sessions.score (0–100)
+            const { sessionScore } = await recomputeSessionTotalScore(sessionId);
 
-            // 5) Update sessions table
+            // 5) Complete session row
             await supabase
                 .from('sessions')
                 .update({
                     end_time: nowIso,
-                    score: sessionScore,
+                    score: sessionScore ?? Math.min(100, Math.round(((historyScore + physicalScore) / 20) * 100)),
                     status: 'Completed',
                     feedback_notes: feedbackNotes
                 })
@@ -1858,9 +1861,30 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
 
                                 {/* Header */}
                                 <div className="px-5 py-3.5 flex items-center justify-between flex-shrink-0" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                                    <div className="flex items-center gap-2.5">
-                                        <div className="w-2 h-2 rounded-full bg-emerald-400" style={{ boxShadow: '0 0 6px rgba(52,211,153,0.8)' }} />
+                                    <div className="flex items-center gap-2.5 min-w-0">
+                                        <div className="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0" style={{ boxShadow: '0 0 6px rgba(52,211,153,0.8)' }} />
                                         <span className="text-sm font-semibold" style={{ color: '#f4f4f5' }}>Patient Conversation</span>
+                                        {lastReplySource && (
+                                            <span
+                                                className="text-[10px] font-medium px-2 py-0.5 rounded-full flex-shrink-0"
+                                                title="AI that generated the last patient reply"
+                                                style={{
+                                                    background: lastReplySource === 'groq'
+                                                        ? 'rgba(59,130,246,0.12)'
+                                                        : lastReplySource === 'ollama'
+                                                            ? 'rgba(168,85,247,0.12)'
+                                                            : 'rgba(255,255,255,0.06)',
+                                                    color: lastReplySource === 'groq'
+                                                        ? '#93c5fd'
+                                                        : lastReplySource === 'ollama'
+                                                            ? '#d8b4fe'
+                                                            : 'rgba(255,255,255,0.45)',
+                                                    border: '1px solid rgba(255,255,255,0.08)',
+                                                }}
+                                            >
+                                                {lastReplySource === 'groq' ? 'Groq' : lastReplySource === 'ollama' ? 'Ollama' : 'Canned'}
+                                            </span>
+                                        )}
                                     </div>
                                     <button
                                         onClick={() => setVoiceEnabled(!voiceEnabled)}
@@ -1952,7 +1976,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
                                 `}</style>
 
                                 {/* Last transcript pill */}
-                                {lastTranscript && !isRecording && (
+                                {lastTranscript && !isRecording && !sttReviewReady && (
                                     <div className="px-4 pb-2 flex-shrink-0">
                                         <div className="flex items-center gap-2 px-3 py-1.5 rounded-full w-fit" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
                                             <Mic size={9} style={{ color: 'rgba(255,255,255,0.3)' }} />
@@ -1989,11 +2013,49 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
                                             <span className="text-xs font-medium" style={{ color: '#6ee7b7' }}>Transcribing…</span>
                                         </div>
                                     )}
-                                    <div className="rounded-2xl overflow-hidden transition-all" style={{ background: 'rgba(255,255,255,0.04)', border: `1px solid ${isRecording ? 'rgba(239,68,68,0.3)' : 'rgba(255,255,255,0.09)'}` }}>
+                                    {sttReviewReady && inputValue.trim() && !isRecording && !isTranscribing && (
+                                        <div
+                                            className="flex flex-wrap items-center justify-between gap-2 mb-2 py-2 px-3 rounded-xl"
+                                            style={{ background: 'rgba(110,231,183,0.08)', border: '1px solid rgba(110,231,183,0.22)' }}
+                                        >
+                                            <span className="text-xs font-medium" style={{ color: '#6ee7b7' }}>
+                                                Review your transcription — edit if needed, then Send
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={handleReRecord}
+                                                disabled={isTyping || isSpeaking}
+                                                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all"
+                                                style={{ color: 'rgba(255,255,255,0.65)', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}
+                                            >
+                                                <RotateCcw size={11} />
+                                                Re-record
+                                            </button>
+                                        </div>
+                                    )}
+                                    <div
+                                        className="rounded-2xl overflow-hidden transition-all"
+                                        style={{
+                                            background: 'rgba(255,255,255,0.04)',
+                                            border: `1px solid ${
+                                                isRecording
+                                                    ? 'rgba(239,68,68,0.3)'
+                                                    : sttReviewReady
+                                                        ? 'rgba(110,231,183,0.35)'
+                                                        : 'rgba(255,255,255,0.09)'
+                                            }`,
+                                        }}
+                                    >
                                         <textarea
                                             ref={chatInputRef}
                                             rows={1}
-                                            placeholder={isRecording ? 'Listening...' : 'Ask the patient a question...'}
+                                            placeholder={
+                                                isRecording
+                                                    ? 'Listening...'
+                                                    : sttReviewReady
+                                                        ? 'Edit your question before sending...'
+                                                        : 'Ask the patient a question...'
+                                            }
                                             className="w-full bg-transparent px-4 pt-3.5 pb-2 text-sm focus:outline-none resize-none placeholder:text-white/20"
                                             style={{ color: '#f4f4f5', minHeight: 48, maxHeight: 120, caretColor: '#6ee7b7', lineHeight: 1.5 }}
                                             value={inputValue}
@@ -2012,7 +2074,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
                                                         : isTranscribing
                                                             ? { color: '#6ee7b7', background: 'rgba(110,231,183,0.08)' }
                                                             : { color: 'rgba(255,255,255,0.3)', background: 'transparent' }}
-                                                    title={isRecording ? 'Stop recording' : isTranscribing ? 'Transcribing…' : 'Hold Space or click to record'}
+                                                    title={isRecording ? 'Click to stop and transcribe' : isTranscribing ? 'Transcribing…' : 'Click to record (click again when done)'}
                                                 >
                                                     {isRecording ? <MicOff size={15} /> : <Mic size={15} />}
                                                 </button>
@@ -2025,14 +2087,21 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
                                             </div>
                                             <button
                                                 onClick={handleSendMessage}
-                                                disabled={!inputValue.trim() || isTyping || isSpeaking}
+                                                disabled={!inputValue.trim() || isTyping || isSpeaking || isRecording || isTranscribing}
+                                                title={sttReviewReady ? 'Send edited message to patient' : 'Send message'}
                                                 className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all"
-                                                style={inputValue.trim()
-                                                    ? { background: 'linear-gradient(135deg, #6ee7b7, #3b82f6)', color: '#0a0a0a', boxShadow: '0 4px 14px rgba(110,231,183,0.25)' }
+                                                style={inputValue.trim() && !isRecording && !isTranscribing
+                                                    ? {
+                                                        background: 'linear-gradient(135deg, #6ee7b7, #3b82f6)',
+                                                        color: '#0a0a0a',
+                                                        boxShadow: sttReviewReady
+                                                            ? '0 4px 18px rgba(110,231,183,0.4)'
+                                                            : '0 4px 14px rgba(110,231,183,0.25)',
+                                                    }
                                                     : { background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.2)', cursor: 'not-allowed' }}
                                             >
                                                 <Send size={13} />
-                                                Send
+                                                {sttReviewReady ? 'Send to patient' : 'Send'}
                                             </button>
                                         </div>
                                     </div>

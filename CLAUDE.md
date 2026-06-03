@@ -16,7 +16,8 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1       # Windows
 source .venv/bin/activate         # macOS/Linux
 pip install -r requirements.txt
-python -m uvicorn main:app --reload --port 8000
+.\run-dev.ps1   # preferred on Windows (excludes .venv-kokoro from reload)
+# or: python -m uvicorn main:app --reload --port 8000 --reload-exclude ".venv-kokoro"
 ```
 
 ## Environment Variables
