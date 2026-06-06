@@ -8,12 +8,24 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { fetchHistoryEvaluation, displayHistoryPercent } from '../../lib/historyEvaluations';
+import {
+  fetchEvaluation,
+  displayEvalPercent,
+  HISTORY_EVAL_TYPE,
+  EVAL_TYPE_LABELS,
+} from '../../lib/historyEvaluations';
 
 /**
  * Read-only history evaluation breakdown for students (practice or released exam).
  */
-export function HistoryEvalDetailModal({ sessionId, caseTitle, sessionLabel, onClose }) {
+export function HistoryEvalDetailModal({
+  sessionId,
+  caseTitle,
+  sessionLabel,
+  evaluationType = HISTORY_EVAL_TYPE,
+  onClose,
+}) {
+  const evalLabel = EVAL_TYPE_LABELS[evaluationType] || 'Evaluation';
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [row, setRow] = useState(null);
@@ -22,7 +34,7 @@ export function HistoryEvalDetailModal({ sessionId, caseTitle, sessionLabel, onC
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const { data, err } = await fetchHistoryEvaluation(sessionId);
+    const { data, error: err } = await fetchEvaluation(sessionId, evaluationType);
     if (err) {
       setError(err.message || 'Could not load score details');
       setLoading(false);
@@ -35,14 +47,14 @@ export function HistoryEvalDetailModal({ sessionId, caseTitle, sessionLabel, onC
     }
     setRow(data);
     setLoading(false);
-  }, [sessionId]);
+  }, [sessionId, evaluationType]);
 
   useEffect(() => {
     load();
   }, [load]);
 
   const sections = row?.instructor_sections?.length ? row.instructor_sections : row?.sections;
-  const percent = displayHistoryPercent(row);
+  const percent = displayEvalPercent(row);
   const { covered, total } = row
     ? { covered: row.items_covered, total: row.total_items }
     : { covered: 0, total: 0 };
@@ -59,7 +71,7 @@ export function HistoryEvalDetailModal({ sessionId, caseTitle, sessionLabel, onC
               <ClipboardCheck size={20} />
             </div>
             <div className="min-w-0">
-              <h2 className="text-lg font-bold text-foreground truncate">History-taking score</h2>
+              <h2 className="text-lg font-bold text-foreground truncate">{evalLabel} score</h2>
               <p className="text-xs text-muted-foreground truncate">
                 {caseTitle || sessionLabel || 'Practice session'}
               </p>

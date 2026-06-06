@@ -11,12 +11,14 @@ import {
 import { cn } from '../../lib/utils';
 import { useAuth } from '../../context/AuthContext';
 import {
-  fetchHistoryEvaluation,
-  saveInstructorHistoryReview,
-  releaseHistoryEvaluationToStudent,
+  fetchEvaluation,
+  saveInstructorEvalReview,
+  releaseEvaluationToStudent,
   percentFromSections,
   countFromSections,
-  historyEvalStatusLabel,
+  evalStatusLabel,
+  HISTORY_EVAL_TYPE,
+  EVAL_TYPE_LABELS,
 } from '../../lib/historyEvaluations';
 
 function cloneSections(sections) {
@@ -26,7 +28,15 @@ function cloneSections(sections) {
   }));
 }
 
-export function HistoryEvalReview({ sessionId, studentName, caseTitle, onClose, onUpdated }) {
+export function HistoryEvalReview({
+  sessionId,
+  studentName,
+  caseTitle,
+  evaluationType = HISTORY_EVAL_TYPE,
+  onClose,
+  onUpdated,
+}) {
+  const evalLabel = EVAL_TYPE_LABELS[evaluationType] || 'Evaluation';
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -41,14 +51,14 @@ export function HistoryEvalReview({ sessionId, studentName, caseTitle, onClose, 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const { data, error: err } = await fetchHistoryEvaluation(sessionId);
+    const { data, error: err } = await fetchEvaluation(sessionId, evaluationType);
     if (err) {
       setError(err.message || 'Could not load evaluation');
       setLoading(false);
       return;
     }
     if (!data) {
-      setError('No history evaluation saved for this session yet.');
+      setError(`No ${evalLabel.toLowerCase()} evaluation saved for this session yet.`);
       setLoading(false);
       return;
     }
@@ -62,7 +72,7 @@ export function HistoryEvalReview({ sessionId, studentName, caseTitle, onClose, 
     setNotes(data.instructor_notes || '');
     setUseManualPercent(data.instructor_percent != null);
     setLoading(false);
-  }, [sessionId]);
+  }, [sessionId, evaluationType, evalLabel]);
 
   useEffect(() => {
     load();
@@ -91,8 +101,9 @@ export function HistoryEvalReview({ sessionId, studentName, caseTitle, onClose, 
   const handleSave = async () => {
     setSaving(true);
     setError(null);
-    const { error: err } = await saveInstructorHistoryReview({
+    const { error: err } = await saveInstructorEvalReview({
       sessionId,
+      evaluationType,
       instructorPercent: displayPercent,
       instructorSections: sections,
       instructorNotes: notes.trim() || null,
@@ -113,12 +124,12 @@ export function HistoryEvalReview({ sessionId, studentName, caseTitle, onClose, 
   };
 
   const handleRelease = async () => {
-    if (!window.confirm('Send this history-taking score to the student? They will see it in their session history.')) {
+    if (!window.confirm(`Send this ${evalLabel.toLowerCase()} score to the student? They will see it in their session history.`)) {
       return;
     }
     setReleasing(true);
     setError(null);
-    const { error: err } = await releaseHistoryEvaluationToStudent(sessionId);
+    const { error: err } = await releaseEvaluationToStudent(sessionId, evaluationType);
     setReleasing(false);
     if (err) {
       setError(err.message || 'Release failed');
@@ -128,7 +139,7 @@ export function HistoryEvalReview({ sessionId, studentName, caseTitle, onClose, 
     onUpdated?.();
   };
 
-  const statusLabel = historyEvalStatusLabel(row);
+  const statusLabel = evalStatusLabel(row);
   const isReleased = row?.released_to_student;
 
   return (
@@ -143,7 +154,7 @@ export function HistoryEvalReview({ sessionId, studentName, caseTitle, onClose, 
               <ClipboardCheck size={20} />
             </div>
             <div className="min-w-0">
-              <h2 className="text-lg font-bold text-foreground truncate">Review history score</h2>
+              <h2 className="text-lg font-bold text-foreground truncate">Review {evalLabel.toLowerCase()} score</h2>
               <p className="text-xs text-muted-foreground truncate">
                 {studentName || 'Student'}
                 {caseTitle ? ` · ${caseTitle}` : ''}
@@ -172,7 +183,7 @@ export function HistoryEvalReview({ sessionId, studentName, caseTitle, onClose, 
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200 space-y-2">
               <p>{error}</p>
               <p className="text-xs text-amber-200/80">
-                The student must complete history-taking (practice or exam digital flow) while signed in. If saves fail for everyone, run{' '}
+                The student must complete the {evalLabel.toLowerCase()} step (practice or exam digital flow) while signed in. If saves fail for everyone, run{' '}
                 <code className="bg-black/20 px-1 rounded">supabase_migration_history_evaluations_fix.sql</code> in Supabase.
               </p>
             </div>

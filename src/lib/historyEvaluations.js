@@ -1,7 +1,8 @@
 import { supabase } from './supabase';
-import { syncHistoryScoreFromEvaluation } from './sessionScores';
+import { syncHistoryScoreFromEvaluation, syncPhysicalScoreFromEvaluation } from './sessionScores';
 
 export const HISTORY_EVAL_TYPE = 'history_taking';
+export const PHYSICAL_EVAL_TYPE = 'physical_examination';
 
 /** Count covered checklist items and return 0–100 percent. */
 export function percentFromSections(sections) {
@@ -34,14 +35,20 @@ function aiPercentFromResult(result) {
 }
 
 /** Core columns only (works even if optional columns were not added). */
-export function buildHistoryEvalRow({ sessionId, isExam, result, includeOptional = true }) {
+export function buildHistoryEvalRow({
+  sessionId,
+  isExam,
+  result,
+  includeOptional = true,
+  evaluationType = HISTORY_EVAL_TYPE,
+}) {
   const aiPercent = aiPercentFromResult(result);
   const now = new Date().toISOString();
   const counts = countFromSections(result.sections);
 
   const row = {
     session_id: sessionId,
-    evaluation_type: HISTORY_EVAL_TYPE,
+    evaluation_type: evaluationType,
     items_covered: result.items_covered ?? counts.covered,
     total_items: result.total_items ?? counts.total,
     ai_percent: aiPercent,
@@ -75,11 +82,12 @@ async function tryUpsertRow(row) {
 }
 
 async function tryInsertOrUpdate(row) {
+  const evalType = row.evaluation_type || HISTORY_EVAL_TYPE;
   const { data: existing } = await supabase
     .from('history_evaluations')
     .select('id')
     .eq('session_id', row.session_id)
-    .eq('evaluation_type', HISTORY_EVAL_TYPE)
+    .eq('evaluation_type', evalType)
     .maybeSingle();
 
   if (existing?.id) {
@@ -100,20 +108,27 @@ async function tryInsertOrUpdate(row) {
   return { data, error };
 }
 
-/** Persist AI history evaluation (practice: visible immediately; exam: pending instructor). */
-export async function upsertHistoryEvaluation({ sessionId, isExam, caseId, checklistKey, result }) {
+/** Persist AI evaluation (practice: visible immediately; exam: pending instructor). */
+export async function upsertEvaluation({
+  sessionId,
+  isExam,
+  caseId,
+  checklistKey,
+  result,
+  evaluationType = HISTORY_EVAL_TYPE,
+}) {
   if (!sessionId || !result?.sections) {
     return { data: null, error: new Error('Missing session or evaluation data') };
   }
 
-  let row = buildHistoryEvalRow({ sessionId, isExam, result });
+  let row = buildHistoryEvalRow({ sessionId, isExam, result, evaluationType });
   if (caseId) row = { ...row, case_id: caseId };
   if (checklistKey) row = { ...row, checklist_key: checklistKey };
 
   let { data, error } = await tryUpsertRow(row);
 
   if (error?.message?.includes('case_id') || error?.message?.includes('checklist_key')) {
-    const minimal = buildHistoryEvalRow({ sessionId, isExam, result });
+    const minimal = buildHistoryEvalRow({ sessionId, isExam, result, evaluationType });
     ({ data, error } = await tryUpsertRow(minimal));
   }
 
@@ -122,12 +137,26 @@ export async function upsertHistoryEvaluation({ sessionId, isExam, caseId, check
   }
 
   if (error) {
-    console.error('[history_evaluations] save failed:', error.message, error.details, error.hint);
+    console.error(`[history_evaluations] ${evaluationType} save failed:`, error.message, error.details, error.hint);
     return { data: null, error };
   }
 
-  await syncHistorySessionScore(sessionId, row.final_percent);
+  if (evaluationType === PHYSICAL_EVAL_TYPE) {
+    await syncPhysicalScoreFromEvaluation(sessionId, row.final_percent);
+  } else {
+    await syncHistorySessionScore(sessionId, row.final_percent);
+  }
   return { data, error: null };
+}
+
+/** Persist AI history evaluation (practice: visible immediately; exam: pending instructor). */
+export async function upsertHistoryEvaluation(args) {
+  return upsertEvaluation({ ...args, evaluationType: HISTORY_EVAL_TYPE });
+}
+
+/** Persist AI physical examination evaluation (same table + flow as history). */
+export async function upsertPhysicalEvaluation(args) {
+  return upsertEvaluation({ ...args, evaluationType: PHYSICAL_EVAL_TYPE });
 }
 
 /** history_evaluations % → session_scores.history_taking + sessions.score rollup. */
@@ -136,38 +165,54 @@ export async function syncHistorySessionScore(sessionId, percent) {
   await syncHistoryScoreFromEvaluation(sessionId, percent);
 }
 
-export async function fetchHistoryEvaluation(sessionId) {
+export async function fetchEvaluation(sessionId, evaluationType = HISTORY_EVAL_TYPE) {
   const { data, error } = await supabase
     .from('history_evaluations')
     .select('*')
     .eq('session_id', sessionId)
-    .eq('evaluation_type', HISTORY_EVAL_TYPE)
+    .eq('evaluation_type', evaluationType)
     .maybeSingle();
   return { data, error };
 }
 
-/** Batch fetch for instructor sessions list */
-export async function fetchHistoryEvaluationsForSessions(sessionIds) {
-  if (!sessionIds?.length) return {};
+export async function fetchHistoryEvaluation(sessionId) {
+  return fetchEvaluation(sessionId, HISTORY_EVAL_TYPE);
+}
+
+export async function fetchPhysicalEvaluation(sessionId) {
+  return fetchEvaluation(sessionId, PHYSICAL_EVAL_TYPE);
+}
+
+/** Batch fetch history + physical rows for instructor sessions list */
+export async function fetchEvaluationsForSessions(sessionIds) {
+  if (!sessionIds?.length) return { history: {}, physical: {} };
   const { data, error } = await supabase
     .from('history_evaluations')
     .select('*')
-    .in('session_id', sessionIds)
-    .eq('evaluation_type', HISTORY_EVAL_TYPE);
+    .in('session_id', sessionIds);
   if (error) {
     console.warn('[history_evaluations] batch fetch:', error.message);
-    return {};
+    return { history: {}, physical: {} };
   }
-  const map = {};
+  const history = {};
+  const physical = {};
   (data || []).forEach((row) => {
-    map[row.session_id] = row;
+    if (row.evaluation_type === PHYSICAL_EVAL_TYPE) physical[row.session_id] = row;
+    else history[row.session_id] = row;
   });
-  return map;
+  return { history, physical };
+}
+
+/** Batch fetch for instructor sessions list (history only — backward compatible) */
+export async function fetchHistoryEvaluationsForSessions(sessionIds) {
+  const { history } = await fetchEvaluationsForSessions(sessionIds);
+  return history;
 }
 
 /** Instructor saves adjusted score (does not release to student). */
-export async function saveInstructorHistoryReview({
+export async function saveInstructorEvalReview({
   sessionId,
+  evaluationType = HISTORY_EVAL_TYPE,
   instructorPercent,
   instructorSections,
   instructorNotes,
@@ -194,7 +239,7 @@ export async function saveInstructorHistoryReview({
     .from('history_evaluations')
     .update(patch)
     .eq('session_id', sessionId)
-    .eq('evaluation_type', HISTORY_EVAL_TYPE)
+    .eq('evaluation_type', evaluationType)
     .select()
     .single();
 
@@ -210,24 +255,37 @@ export async function saveInstructorHistoryReview({
       .from('history_evaluations')
       .update(minimal)
       .eq('session_id', sessionId)
-      .eq('evaluation_type', HISTORY_EVAL_TYPE)
+      .eq('evaluation_type', evaluationType)
       .select()
       .single());
   }
 
   if (error) return { data: null, error };
 
-  await syncHistorySessionScore(sessionId, finalPercent);
+  if (evaluationType === PHYSICAL_EVAL_TYPE) {
+    await syncPhysicalScoreFromEvaluation(sessionId, finalPercent);
+  } else {
+    await syncHistorySessionScore(sessionId, finalPercent);
+  }
   return { data, error: null };
 }
 
-/** Instructor releases final history score to the student. */
-export async function releaseHistoryEvaluationToStudent(sessionId) {
+export async function saveInstructorHistoryReview(args) {
+  return saveInstructorEvalReview({ ...args, evaluationType: HISTORY_EVAL_TYPE });
+}
+
+export async function saveInstructorPhysicalReview(args) {
+  return saveInstructorEvalReview({ ...args, evaluationType: PHYSICAL_EVAL_TYPE });
+}
+
+/** Instructor releases final score to the student. */
+export async function releaseEvaluationToStudent(sessionId, evaluationType = HISTORY_EVAL_TYPE) {
   const now = new Date().toISOString();
 
-  const { data: evalRow, error: fetchErr } = await fetchHistoryEvaluation(sessionId);
+  const { data: evalRow, error: fetchErr } = await fetchEvaluation(sessionId, evaluationType);
   if (fetchErr || !evalRow) {
-    return { data: null, error: fetchErr || new Error('No history evaluation found for this session.') };
+    const label = evaluationType === PHYSICAL_EVAL_TYPE ? 'physical examination' : 'history-taking';
+    return { data: null, error: fetchErr || new Error(`No ${label} evaluation found for this session.`) };
   }
 
   const { data, error } = await supabase
@@ -238,16 +296,30 @@ export async function releaseHistoryEvaluationToStudent(sessionId) {
       released_at: now,
     })
     .eq('session_id', sessionId)
-    .eq('evaluation_type', HISTORY_EVAL_TYPE)
+    .eq('evaluation_type', evaluationType)
     .select()
     .single();
 
   if (error) return { data: null, error };
 
   const finalPercent = Math.round(evalRow.final_percent ?? evalRow.ai_percent ?? 0);
-  await syncHistoryScoreFromEvaluation(sessionId, finalPercent);
+  if (evaluationType === PHYSICAL_EVAL_TYPE) {
+    await syncPhysicalScoreFromEvaluation(sessionId, finalPercent);
+  } else {
+    await syncHistoryScoreFromEvaluation(sessionId, finalPercent);
+  }
 
   return { data, error: null };
+}
+
+/** Instructor releases final history score to the student. */
+export async function releaseHistoryEvaluationToStudent(sessionId) {
+  return releaseEvaluationToStudent(sessionId, HISTORY_EVAL_TYPE);
+}
+
+/** Instructor releases final physical score to the student. */
+export async function releasePhysicalEvaluationToStudent(sessionId) {
+  return releaseEvaluationToStudent(sessionId, PHYSICAL_EVAL_TYPE);
 }
 
 function normalizeInsightText(value) {
@@ -305,30 +377,68 @@ export function aggregateHistoryEvalInsights(rows, { limit = 5 } = {}) {
   };
 }
 
-export function pickHistoryEval(embed) {
+export function pickEval(embed, evaluationType = HISTORY_EVAL_TYPE) {
   if (!embed) return null;
   if (Array.isArray(embed)) {
-    return embed.find((r) => r.evaluation_type === HISTORY_EVAL_TYPE) || embed[0] || null;
+    return embed.find((r) => r.evaluation_type === evaluationType) || null;
   }
+  if (embed.evaluation_type && embed.evaluation_type !== evaluationType) return null;
   return embed;
 }
 
-export function studentCanSeeHistoryScore(sessionKind, historyEval) {
+export function pickHistoryEval(embed) {
+  return pickEval(embed, HISTORY_EVAL_TYPE);
+}
+
+export function pickPhysicalEval(embed) {
+  return pickEval(embed, PHYSICAL_EVAL_TYPE);
+}
+
+export function studentCanSeeEvalScore(sessionKind, evalRow) {
   if (sessionKind === 'practice') return true;
-  if (sessionKind === 'exam') return Boolean(historyEval?.released_to_student);
+  if (sessionKind === 'exam') return Boolean(evalRow?.released_to_student);
   return false;
 }
 
+export function studentCanSeeHistoryScore(sessionKind, historyEval) {
+  return studentCanSeeEvalScore(sessionKind, historyEval);
+}
+
+export function studentCanSeePhysicalScore(sessionKind, physicalEval) {
+  return studentCanSeeEvalScore(sessionKind, physicalEval);
+}
+
+export function displayEvalPercent(evalRow) {
+  if (!evalRow) return null;
+  return evalRow.final_percent ?? evalRow.ai_percent ?? null;
+}
+
 export function displayHistoryPercent(historyEval) {
-  if (!historyEval) return null;
-  return historyEval.final_percent ?? historyEval.ai_percent ?? null;
+  return displayEvalPercent(historyEval);
+}
+
+export function displayPhysicalPercent(physicalEval) {
+  return displayEvalPercent(physicalEval);
+}
+
+export function evalStatusLabel(evalRow) {
+  if (!evalRow) return null;
+  if (evalRow.released_to_student) return 'Released';
+  if (evalRow.review_status === 'saved') return 'Saved — not sent';
+  if (evalRow.review_status === 'pending_instructor') return 'Awaiting review';
+  if (evalRow.review_status === 'auto') return 'Auto-scored';
+  return evalRow.review_status;
 }
 
 export function historyEvalStatusLabel(historyEval) {
-  if (!historyEval) return null;
-  if (historyEval.released_to_student) return 'Released';
-  if (historyEval.review_status === 'saved') return 'Saved — not sent';
-  if (historyEval.review_status === 'pending_instructor') return 'Awaiting review';
-  if (historyEval.review_status === 'auto') return 'Auto-scored';
-  return historyEval.review_status;
+  return evalStatusLabel(historyEval);
 }
+
+export function physicalEvalStatusLabel(physicalEval) {
+  return evalStatusLabel(physicalEval);
+}
+
+export const EVAL_TYPE_LABELS = {
+  [HISTORY_EVAL_TYPE]: 'History-taking',
+  [PHYSICAL_EVAL_TYPE]: 'Physical examination',
+};

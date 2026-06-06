@@ -282,6 +282,9 @@ class PatientReplyRequest(BaseModel):
     system_prompt: str = ""  # LLM persona prompt from patients.js
     revealed_symptoms: list[str] = []  # symptoms already disclosed to the student this session
     conversation_summary: str = ""    # rolling summary of prior turns (injected when non-empty)
+    # Physical exam chatbot — history taking omits these (defaults keep history path unchanged)
+    session_mode: str = "history"  # "history" | "physical_exam"
+    physical_exam_region: str | None = None
 
     @field_validator("patient_age", mode="before")
     @classmethod
@@ -556,7 +559,7 @@ def _build_ollama_messages(
                 continue
             if role == "student":
                 messages.append({"role": "user", "content": content.strip()})
-            elif role == "patient":
+            elif role in ("patient", "assistant"):
                 messages.append({"role": "assistant", "content": content.strip()})
             # skip "system", "alert", and any other roles
 
@@ -1014,10 +1017,114 @@ def _extract_revealed_symptoms(
     return [symptom_map.get(s, s) for s in revealed]
 
 
+async def _physical_exam_patient_reply(body: PatientReplyRequest):
+    """
+    OSCE exam instructor via /patient-reply.
+    Rule-based scoring picks the outcome; Groq/Ollama generates a natural instructor reply.
+    Never reveals findings — safety filter falls back to canned lines if the LLM leaks.
+    """
+    from fastapi.responses import JSONResponse
+    from physical_exam_logic import (
+        build_evaluation_instruction,
+        build_instructor_system_prompt,
+        handle_physical_exam_message,
+        sanitize_instructor_reply,
+    )
+
+    current_question = body.student_question.strip()
+    if not current_question:
+        raise HTTPException(status_code=400, detail="Empty message")
+
+    case_key = resolve_case_key(body.case_id, body.case_title)
+
+    patient_name = (body.patient_name or "").strip()
+
+    result = handle_physical_exam_message(
+        case_key=case_key,
+        message=current_question,
+        current_region=body.physical_exam_region,
+        patient_name=patient_name,
+    )
+
+    # Rule engine picks outcome; Groq/Ollama generates natural wording from instructions.
+    fallback_reply = result["reply"]
+    reply_text = fallback_reply
+    reply_source = "physical_exam"
+
+    system = (
+        build_instructor_system_prompt(
+            case_key, body.case_title, body.case_category, patient_name=patient_name
+        )
+        + build_evaluation_instruction(
+            result["phase"],
+            result.get("current_region"),
+            current_question,
+            patient_name=patient_name,
+            ack_kind=result.get("ack_kind"),
+            student_name=result.get("student_name"),
+        )
+    )
+
+    text, llm_source = await _chat(
+        system,
+        current_question,
+        conversation_history=body.conversation_history,
+    )
+    safe = (
+        sanitize_instructor_reply(
+            text,
+            case_key,
+            current_question,
+            phase=result["phase"],
+            ack_kind=result.get("ack_kind"),
+        )
+        if text
+        else None
+    )
+    if safe:
+        reply_text = safe
+        reply_source = llm_source or "physical_exam"
+        logger.info(
+            "[physical-exam] instructor via %s (phase=%s ack=%s)",
+            reply_source,
+            result["phase"],
+            result.get("ack_kind"),
+        )
+    else:
+        reply_text = fallback_reply
+        reply_source = "physical_exam"
+        if text:
+            logger.warning(
+                "[physical-exam] LLM blocked; rule fallback (phase=%s ack=%s)",
+                result["phase"],
+                result.get("ack_kind"),
+            )
+        else:
+            logger.info(
+                "[physical-exam] LLM unavailable; rule fallback (phase=%s ack=%s)",
+                result["phase"],
+                result.get("ack_kind"),
+            )
+
+    return JSONResponse(
+        content={
+            "text": reply_text,
+            "phase": result["phase"],
+            "physical_exam_region": result.get("current_region"),
+            "reply_source": reply_source,
+            "revealed_symptoms": body.revealed_symptoms,
+        },
+        headers={"X-Reply-Source": reply_source},
+    )
+
+
 @app.post("/patient-reply")
 async def patient_reply(body: PatientReplyRequest):
     """Generate a patient reply using Groq (falls back to Ollama, then canned replies)."""
     current_question = body.student_question.strip()
+
+    if (body.session_mode or "history").lower() == "physical_exam":
+        return await _physical_exam_patient_reply(body)
 
     # Build system prompt — prefer rich persona from patients.js, fall back to legacy dict
     if body.system_prompt.strip():
@@ -1410,6 +1517,72 @@ async def evaluate_history_taking(body: HistoryEvalRequest):
     }
 
 
+# ── Physical Examination Evaluation ───────────────────────────────────────────
+
+_PHYSICAL_CHECKLIST_CACHE: dict[str, dict] = {}
+
+
+def _load_physical_checklist(case_type: str) -> dict:
+    if case_type in _PHYSICAL_CHECKLIST_CACHE:
+        return _PHYSICAL_CHECKLIST_CACHE[case_type]
+    import json as _json_pe
+    docs_dir = Path(__file__).resolve().parent / "case_docs"
+    path = docs_dir / f"{case_type}_examination_checklist.json"
+    data = _json_pe.loads(path.read_text(encoding="utf-8"))
+    _PHYSICAL_CHECKLIST_CACHE[case_type] = data
+    return data
+
+
+class PhysicalEvalRequest(BaseModel):
+    conversation: list[dict]
+    exam_log: list[dict] | None = None
+    case_id: str = ""
+    case_title: str = ""
+    patient_name: str = ""
+    patient_id: str = ""
+
+
+@app.post("/evaluate-physical-examination")
+async def evaluate_physical_examination(body: PhysicalEvalRequest):
+    """Score a physical examination session with strict rule-based checklist matching."""
+    case_key = resolve_case_key(body.case_id, body.case_title)
+    case_type = CASE_TYPE_MAP.get(case_key, "respiratory")
+
+    try:
+        checklist = _load_physical_checklist(case_type)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not load physical checklist: {e}")
+
+    from physical_eval_scoring import score_physical_examination
+
+    student_turns = [
+        m.get("content", "").strip()
+        for m in body.conversation
+        if m.get("role") in ("student", "user") and m.get("content", "").strip()
+    ]
+    has_manikin = bool(body.exam_log)
+    if not student_turns and not has_manikin:
+        raise HTTPException(status_code=400, detail="No physical examination activity found.")
+
+    logger.info(
+        "[physical-scoring] case=%s type=%s chat_turns=%d manikin_zones=%d",
+        case_key,
+        case_type,
+        len(student_turns),
+        len(body.exam_log or []),
+    )
+
+    result = score_physical_examination(
+        student_turns,
+        body.exam_log,
+        case_type,
+        checklist,
+        patient_name=(body.patient_name or "").strip(),
+    )
+    result.pop("covered_items", None)
+    return result
+
+
 async def _groq_stt(content: bytes, filename: str) -> str:
     """Transcribe audio via Groq Whisper API. Raises on failure."""
     api_key = _groq_api_key()
@@ -1487,3 +1660,32 @@ async def stt(file: UploadFile = File(...)):
                 os.unlink(tmp)
             except Exception:
                 pass
+
+
+# ── Physical Examination Chatbot (legacy /physical-exam-chat alias) ──
+
+class PhysicalExamChatRequest(BaseModel):
+    case_id: str = ""
+    case_title: str = ""
+    message: str = ""
+    current_region: str | None = None
+
+
+@app.post("/physical-exam-chat")
+async def physical_exam_chat(body: PhysicalExamChatRequest):
+    """Legacy alias — routes through /patient-reply physical_exam mode."""
+    req = PatientReplyRequest(
+        case_id=body.case_id,
+        case_title=body.case_title,
+        student_question=body.message,
+        session_mode="physical_exam",
+        physical_exam_region=body.current_region,
+    )
+    resp = await _physical_exam_patient_reply(req)
+    raw = resp.body
+    data = json.loads(raw.decode() if isinstance(raw, bytes) else raw)
+    return {
+        "reply": data.get("text", "OK."),
+        "phase": data.get("phase", "ack"),
+        "current_region": data.get("physical_exam_region"),
+    }

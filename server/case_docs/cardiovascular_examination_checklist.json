@@ -1,0 +1,84 @@
+{
+  "title": "Cardiovascular Examination",
+  "total_items": 30,
+  "sections": [
+    {
+      "id": "preparation",
+      "label": "Preparation",
+      "items": [
+        { "num": 1, "text": "Wash hands and don PPE if appropriate" },
+        { "num": 2, "text": "Introduce yourself including your name and role" },
+        { "num": 3, "text": "Confirm the patient's identity" },
+        { "num": 4, "text": "Explain the examination and gain consent" },
+        { "num": 5, "text": "Position the patient at 45 degrees" },
+        { "num": 6, "text": "Ensure adequate exposure while maintaining dignity" }
+      ]
+    },
+    {
+      "id": "general_inspection",
+      "label": "General Inspection",
+      "items": [
+        { "num": 7, "text": "Inspect the patient from the end of the bed for breathlessness, pain, or distress" },
+        { "num": 8, "text": "Look for signs of cardiac failure (orthopnoea, oedema, cyanosis)" },
+        { "num": 9, "text": "Note any medications, oxygen, or monitoring equipment" }
+      ]
+    },
+    {
+      "id": "hands_arms",
+      "label": "Hands and Arms",
+      "items": [
+        { "num": 10, "text": "Inspect hands for clubbing, splinter haemorrhages, Osler nodes, or Janeway lesions" },
+        { "num": 11, "text": "Check peripheral temperature and capillary refill" },
+        { "num": 12, "text": "Palpate radial pulse rate, rhythm, and character" },
+        { "num": 13, "text": "Measure blood pressure in both arms if indicated" }
+      ]
+    },
+    {
+      "id": "face_neck",
+      "label": "Face and Neck",
+      "items": [
+        { "num": 14, "text": "Inspect eyes for anaemia, jaundice, xanthelasma, or corneal arcus" },
+        { "num": 15, "text": "Inspect mouth for dental disease or high-arched palate" },
+        { "num": 16, "text": "Assess jugular venous pressure at 45 degrees" },
+        { "num": 17, "text": "Palpate carotid pulses and auscultate for bruits" }
+      ]
+    },
+    {
+      "id": "precordium",
+      "label": "Precordium",
+      "items": [
+        { "num": 18, "text": "Inspect the precordium for scars, visible apex beat, or pulsations" },
+        { "num": 19, "text": "Palpate the apex beat and assess character" },
+        { "num": 20, "text": "Palpate for heaves or thrills" },
+        { "num": 21, "text": "Auscultate over all four cardiac areas with the diaphragm" },
+        { "num": 22, "text": "Auscultate with the bell at the apex for low-pitched murmurs" },
+        { "num": 23, "text": "Listen for radiation of murmurs to the neck or axilla if a murmur is heard" }
+      ]
+    },
+    {
+      "id": "lungs_abdomen",
+      "label": "Lungs and Abdomen",
+      "items": [
+        { "num": 24, "text": "Auscultate lung bases for bibasal crackles" },
+        { "num": 25, "text": "Inspect legs for peripheral oedema" },
+        { "num": 26, "text": "Palpate the abdomen for hepatomegaly if heart failure suspected" }
+      ]
+    },
+    {
+      "id": "additional",
+      "label": "Additional Assessment",
+      "items": [
+        { "num": 27, "text": "Assess for sacral oedema if the patient can lie flat" },
+        { "num": 28, "text": "Check for ankle or sacral pressure areas" }
+      ]
+    },
+    {
+      "id": "closing",
+      "label": "Closing the Examination",
+      "items": [
+        { "num": 29, "text": "Thank the patient and restore clothing" },
+        { "num": 30, "text": "Summarise examination findings to the examiner or patient" }
+      ]
+    }
+  ]
+}

@@ -26,8 +26,12 @@ import StudentPracticeFlow from './StudentPracticeFlow';
 import { HistoryEvalReview } from './HistoryEvalReview';
 import {
     pickHistoryEval,
+    pickPhysicalEval,
     historyEvalStatusLabel,
-    fetchHistoryEvaluationsForSessions,
+    physicalEvalStatusLabel,
+    fetchEvaluationsForSessions,
+    HISTORY_EVAL_TYPE,
+    PHYSICAL_EVAL_TYPE,
 } from '../../lib/historyEvaluations';
 import {
     canJoinExamSession,
@@ -118,7 +122,8 @@ function Sessions() {
             const examIds = data
                 .filter((s) => (s.session_type ?? s.type) === 'exam')
                 .map((s) => s.id);
-            const evalMap = await fetchHistoryEvaluationsForSessions(examIds);
+            const { history: historyEvalMap, physical: physicalEvalMap } =
+                await fetchEvaluationsForSessions(examIds);
 
             const formatted = data.map(s => ({
                 id: s.id.split('-')[0],
@@ -138,7 +143,8 @@ function Sessions() {
                 roomName: formatExamStation(s.station, s.room_name),
                 startTime: s.start_time,
                 endTime: s.end_time,
-                historyEval: pickHistoryEval(s.history_eval) || evalMap[s.id] || null,
+                historyEval: pickHistoryEval(s.history_eval) || historyEvalMap[s.id] || null,
+                physicalEval: pickPhysicalEval(s.history_eval) || physicalEvalMap[s.id] || null,
             }));
             setSessions(formatted);
 
@@ -288,6 +294,7 @@ function Sessions() {
                     sessionId={reviewSession.fullId}
                     studentName={reviewSession.student}
                     caseTitle={reviewSession.caseTitle}
+                    evaluationType={reviewSession.evaluationType || HISTORY_EVAL_TYPE}
                     onClose={() => setReviewSession(null)}
                     onUpdated={fetchSessions}
                 />
@@ -446,22 +453,49 @@ function Sessions() {
                                         </div>
                                     </td>
                                     <td className="px-6 py-4 text-right">
-                                        {session.sessionType === 'exam' && session.historyEval ? (
-                                            <div className="inline-flex flex-col items-end gap-0.5">
-                                                <span className={cn(
-                                                    "text-sm font-bold",
-                                                    session.historyEval.released_to_student
-                                                        ? (session.historyEval.final_percent >= 70 ? "text-emerald-500" :
-                                                            session.historyEval.final_percent >= 50 ? "text-amber-500" : "text-destructive")
-                                                        : "text-muted-foreground"
-                                                )}>
-                                                    {session.historyEval.released_to_student
-                                                        ? `${session.historyEval.final_percent}%`
-                                                        : `${session.historyEval.final_percent}% (draft)`}
-                                                </span>
-                                                <span className="text-[10px] text-muted-foreground">
-                                                    {historyEvalStatusLabel(session.historyEval)}
-                                                </span>
+                                        {session.sessionType === 'exam' && (session.historyEval || session.physicalEval) ? (
+                                            <div className="inline-flex flex-col items-end gap-1">
+                                                {session.historyEval && (
+                                                    <div className="inline-flex flex-col items-end gap-0.5">
+                                                        <span className={cn(
+                                                            "text-sm font-bold",
+                                                            session.historyEval.released_to_student
+                                                                ? (session.historyEval.final_percent >= 70 ? "text-emerald-500" :
+                                                                    session.historyEval.final_percent >= 50 ? "text-amber-500" : "text-destructive")
+                                                                : "text-muted-foreground"
+                                                        )}>
+                                                            H {session.historyEval.released_to_student
+                                                                ? `${session.historyEval.final_percent}%`
+                                                                : `${session.historyEval.final_percent}% (draft)`}
+                                                        </span>
+                                                        <span className="text-[10px] text-muted-foreground">
+                                                            {historyEvalStatusLabel(session.historyEval)}
+                                                        </span>
+                                                    </div>
+                                                )}
+                                                {session.physicalEval && (
+                                                    <div className="inline-flex flex-col items-end gap-0.5">
+                                                        <span className={cn(
+                                                            "text-sm font-bold",
+                                                            session.physicalEval.released_to_student
+                                                                ? (session.physicalEval.final_percent >= 70 ? "text-emerald-500" :
+                                                                    session.physicalEval.final_percent >= 50 ? "text-amber-500" : "text-destructive")
+                                                                : "text-muted-foreground"
+                                                        )}>
+                                                            P {session.physicalEval.released_to_student
+                                                                ? `${session.physicalEval.final_percent}%`
+                                                                : `${session.physicalEval.final_percent}% (draft)`}
+                                                        </span>
+                                                        <span className="text-[10px] text-muted-foreground">
+                                                            {physicalEvalStatusLabel(session.physicalEval)}
+                                                        </span>
+                                                    </div>
+                                                )}
+                                                {session.score != null && (
+                                                    <span className="text-[10px] text-muted-foreground">
+                                                        Combined {session.score}%
+                                                    </span>
+                                                )}
                                             </div>
                                         ) : session.score ? (
                                             <div className="inline-flex flex-col items-end">
@@ -514,19 +548,34 @@ function Sessions() {
                                                 </button>
                                             )}
                                             {isInstructor && session.sessionType === 'exam' && (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setReviewSession(session)}
-                                                    className={cn(
-                                                        "text-xs font-bold px-3 py-1 border rounded transition-colors",
-                                                        session.historyEval
-                                                            ? "text-emerald-400 hover:text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/10"
-                                                            : "text-muted-foreground border-white/10 hover:bg-muted/30"
-                                                    )}
-                                                    title={session.historyEval ? 'Review history score' : 'No history score saved yet'}
-                                                >
-                                                    {session.historyEval ? 'REVIEW' : 'REVIEW'}
-                                                </button>
+                                                <>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setReviewSession({ ...session, evaluationType: HISTORY_EVAL_TYPE })}
+                                                        className={cn(
+                                                            "text-xs font-bold px-2 py-1 border rounded transition-colors",
+                                                            session.historyEval
+                                                                ? "text-emerald-400 hover:text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/10"
+                                                                : "text-muted-foreground border-white/10 hover:bg-muted/30"
+                                                        )}
+                                                        title={session.historyEval ? 'Review history score' : 'No history score saved yet'}
+                                                    >
+                                                        H
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setReviewSession({ ...session, evaluationType: PHYSICAL_EVAL_TYPE })}
+                                                        className={cn(
+                                                            "text-xs font-bold px-2 py-1 border rounded transition-colors",
+                                                            session.physicalEval
+                                                                ? "text-sky-400 hover:text-sky-300 border-sky-500/30 hover:bg-sky-500/10"
+                                                                : "text-muted-foreground border-white/10 hover:bg-muted/30"
+                                                        )}
+                                                        title={session.physicalEval ? 'Review physical score' : 'No physical score saved yet'}
+                                                    >
+                                                        P
+                                                    </button>
+                                                </>
                                             )}
                                             <button
                                                 onClick={() => handleDelete(session.fullId)}

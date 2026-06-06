@@ -41,6 +41,15 @@ export async function syncPhysicalScore(sessionId, scoreOutOf10) {
 }
 
 /**
+ * physical evaluation final_percent (0–100) → session_scores.physical_examination,
+ * then refresh sessions.score.
+ */
+export async function syncPhysicalScoreFromEvaluation(sessionId, finalPercent) {
+  await upsertSkillScore(sessionId, SKILL_PHYSICAL, percentToSkillScore(finalPercent));
+  return recomputeSessionTotalScore(sessionId);
+}
+
+/**
  * Combined sessions.score (0–100):
  * Add history_taking + physical_examination (each 0–10), scale to 0–100 → (h + p) / 20 × 100.
  * If only one skill exists, use that skill × 10.

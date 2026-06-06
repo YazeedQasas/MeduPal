@@ -44,10 +44,11 @@ import {
     recordAudioForStt,
     sendAudioToSttApi,
 } from '../../lib/sttFasterWhisper';
-import { upsertHistoryEvaluation } from '../../lib/historyEvaluations';
+import { upsertHistoryEvaluation, upsertPhysicalEvaluation } from '../../lib/historyEvaluations';
+import { PhysicalExamChat } from './PhysicalExamChat';
 import {
     syncHistoryScoreFromEvaluation,
-    syncPhysicalScore,
+    syncPhysicalScoreFromEvaluation,
     recomputeSessionTotalScore,
 } from '../../lib/sessionScores';
 
@@ -264,9 +265,11 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
     const [isTyping, setIsTyping] = useState(false);
     const [caseSelected, setCaseSelected] = useState(false);
     const [isRandomCase, setIsRandomCase] = useState(false);
-    const hideCaseIdentity = isAssignedExam || isRandomCase;
+    /** Practice + random case: student may reveal the case name once (offered at history & physical eval). */
+    const [practiceCaseNameRevealed, setPracticeCaseNameRevealed] = useState(false);
+    const hideCaseIdentity = isAssignedExam || (isRandomCase && !practiceCaseNameRevealed);
+    const canOfferCaseReveal = isRandomCase && !isAssignedExam && !practiceCaseNameRevealed;
     /** Exam only: null = prompt, 'show' = full history eval + PDF, 'skip' = defer evaluation */
-    const [examHistoryEvalChoice, setExamHistoryEvalChoice] = useState(null);
     const [selectedSystem, setSelectedSystem] = useState(null);
     const [caseSearch, setCaseSearch] = useState('');
     const [patientStatus, setPatientStatus] = useState(INITIAL_VITALS);
@@ -289,7 +292,9 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
     const [diagnosisConfidence, setDiagnosisConfidence] = useState(50);
     const [diagnosisRationale, setDiagnosisRationale] = useState('');
     const [showMissedQuestions, setShowMissedQuestions] = useState(false);
+    const [showMissedPhysicalItems, setShowMissedPhysicalItems] = useState(false);
     const [copiedToClipboard, setCopiedToClipboard] = useState(false);
+    const [copiedPhysicalToClipboard, setCopiedPhysicalToClipboard] = useState(false);
     // AI scoring state
     const [historyEvalLoading, setHistoryEvalLoading] = useState(false);
     const [historyEvalResult, setHistoryEvalResult] = useState(null);
@@ -297,8 +302,15 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
     const [historyEvalSaveError, setHistoryEvalSaveError] = useState(null);
     const [historyEvalSaved, setHistoryEvalSaved] = useState(false);
     const historyEvalDoneRef = useRef(false);
+    const [physicalEvalLoading, setPhysicalEvalLoading] = useState(false);
+    const [physicalEvalResult, setPhysicalEvalResult] = useState(null);
+    const [physicalEvalError, setPhysicalEvalError] = useState(null);
+    const [physicalEvalSaveError, setPhysicalEvalSaveError] = useState(null);
+    const [physicalEvalSaved, setPhysicalEvalSaved] = useState(false);
+    const physicalEvalDoneRef = useRef(false);
     
     // Physical Exam step states
+    const [physicalExamMessages, setPhysicalExamMessages] = useState([]);
     const [selectedZone, setSelectedZone] = useState(null);
     const [selectedFinding, setSelectedFinding] = useState('');
     const [examLog, setExamLog] = useState([]);
@@ -389,6 +401,14 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
         setHistoryEvalError(null);
         setHistoryEvalLoading(false);
         historyEvalDoneRef.current = false;
+        setPhysicalExamMessages([]);
+        setPhysicalEvalResult(null);
+        setPhysicalEvalError(null);
+        setPhysicalEvalLoading(false);
+        setPhysicalEvalSaveError(null);
+        setPhysicalEvalSaved(false);
+        physicalEvalDoneRef.current = false;
+        setPracticeCaseNameRevealed(false);
     }, [selectedCase]);
 
     // Assign persona when case is set (practice confirm, assigned exam, etc.)
@@ -557,9 +577,122 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
 
     useEffect(() => {
         if (currentStep !== 2) return;
-        if (isAssignedExam) return;
+        if (historyEvalResult?.sections?.length) return;
+        historyEvalDoneRef.current = false;
         runHistoryEvaluation();
-    }, [currentStep, runHistoryEvaluation, isAssignedExam]);
+    }, [currentStep, messages, runHistoryEvaluation, historyEvalResult]);
+
+    const persistPhysicalEvaluation = useCallback(
+        async (result) => {
+            if (!result?.sections) {
+                setPhysicalEvalSaveError('No checklist data to save.');
+                return false;
+            }
+            if (!user?.id) {
+                setPhysicalEvalSaveError('Sign in to save your score.');
+                return false;
+            }
+            const sessionId = await ensureSessionCreated();
+            if (!sessionId) {
+                setPhysicalEvalSaveError('Could not link to a session record.');
+                return false;
+            }
+            const { error } = await upsertPhysicalEvaluation({
+                sessionId,
+                isExam: isAssignedExam,
+                caseId: selectedCase?.id ?? null,
+                checklistKey: getCaseMockKey(selectedCase),
+                result,
+            });
+            if (error) {
+                const msg = error.message || String(error);
+                setPhysicalEvalSaveError(
+                    msg.includes('row-level security')
+                        ? `${msg} — run supabase_migration_history_evaluations_fix.sql in Supabase.`
+                        : msg
+                );
+                setPhysicalEvalSaved(false);
+                console.error('[physical_evaluations]', error);
+                return false;
+            }
+            setPhysicalEvalSaveError(null);
+            setPhysicalEvalSaved(true);
+            return true;
+        },
+        [user?.id, isAssignedExam, selectedCase, getCaseMockKey, ensureSessionCreated]
+    );
+
+    const runPhysicalEvaluation = useCallback((options = {}) => {
+        const force = options?.force === true;
+        if (physicalEvalDoneRef.current && !force) return;
+        const apiBase = getPatientReplyApiUrl();
+        if (!apiBase) {
+            setPhysicalEvalError(
+                'Scoring service not configured. Add VITE_PATIENT_REPLY_URL=http://localhost:8000 to .env.local and restart the dev server.'
+            );
+            setPhysicalEvalLoading(false);
+            return;
+        }
+        const studentMsgs = physicalExamMessages.filter((m) => m.role === 'student');
+        if (studentMsgs.length === 0 && examLog.length === 0) {
+            setPhysicalEvalLoading(false);
+            setPhysicalEvalError(null);
+            return;
+        }
+        physicalEvalDoneRef.current = true;
+        setPhysicalEvalLoading(true);
+        setPhysicalEvalError(null);
+        const caseKey = getCaseMockKey(selectedCase);
+        fetch(`${apiBase}/evaluate-physical-examination`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                conversation: physicalExamMessages,
+                exam_log: examLog,
+                case_id: selectedCase?.id || caseKey,
+                case_title: selectedCase?.title || '',
+                patient_name: selectedPatient?.name || '',
+                patient_id: selectedPatient?.id || '',
+            }),
+        })
+            .then(async (r) => {
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) {
+                    const detail = typeof data?.detail === 'string'
+                        ? data.detail
+                        : Array.isArray(data?.detail)
+                            ? data.detail.map((d) => d?.msg || d).join(', ')
+                            : r.statusText;
+                    setPhysicalEvalError(`Scoring failed: ${detail || r.statusText}`);
+                    setPhysicalEvalLoading(false);
+                    physicalEvalDoneRef.current = false;
+                    return;
+                }
+                if (data._error) setPhysicalEvalError(`Scoring failed: ${data._error}`);
+                if (!data.sections?.length) {
+                    setPhysicalEvalError((prev) => prev || 'Scoring returned no checklist. Is the Python server running on port 8000?');
+                    setPhysicalEvalResult(null);
+                    setPhysicalEvalLoading(false);
+                    physicalEvalDoneRef.current = false;
+                    return;
+                }
+                setPhysicalEvalResult(data);
+                setPhysicalEvalLoading(false);
+                if (!data._error && data.sections) await persistPhysicalEvaluation(data);
+            })
+            .catch((err) => {
+                setPhysicalEvalError(`Scoring service unavailable: ${err?.message || err}`);
+                setPhysicalEvalLoading(false);
+                physicalEvalDoneRef.current = false;
+            });
+    }, [physicalExamMessages, examLog, selectedCase, selectedPatient, getCaseMockKey, persistPhysicalEvaluation]);
+
+    useEffect(() => {
+        if (currentStep !== 4) return;
+        if (physicalEvalResult?.sections?.length) return;
+        physicalEvalDoneRef.current = false;
+        runPhysicalEvaluation();
+    }, [currentStep, physicalExamMessages, examLog, runPhysicalEvaluation, physicalEvalResult]);
 
     // Create session early so history scores can be saved
     useEffect(() => {
@@ -1087,8 +1220,14 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
         return Math.min(10, Math.round(score * 10) / 10);
     }, [historyEvalResult, hasDeteriorated, redFlagRecognized, selectedDiagnosis, selectedCase?.id]);
 
-    // Compute physical score (same logic as step 4 evaluation UI)
+    // Compute physical score — uses real AI eval result when available
     const computePhysicalScore = useCallback(() => {
+        if (physicalEvalResult?.items_covered != null && physicalEvalResult?.total_items) {
+            return Math.min(
+                10,
+                Math.round((physicalEvalResult.items_covered / physicalEvalResult.total_items) * 10 * 10) / 10
+            );
+        }
         const caseKey = getCaseMockKey(selectedCase);
         const requirements = REQUIRED_ZONES_BY_CASE[caseKey] || REQUIRED_ZONES_BY_CASE['pneumonia'];
         const examinedZoneIds = examLog
@@ -1119,7 +1258,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
         score += (physicalRubricTotal / 10) * 4.5;
         score += (physicalChecklistCompleted / 4) * 2.5;
         return Math.min(10, Math.round(score * 10) / 10);
-    }, [selectedCase, getCaseMockKey, examLog]);
+    }, [physicalEvalResult, selectedCase, getCaseMockKey, examLog]);
 
     const handleFinishSession = async () => {
         if (isSavingSession) return;
@@ -1157,7 +1296,7 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
                 return 'Keep practicing. Try to cover all OSCE checklist items systematically.';
             })();
 
-            const physicalFeedback = (() => {
+            const physicalFeedback = physicalEvalResult?.feedback || (() => {
                 if (examLog.length === 0) {
                     return 'No physical examination was performed. Remember to examine relevant body zones.';
                 }
@@ -1186,7 +1325,14 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
             }
 
             // 3) Physical exam → session_scores.physical_examination
-            await syncPhysicalScore(sessionId, physicalScore);
+            if (physicalEvalResult?.sections) {
+                await persistPhysicalEvaluation(physicalEvalResult);
+            } else {
+                const physicalPercent = physicalEvalResult?.items_covered != null && physicalEvalResult?.total_items
+                    ? Math.round((physicalEvalResult.items_covered / physicalEvalResult.total_items) * 100)
+                    : Math.round(physicalScore * 10);
+                await syncPhysicalScoreFromEvaluation(sessionId, physicalPercent);
+            }
 
             // 4) Sum history + physical (0–10 each) → sessions.score (0–100)
             const { sessionScore } = await recomputeSessionTotalScore(sessionId);
@@ -1281,6 +1427,19 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
                 console.error('Failed to save history evaluation:', err);
             }
         }
+        if (currentStep === 3) {
+            physicalEvalDoneRef.current = false;
+            setPhysicalEvalResult(null);
+            setPhysicalEvalError(null);
+            setPhysicalEvalLoading(false);
+        }
+        if (currentStep === 4 && user?.id && physicalEvalResult?.sections) {
+            try {
+                await persistPhysicalEvaluation(physicalEvalResult);
+            } catch (err) {
+                console.error('Failed to save physical evaluation:', err);
+            }
+        }
         if (currentStep < STEPS.length - 1) setCurrentStep(currentStep + 1);
     };
 
@@ -1291,7 +1450,14 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
                 setHistoryEvalError(null);
                 setHistoryEvalLoading(false);
                 historyEvalDoneRef.current = false;
-                if (isAssignedExam) setExamHistoryEvalChoice(null);
+            }
+            if (currentStep === 4) {
+                setPhysicalEvalResult(null);
+                setPhysicalEvalError(null);
+                setPhysicalEvalLoading(false);
+                setPhysicalEvalSaveError(null);
+                setPhysicalEvalSaved(false);
+                physicalEvalDoneRef.current = false;
             }
             setCurrentStep(currentStep - 1);
         }
@@ -2370,82 +2536,34 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
                         setTimeout(() => setCopiedToClipboard(false), 2000);
                     };
 
-                    if (isAssignedExam && examHistoryEvalChoice === null) {
-                        return (
-                            <div className="h-full flex flex-col items-center justify-center p-8">
-                                <div className="max-w-md w-full bg-card border border-white/10 rounded-2xl p-8 text-center space-y-5">
-                                    <CheckCircle2 size={40} className="text-primary mx-auto" />
-                                    <div>
-                                        <h2 className="text-lg font-bold text-foreground">History evaluation</h2>
-                                        <p className="text-sm text-muted-foreground mt-2">
-                                            Proceed to the AI history evaluation?
-                                        </p>
-                                    </div>
-                                    <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                setExamHistoryEvalChoice('show');
-                                                historyEvalDoneRef.current = false;
-                                                runHistoryEvaluation();
-                                            }}
-                                            className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
-                                        >
-                                            Yes, show evaluation
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => setExamHistoryEvalChoice('skip')}
-                                            className="px-5 py-2.5 rounded-xl text-sm font-medium bg-muted/50 text-foreground border border-white/10 hover:bg-muted"
-                                        >
-                                            Not now
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        );
-                    }
-
-                    if (isAssignedExam && examHistoryEvalChoice === 'skip') {
-                        return (
-                            <div className="h-full flex flex-col">
-                                <div className="flex-1 flex items-center justify-center p-8">
-                                    <p className="text-sm text-muted-foreground text-center max-w-md">
-                                        History evaluation deferred. Continue to the physical examination when ready.
-                                    </p>
-                                </div>
-                                <div className="flex-shrink-0 border-t border-white/5 px-6 py-4 flex justify-between">
-                                    <button
-                                        type="button"
-                                        onClick={goBack}
-                                        className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-muted/50 text-foreground border border-white/5 hover:bg-muted"
-                                    >
-                                        <ChevronLeft size={16} />
-                                        Back to history
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={goNext}
-                                        className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
-                                    >
-                                        Continue to physical exam
-                                        <ChevronRight size={16} />
-                                    </button>
-                                </div>
-                            </div>
-                        );
-                    }
-
                     return (
                         <div className="h-full flex flex-col">
                             <div className="flex-1 flex flex-col lg:flex-row overflow-hidden p-4 gap-4">
                                 {/* LEFT: Evaluation Content */}
                                 <div className="flex-1 lg:flex-[3] overflow-y-auto space-y-4 lg:pr-2 min-h-0">
 
-                                    {/* Case title reveal (instructors see case during exam scoring) */}
+                                    {canOfferCaseReveal && (
+                                        <div className="rounded-xl border border-white/10 bg-muted/20 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                            <div>
+                                                <p className="text-sm font-medium text-foreground">Case identity hidden</p>
+                                                <p className="text-xs text-muted-foreground mt-0.5">
+                                                    Reveal the case name once after history evaluation (you can wait until physical evaluation instead).
+                                                </p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => setPracticeCaseNameRevealed(true)}
+                                                className="shrink-0 px-4 py-2 rounded-lg text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                                            >
+                                                Reveal case name
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {/* Case title (practice reveal or exam instructor) */}
                                     {(!hideCaseIdentity || (isAssignedExam && role !== 'student')) && (
                                     <div className="pt-1 pb-2">
-                                        {isRandomCase && (
+                                        {isRandomCase && practiceCaseNameRevealed && (
                                             <p className="text-xs font-medium text-muted-foreground uppercase tracking-widest mb-1">Case Revealed</p>
                                         )}
                                         <h1 style={{ fontFamily: "'Playfair Display', serif" }} className="text-3xl font-semibold text-foreground leading-tight">{selectedCase?.title}</h1>
@@ -2530,14 +2648,18 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
                                         </div>
                                     )}
 
-                                    {historyEvalSaved && !historyEvalSaveError && !historyEvalLoading && historyEvalResult && (
+                                    {historyEvalSaved && !historyEvalSaveError && !historyEvalLoading && historyEvalResult && !isAssignedExam && (
                                         <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 flex items-start gap-3">
                                             <CheckCircle2 size={16} className="text-emerald-400 mt-0.5 shrink-0" />
                                             <p className="text-sm text-emerald-300">
-                                                {isExamStudent
-                                                    ? 'History-taking score saved. Your examiner will review and send your official result.'
-                                                    : `History-taking score saved (${evalScore ?? '—'}%). View it under My Sessions → History.`}
+                                                History-taking score saved ({evalScore ?? '—'}%). View it under My Sessions → History.
                                             </p>
+                                        </div>
+                                    )}
+
+                                    {historyEvalSaved && !historyEvalSaveError && !historyEvalLoading && historyEvalResult && isAssignedExam && (
+                                        <div className="rounded-xl border border-primary/25 bg-primary/10 px-4 py-3 text-sm text-foreground/90">
+                                            History score recorded for this exam. Open <strong>OSCE Sessions</strong> → Review <strong>H</strong> to adjust the checklist, then send the result to the student.
                                         </div>
                                     )}
 
@@ -2816,272 +2938,152 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
                     );
                 })()}
 
-                {/* Step 3: Physical Exam */}
+                {/* Step 3: Physical Exam — manikin + patient card + chatbot */}
                 {currentStep === 3 && (
-                    <div className="h-full flex flex-col">
-                        {/* Main Two-Column Layout */}
-                        <div className="flex-1 flex overflow-hidden p-4 gap-4">
-                            {/* LEFT COLUMN: Manikin Body Map (60-65%) */}
-                            <div className="flex-[3] flex flex-col bg-card border border-white/5 rounded-xl overflow-hidden min-w-0">
-                                {/* Header */}
+                    <div className="h-full flex flex-col min-h-0">
+                        <div className="flex-1 flex flex-col lg:flex-row min-h-0 p-4 gap-4 overflow-hidden">
+                            {/* Manikin + patient persona */}
+                            <div className="flex-[1.15] flex flex-col bg-card border border-white/5 rounded-xl overflow-hidden min-w-0 min-h-[280px] lg:min-h-0">
                                 <div className="bg-muted/30 border-b border-white/5 px-4 py-3 flex items-center justify-between flex-shrink-0">
                                     <div className="flex items-center gap-2">
                                         <Stethoscope size={16} className="text-primary" />
-                                        <span className="font-semibold text-foreground text-sm">Physical Examination (Demo)</span>
+                                        <span className="font-semibold text-foreground text-sm">Physical Examination</span>
                                     </div>
-                                    <span className="text-xs text-muted-foreground">
-                                        Click body zones to examine
-                                    </span>
+                                    <span className="text-xs text-muted-foreground">Click body zones to examine</span>
                                 </div>
-
-                                {/* Body Map Area */}
-                                <div className="flex-1 flex flex-col p-4 overflow-y-auto">
-                                    {/* Body Diagram Container */}
-                                    <div className="relative mx-auto w-full max-w-sm aspect-[3/4] bg-gradient-to-b from-muted/30 to-muted/10 rounded-2xl border border-white/10 mb-4">
-                                        {/* Body Silhouette Placeholder */}
+                                <div className="flex-1 flex flex-col sm:flex-row min-h-0 gap-3 p-3">
+                                <div className="flex-1 flex items-center justify-center min-h-[240px] min-w-0">
+                                    <div className="relative w-full max-w-md h-full max-h-[520px] bg-gradient-to-b from-muted/30 to-muted/10 rounded-2xl border border-white/10">
                                         <div className="absolute inset-0 flex items-center justify-center">
-                                            <div className="relative w-32 h-48">
-                                                {/* Head */}
-                                                <div 
-                                                    className="absolute top-0 left-1/2 -translate-x-1/2 w-12 h-12 rounded-full border-2 border-white/20"
-                                                    style={{
-                                                        background: 'linear-gradient(145deg, rgba(90,125,138,0.4) 0%, rgba(61,90,106,0.3) 100%)'
-                                                    }}
+                                            <div className="relative w-36 h-56">
+                                                <div
+                                                    className="absolute top-0 left-1/2 -translate-x-1/2 w-14 h-14 rounded-full border-2 border-white/20"
+                                                    style={{ background: 'linear-gradient(145deg, rgba(90,125,138,0.4) 0%, rgba(61,90,106,0.3) 100%)' }}
                                                 />
-                                                {/* Torso */}
-                                                <div 
-                                                    className="absolute top-14 left-1/2 -translate-x-1/2 w-20 h-28 rounded-t-2xl rounded-b-lg border-2 border-white/20"
-                                                    style={{
-                                                        background: 'linear-gradient(145deg, rgba(90,125,138,0.3) 0%, rgba(61,90,106,0.2) 100%)'
-                                                    }}
+                                                <div
+                                                    className="absolute top-16 left-1/2 -translate-x-1/2 w-24 h-32 rounded-t-2xl rounded-b-lg border-2 border-white/20"
+                                                    style={{ background: 'linear-gradient(145deg, rgba(90,125,138,0.3) 0%, rgba(61,90,106,0.2) 100%)' }}
                                                 />
-                                                {/* Arms */}
-                                                <div className="absolute top-16 -left-4 w-4 h-20 rounded-full border-2 border-white/20 bg-white/5" />
-                                                <div className="absolute top-16 -right-4 w-4 h-20 rounded-full border-2 border-white/20 bg-white/5" />
+                                                <div className="absolute top-[4.5rem] -left-5 w-5 h-24 rounded-full border-2 border-white/20 bg-white/5" />
+                                                <div className="absolute top-[4.5rem] -right-5 w-5 h-24 rounded-full border-2 border-white/20 bg-white/5" />
                                             </div>
                                         </div>
-
-                                        {/* Clickable Zone Buttons */}
                                         {BODY_ZONES.map((zone) => (
                                             <button
                                                 key={zone.id}
+                                                type="button"
                                                 onClick={() => handleZoneClick(zone)}
                                                 className={cn(
-                                                    "absolute w-8 h-8 rounded-full flex items-center justify-center transition-all duration-200",
-                                                    "border-2 text-xs font-bold",
+                                                    'absolute w-9 h-9 rounded-full flex items-center justify-center transition-all duration-200 border-2',
                                                     selectedZone?.id === zone.id
-                                                        ? zone.type === 'cardiac' 
-                                                            ? "bg-red-500 border-red-400 text-white scale-110 shadow-lg shadow-red-500/30"
-                                                            : "bg-blue-500 border-blue-400 text-white scale-110 shadow-lg shadow-blue-500/30"
+                                                        ? zone.type === 'cardiac'
+                                                            ? 'bg-red-500 border-red-400 text-white scale-110 shadow-lg shadow-red-500/30'
+                                                            : 'bg-blue-500 border-blue-400 text-white scale-110 shadow-lg shadow-blue-500/30'
                                                         : zone.type === 'cardiac'
-                                                            ? "bg-red-500/20 border-red-500/50 text-red-400 hover:bg-red-500/40 hover:scale-105"
-                                                            : "bg-blue-500/20 border-blue-500/50 text-blue-400 hover:bg-blue-500/40 hover:scale-105"
+                                                            ? 'bg-red-500/20 border-red-500/50 text-red-400 hover:bg-red-500/40 hover:scale-105'
+                                                            : 'bg-blue-500/20 border-blue-500/50 text-blue-400 hover:bg-blue-500/40 hover:scale-105'
                                                 )}
                                                 style={{
                                                     top: zone.position.top,
                                                     left: zone.position.left,
-                                                    transform: `translate(-50%, -50%) ${selectedZone?.id === zone.id ? 'scale(1.1)' : ''}`
+                                                    transform: `translate(-50%, -50%) ${selectedZone?.id === zone.id ? 'scale(1.1)' : ''}`,
                                                 }}
                                                 title={zone.label}
                                             >
                                                 {zone.type === 'cardiac' ? <Heart size={14} /> : <Wind size={14} />}
                                             </button>
                                         ))}
-
-                                        {/* Zone Labels */}
                                         <div className="absolute bottom-3 left-3 right-3 flex flex-wrap gap-1 justify-center">
-                                            <span className="text-[10px] px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30">
-                                                Lung zones
-                                            </span>
-                                            <span className="text-[10px] px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30">
-                                                Heart zones
-                                            </span>
+                                            <span className="text-[10px] px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30">Lung zones</span>
+                                            <span className="text-[10px] px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30">Heart zones</span>
                                         </div>
                                     </div>
+                                </div>
 
-                                    {/* Selected Zone Info */}
-                                    {selectedZone && (
-                                        <div className="bg-muted/30 border border-white/10 rounded-xl p-4 mb-4">
-                                            <div className="flex items-center justify-between mb-2">
-                                                <div className="flex items-center gap-2">
-                                                    <div className={cn(
-                                                        "w-3 h-3 rounded-full",
-                                                        selectedZone.type === 'cardiac' ? "bg-red-500" : "bg-blue-500"
-                                                    )} />
-                                                    <span className="font-semibold text-foreground text-sm">{selectedZone.label}</span>
-                                                </div>
-                                                <span className={cn(
-                                                    "text-[10px] px-2 py-0.5 rounded font-medium",
-                                                    selectedZone.type === 'cardiac' 
-                                                        ? "bg-red-500/20 text-red-400" 
-                                                        : "bg-blue-500/20 text-blue-400"
-                                                )}>
-                                                    {selectedZone.type === 'cardiac' ? 'Cardiac' : 'Pulmonary'}
-                                                </span>
-                                            </div>
-                                            
-                                            <div className="mb-3">
-                                                <span className="text-xs text-muted-foreground">Finding:</span>
-                                                <p className="text-sm text-foreground mt-1 font-medium">{selectedFinding}</p>
-                                            </div>
-
-                                            <button
-                                                onClick={handlePlaySound}
-                                                disabled={playingSoundDemo}
-                                                className={cn(
-                                                    "flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all",
-                                                    playingSoundDemo
-                                                        ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                                                        : "bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20"
+                                {/* Patient persona card */}
+                                {selectedPatient && (
+                                    <div
+                                        className="w-full sm:w-[210px] shrink-0 rounded-2xl overflow-hidden flex flex-col"
+                                        style={{ background: 'rgba(8,8,8,0.75)', border: `1px solid ${P.border}` }}
+                                    >
+                                        <div className="flex items-center justify-between px-3 py-2" style={{ borderBottom: `1px solid ${P.border}` }}>
+                                            <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: P.muted }}>Patient</span>
+                                            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold" style={{ background: 'rgba(110,231,183,0.1)', color: P.accent }}>Active</span>
+                                        </div>
+                                        <div className="flex items-center gap-2.5 px-3 py-2.5" style={{ borderBottom: `1px solid ${P.border}` }}>
+                                            <div className="w-12 h-12 rounded-xl flex-shrink-0 overflow-hidden" style={{ border: `1px solid ${P.border}` }}>
+                                                {selectedPatient.photo ? (
+                                                    <img
+                                                        src={selectedPatient.photo}
+                                                        alt={selectedPatient.name}
+                                                        className="w-full h-full object-cover"
+                                                        style={{ objectPosition: selectedPatient.photo_position || 'center' }}
+                                                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                                    />
+                                                ) : (
+                                                    <div className="w-full h-full flex items-center justify-center bg-muted/30">
+                                                        <User size={20} className="text-muted-foreground" />
+                                                    </div>
                                                 )}
-                                            >
-                                                <Play size={12} />
-                                                {playingSoundDemo ? "Playing sound..." : "Play Sound (demo)"}
-                                            </button>
+                                            </div>
+                                            <div className="min-w-0">
+                                                <div className="flex flex-wrap items-center gap-1 mb-1">
+                                                    <span className="text-[10px] px-1.5 py-px rounded font-semibold" style={{ background: 'rgba(255,255,255,0.06)', color: P.tagText }}>{selectedPatient.weight_kg} kg</span>
+                                                    {selectedPatient.blood_type && (
+                                                        <span className="text-[10px] px-1.5 py-px rounded font-semibold" style={{ background: 'rgba(239,68,68,0.12)', color: '#f87171' }}>{selectedPatient.blood_type}</span>
+                                                    )}
+                                                </div>
+                                                <p className="text-xs font-bold truncate" style={{ color: P.text }}>{selectedPatient.name}</p>
+                                                <p className="text-[10px]" style={{ color: P.muted }}>{selectedPatient.gender} · {selectedPatient.age} yrs</p>
+                                            </div>
                                         </div>
-                                    )}
-
-                                    {/* No zone selected placeholder */}
-                                    {!selectedZone && (
-                                        <div className="bg-muted/20 border border-white/5 rounded-xl p-6 text-center">
-                                            <Stethoscope size={24} className="text-muted-foreground mx-auto mb-2 opacity-50" />
-                                            <p className="text-sm text-muted-foreground">
-                                                Click on a body zone to examine
-                                            </p>
-                                            <p className="text-xs text-muted-foreground/60 mt-1">
-                                                Blue = Lung auscultation • Red = Heart auscultation
-                                            </p>
+                                        <div className="grid grid-cols-2 text-center" style={{ borderBottom: `1px solid ${P.border}` }}>
+                                            <div className="px-2 py-2" style={{ borderRight: `1px solid ${P.border}` }}>
+                                                <span className="text-[9px] uppercase tracking-wide font-semibold block" style={{ color: P.muted }}>BP</span>
+                                                <p className="text-xs font-bold" style={{ color: P.text }}>{selectedPatient.vitals?.bp ?? '—'}</p>
+                                            </div>
+                                            <div className="px-2 py-2">
+                                                <span className="text-[9px] uppercase tracking-wide font-semibold block" style={{ color: P.muted }}>HR</span>
+                                                <p className="text-xs font-bold" style={{ color: P.text }}>{patientStatus.heartRate}</p>
+                                            </div>
                                         </div>
-                                    )}
+                                        <div className="grid grid-cols-2 gap-px px-2 py-2 text-center" style={{ background: P.border }}>
+                                            <div className="rounded-lg py-1.5" style={{ background: 'rgba(8,8,8,0.75)' }}>
+                                                <span className="text-[9px] block" style={{ color: P.muted }}>SpO₂</span>
+                                                <span className="text-xs font-bold" style={{ color: patientStatus.spO2 < 95 ? '#f87171' : P.accent }}>{patientStatus.spO2}%</span>
+                                            </div>
+                                            <div className="rounded-lg py-1.5" style={{ background: 'rgba(8,8,8,0.75)' }}>
+                                                <span className="text-[9px] block" style={{ color: P.muted }}>RR</span>
+                                                <span className="text-xs font-bold" style={{ color: P.text }}>{patientStatus.respiratoryRate}</span>
+                                            </div>
+                                        </div>
+                                        {selectedPatient.occupation && (
+                                            <p className="px-3 py-2 text-[10px] leading-snug" style={{ color: P.muted }}>
+                                                {selectedPatient.occupation}
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
                                 </div>
                             </div>
 
-                            {/* RIGHT COLUMN: Exam Info Panel (35-40%) */}
-                            <div className="hidden lg:flex flex-[2] flex-col gap-4 min-w-0">
-                                {/* Patient Status Summary */}
-                                <div className="bg-card border border-white/5 rounded-xl p-4">
-                                    <h3 className="font-semibold text-foreground mb-3 flex items-center gap-2 text-sm">
-                                        <Activity size={14} className="text-primary" />
-                                        Patient Status
-                                    </h3>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        <div className="p-2 bg-muted/30 rounded-lg text-center">
-                                            <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
-                                                <Thermometer size={10} />
-                                                <span className="text-[10px]">Temp</span>
-                                            </div>
-                                            <span className="text-xs font-semibold text-amber-500">{patientStatus.temperature}</span>
-                                        </div>
-                                        <div className="p-2 bg-muted/30 rounded-lg text-center">
-                                            <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
-                                                <Heart size={10} />
-                                                <span className="text-[10px]">HR</span>
-                                            </div>
-                                            <span className="text-xs font-semibold text-foreground">{patientStatus.heartRate}</span>
-                                        </div>
-                                        <div className={cn(
-                                            "p-2 rounded-lg text-center",
-                                            patientStatus.spO2 < 95 ? "bg-red-500/20" : "bg-muted/30"
-                                        )}>
-                                            <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
-                                                <Activity size={10} />
-                                                <span className="text-[10px]">SpO₂</span>
-                                            </div>
-                                            <span className={cn(
-                                                "text-xs font-semibold",
-                                                patientStatus.spO2 < 95 ? "text-red-500" : "text-emerald-500"
-                                            )}>{patientStatus.spO2}%</span>
-                                        </div>
-                                        <div className="p-2 bg-muted/30 rounded-lg text-center">
-                                            <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
-                                                <Wind size={10} />
-                                                <span className="text-[10px]">RR</span>
-                                            </div>
-                                            <span className="text-xs font-semibold text-foreground">{patientStatus.respiratoryRate}/m</span>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Physical Exam Checklist */}
-                                <div className="bg-card border border-white/5 rounded-xl p-4">
-                                    <h3 className="font-semibold text-foreground mb-3 flex items-center gap-2 text-sm">
-                                        <ListChecks size={14} className="text-primary" />
-                                        Exam Checklist
-                                    </h3>
-                                    <div className="space-y-2">
-                                        {EXAM_CHECKLIST_ITEMS.map((item) => {
-                                            const IconComponent = item.icon;
-                                            const isChecked = examChecklist[item.id];
-                                            return (
-                                                <button
-                                                    key={item.id}
-                                                    onClick={() => toggleExamChecklistItem(item.id)}
-                                                    className={cn(
-                                                        "w-full flex items-center gap-3 p-2.5 rounded-lg border transition-all text-left",
-                                                        isChecked
-                                                            ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
-                                                            : "bg-muted/20 border-white/5 text-muted-foreground hover:bg-muted/40"
-                                                    )}
-                                                >
-                                                    <div className={cn(
-                                                        "w-5 h-5 rounded-md flex items-center justify-center border",
-                                                        isChecked
-                                                            ? "bg-emerald-500 border-emerald-400"
-                                                            : "bg-muted/50 border-white/10"
-                                                    )}>
-                                                        {isChecked && <CheckCircle2 size={12} className="text-white" />}
-                                                    </div>
-                                                    <IconComponent size={14} />
-                                                    <span className="text-sm font-medium">{item.label}</span>
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                    <div className="mt-3 pt-3 border-t border-white/5">
-                                        <div className="flex items-center justify-between text-xs">
-                                            <span className="text-muted-foreground">Progress</span>
-                                            <span className="font-medium text-foreground">
-                                                {Object.values(examChecklist).filter(Boolean).length}/4
-                                            </span>
-                                        </div>
-                                        <div className="mt-1.5 h-1.5 bg-muted/50 rounded-full overflow-hidden">
-                                            <div 
-                                                className="h-full bg-emerald-500 rounded-full transition-all duration-300"
-                                                style={{ width: `${(Object.values(examChecklist).filter(Boolean).length / 4) * 100}%` }}
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Exam Log */}
-                                <div className="flex-1 bg-card border border-white/5 rounded-xl p-4 overflow-hidden flex flex-col">
-                                    <h3 className="font-semibold text-foreground mb-3 flex items-center gap-2 text-sm flex-shrink-0">
-                                        <FileText size={14} className="text-primary" />
-                                        Exam Log
-                                    </h3>
-                                    <div className="flex-1 overflow-y-auto space-y-2">
-                                        {examLog.length === 0 ? (
-                                            <p className="text-xs text-muted-foreground/50 italic text-center py-4">
-                                                No examinations yet
-                                            </p>
-                                        ) : (
-                                            examLog.slice(0, 5).map((entry, idx) => (
-                                                <div 
-                                                    key={idx}
-                                                    className="p-2 bg-muted/20 rounded-lg border border-white/5"
-                                                >
-                                                    <div className="flex items-center justify-between mb-1">
-                                                        <span className="text-xs font-medium text-foreground">{entry.zone}</span>
-                                                        <span className="text-[10px] text-muted-foreground">
-                                                            {new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                                                        </span>
-                                                    </div>
-                                                    <p className="text-[10px] text-muted-foreground line-clamp-2">{entry.finding}</p>
-                                                </div>
-                                            ))
-                                        )}
-                                    </div>
-                                </div>
+                            {/* Chatbot */}
+                            <div className="flex-1 flex flex-col min-w-0 min-h-[400px] lg:min-h-0 h-full">
+                                <PhysicalExamChat
+                                    className="flex-1 h-full"
+                                    caseId={selectedCase?.id || getCaseMockKey(selectedCase)}
+                                    caseTitle={selectedCase?.title || ''}
+                                    caseCategory={selectedCase?.category || ''}
+                                    symptoms={CASE_SYMPTOMS[getCaseMockKey(selectedCase)] || []}
+                                    chiefComplaint={
+                                        selectedCase?.chief_complaint
+                                        || CHIEF_COMPLAINTS[getCaseMockKey(selectedCase)]
+                                        || ''
+                                    }
+                                    patientId={selectedPatient?.id || ''}
+                                    patientName={selectedPatient?.name || ''}
+                                    onConversationUpdate={setPhysicalExamMessages}
+                                />
                             </div>
                         </div>
 
@@ -3107,367 +3109,370 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
 
                 {/* STEP 4: Physical Evaluation */}
                 {currentStep === 4 && (() => {
-                    const caseKey = getCaseMockKey(selectedCase);
-                    const requirements = REQUIRED_ZONES_BY_CASE[caseKey] || REQUIRED_ZONES_BY_CASE['pneumonia'];
-                    const examinedZoneIds = examLog.map(entry => {
-                        const zone = BODY_ZONES.find(z => z.label === entry.zone);
-                        return zone?.id;
-                    }).filter(Boolean);
-                    
-                    const coveredRequiredZones = requirements.zones.filter(zoneId => examinedZoneIds.includes(zoneId));
-                    const coverageComplete = coveredRequiredZones.length >= requirements.minRequired;
-                    
-                    // AI-filled physical rubric scores
-                    const aiPhysicalRubric = {
-                        technique: 2,
-                        coverage: coverageComplete ? 2 : 1,
-                        infectionControl: 2,
-                        interpretation: 2,
-                        communication: 1
-                    };
-                    const physicalRubricTotal = Object.values(aiPhysicalRubric).reduce((a, b) => a + b, 0);
-                    
-                    // AI-filled physical checklist
-                    const aiPhysicalChecklist = {
-                        inspection: true,
-                        palpation: true,
-                        percussion: false,
-                        auscultation: examinedZoneIds.length > 0
-                    };
-                    const physicalChecklistCompleted = Object.values(aiPhysicalChecklist).filter(Boolean).length;
-                    
-                    // Calculate physical eval score
-                    const calculatePhysicalScore = () => {
-                        let score = 0;
-                        // Coverage: 3 points max
-                        score += (coveredRequiredZones.length / requirements.zones.length) * 3;
-                        // Rubric: 4.5 points max
-                        score += (physicalRubricTotal / 10) * 4.5;
-                        // Checklist: 2.5 points max
-                        score += (physicalChecklistCompleted / 4) * 2.5;
-                        return Math.min(10, Math.round(score * 10) / 10);
-                    };
-                    const physicalScore = calculatePhysicalScore();
-                    
-                    // Generate feedback
-                    const getPhysicalFeedback = () => {
-                        if (examLog.length === 0) {
-                            return "No physical examination was performed. Remember to examine relevant body zones.";
+                    const evalScore = physicalEvalResult
+                        ? Math.round((physicalEvalResult.items_covered / physicalEvalResult.total_items) * 100)
+                        : null;
+                    const isExamStudent = isAssignedExam && role === 'student';
+                    const showEvalPercentToStudent = !isExamStudent;
+                    const hasExamActivity =
+                        physicalExamMessages.some((m) => m.role === 'student') || examLog.length > 0;
+
+                    const copyPhysicalEvaluationSummary = async () => {
+                        const r = physicalEvalResult;
+                        const checklistLines = r
+                            ? r.sections.flatMap((s) => [
+                                `\n[${s.label}]`,
+                                ...s.items.map((i) => `  ${i.num}. [${i.covered ? '✓' : '✗'}] ${i.text}`),
+                              ]).join('\n')
+                            : '  (scoring unavailable)';
+                        const summary = [
+                            'OSCE PHYSICAL EXAMINATION EVALUATION',
+                            '='.repeat(36),
+                            `Case: ${selectedCase?.title || 'Unknown'} (${selectedCase?.category || ''})`,
+                            `Items Covered: ${r ? `${r.items_covered}/${r.total_items}` : 'N/A'}`,
+                            `Manikin zones examined: ${examLog.length}`,
+                            '',
+                            'CHECKLIST:',
+                            checklistLines,
+                            '',
+                            `STRUCTURE FOLLOWED: ${r?.structure_followed ? 'Yes ✓' : 'No ✗'}`,
+                            r?.structure_notes ? `Note: ${r.structure_notes}` : '',
+                            '',
+                            'FEEDBACK:',
+                            r?.feedback || '—',
+                            '',
+                            r?.strengths?.length ? `STRENGTHS:\n${r.strengths.map((s) => `• ${s}`).join('\n')}` : '',
+                            r?.areas_for_improvement?.length
+                                ? `AREAS FOR IMPROVEMENT:\n${r.areas_for_improvement.map((a) => `• ${a}`).join('\n')}`
+                                : '',
+                        ].filter((l) => l !== undefined).join('\n').trim();
+
+                        try {
+                            await navigator.clipboard.writeText(summary);
+                        } catch {
+                            const ta = document.createElement('textarea');
+                            ta.value = summary;
+                            document.body.appendChild(ta);
+                            ta.select();
+                            document.execCommand('copy');
+                            document.body.removeChild(ta);
                         }
-                        if (coverageComplete) {
-                            return `Good coverage of ${requirements.label}. Systematic approach demonstrated.`;
-                        }
-                        return `Partial coverage. Remember to examine ${requirements.label} for this case.`;
+                        setCopiedPhysicalToClipboard(true);
+                        setTimeout(() => setCopiedPhysicalToClipboard(false), 2000);
                     };
-                    
-                    // Key findings based on zones examined
-                    const getKeyPhysicalFindings = () => {
-                        if (examLog.length === 0) return [];
-                        const findings = [];
-                        const hasLungZones = examinedZoneIds.some(id => id && !id.includes('heart'));
-                        const hasCardiacZones = examinedZoneIds.some(id => id && id.includes('heart'));
-                        
-                        if (hasLungZones) {
-                            const lungFindings = ZONE_FINDINGS[caseKey]?.lung || 'Normal breath sounds';
-                            findings.push({ zone: 'Lung fields', finding: lungFindings });
-                        }
-                        if (hasCardiacZones) {
-                            const cardiacFindings = ZONE_FINDINGS[caseKey]?.cardiac || 'Normal heart sounds';
-                            findings.push({ zone: 'Cardiac', finding: cardiacFindings });
-                        }
-                        return findings;
-                    };
-                    const keyFindings = getKeyPhysicalFindings();
-                    
+
                     return (
                         <div className="h-full flex flex-col">
-                            <div className="flex-1 flex overflow-hidden p-4 gap-4">
-                                {/* LEFT COLUMN: Evaluation Content */}
-                                <div className="flex-[3] flex flex-col gap-4 overflow-y-auto pr-2">
-                                    {/* Header */}
-                                    <div className="bg-card border border-white/5 rounded-xl p-4">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                                                <ListChecks size={20} className="text-primary" />
-                                            </div>
+                            <div className="flex-1 flex flex-col lg:flex-row overflow-hidden p-4 gap-4">
+                                <div className="flex-1 lg:flex-[3] overflow-y-auto space-y-4 lg:pr-2 min-h-0">
+                                    {canOfferCaseReveal && (
+                                        <div className="rounded-xl border border-white/10 bg-muted/20 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                                             <div>
-                                                <h2 className="font-bold text-foreground">Physical Evaluation</h2>
-                                                <p className="text-xs text-muted-foreground">AI-assessed physical examination performance</p>
+                                                <p className="text-sm font-medium text-foreground">Case identity hidden</p>
+                                                <p className="text-xs text-muted-foreground mt-0.5">
+                                                    Reveal the case name once after physical examination evaluation.
+                                                </p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => setPracticeCaseNameRevealed(true)}
+                                                className="shrink-0 px-4 py-2 rounded-lg text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                                            >
+                                                Reveal case name
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {(!hideCaseIdentity || (isAssignedExam && role !== 'student')) && (
+                                        <div className="pt-1 pb-2">
+                                            {isRandomCase && practiceCaseNameRevealed && (
+                                                <p className="text-xs font-medium text-muted-foreground uppercase tracking-widest mb-1">Case Revealed</p>
+                                            )}
+                                            <h1 style={{ fontFamily: "'Playfair Display', serif" }} className="text-3xl font-semibold text-foreground leading-tight">{selectedCase?.title}</h1>
+                                            <p className="text-sm text-muted-foreground mt-1">{selectedCase?.category}</p>
+                                        </div>
+                                    )}
+
+                                    {isExamStudent && physicalEvalResult && !physicalEvalLoading && (
+                                        <div className="rounded-xl border border-primary/25 bg-primary/10 px-4 py-3 text-sm text-foreground/90">
+                                            Your physical examination has been recorded. Your examiner will review the checklist and send your official score when ready.
+                                        </div>
+                                    )}
+
+                                    {/* Header with live score badge — same layout as History Evaluation */}
+                                    <div className="bg-card border border-white/5 rounded-xl p-4">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 rounded-lg bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
+                                                    <CheckCircle2 size={20} />
+                                                </div>
+                                                <div>
+                                                    <h2 className="text-lg font-bold text-foreground">Physical Evaluation</h2>
+                                                    <p className="text-xs text-muted-foreground">
+                                                        {physicalEvalLoading
+                                                            ? 'Analyzing session…'
+                                                            : physicalEvalResult
+                                                                ? `${physicalEvalResult.items_covered}/${physicalEvalResult.total_items} checklist items covered`
+                                                                : 'OSCE checklist review'}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                {!physicalEvalLoading && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setPhysicalEvalResult(null);
+                                                            setPhysicalEvalError(null);
+                                                            physicalEvalDoneRef.current = false;
+                                                            runPhysicalEvaluation({ force: true });
+                                                        }}
+                                                        className="text-xs px-2.5 py-1.5 rounded-lg bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted border border-white/5 transition-colors"
+                                                    >
+                                                        Re-score
+                                                    </button>
+                                                )}
+                                                {evalScore != null && !physicalEvalLoading && showEvalPercentToStudent && (
+                                                    <div className={cn(
+                                                        'flex flex-col items-center justify-center w-14 h-14 rounded-full border-2 font-bold text-lg',
+                                                        evalScore >= 70 ? 'border-emerald-500 text-emerald-400' :
+                                                        evalScore >= 50 ? 'border-amber-500 text-amber-400' : 'border-red-500 text-red-400'
+                                                    )}>
+                                                        {evalScore}
+                                                        <span className="text-[10px] font-normal text-muted-foreground leading-none">%</span>
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
 
-                                    {examLog.length === 0 ? (
+                                    {!hasExamActivity && !physicalEvalLoading && (
                                         <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-6 text-center">
                                             <AlertTriangle size={32} className="text-amber-500 mx-auto mb-3" />
                                             <h3 className="font-semibold text-amber-500 mb-1">No Physical Examination Performed</h3>
                                             <p className="text-sm text-amber-400/80">
-                                                You did not examine any body zones. Go back to perform the physical examination.
+                                                You did not examine any zones or use the exam assistant. Go back to perform the physical examination.
                                             </p>
                                         </div>
-                                    ) : (
-                                        <>
-                                            {/* Exam Coverage */}
-                                            <div className="bg-card border border-white/5 rounded-xl p-4">
+                                    )}
+
+                                    {physicalEvalLoading && (
+                                        <div className="bg-card border border-white/5 rounded-xl p-8 flex flex-col items-center gap-3">
+                                            <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                                            <p className="text-sm text-muted-foreground">Scoring against OSCE checklist…</p>
+                                        </div>
+                                    )}
+
+                                    {physicalEvalError && !physicalEvalLoading && (
+                                        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 flex items-start gap-3">
+                                            <AlertTriangle size={16} className="text-amber-400 mt-0.5 shrink-0" />
+                                            <p className="text-sm text-amber-300">{physicalEvalError}</p>
+                                        </div>
+                                    )}
+
+                                    {physicalEvalSaveError && !physicalEvalLoading && (
+                                        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 flex items-start gap-3">
+                                            <AlertTriangle size={16} className="text-red-400 mt-0.5 shrink-0" />
+                                            <p className="text-sm text-red-300">Could not save score: {physicalEvalSaveError}</p>
+                                        </div>
+                                    )}
+
+                                    {physicalEvalSaved && !physicalEvalSaveError && !physicalEvalLoading && physicalEvalResult && !isAssignedExam && (
+                                        <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 flex items-start gap-3">
+                                            <CheckCircle2 size={16} className="text-emerald-400 mt-0.5 shrink-0" />
+                                            <p className="text-sm text-emerald-300">
+                                                Physical examination score saved ({evalScore ?? '—'}%). View it under My Sessions → History.
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    {physicalEvalSaved && !physicalEvalSaveError && !physicalEvalLoading && physicalEvalResult && isAssignedExam && (
+                                        <div className="rounded-xl border border-primary/25 bg-primary/10 px-4 py-3 text-sm text-foreground/90">
+                                            Physical score recorded for this exam. Open <strong>OSCE Sessions</strong> → Review <strong>P</strong> to adjust the checklist, then send the result to the student.
+                                        </div>
+                                    )}
+
+                                    {physicalEvalResult && !physicalEvalLoading && showEvalPercentToStudent && physicalEvalResult.sections?.map((section) => {
+                                        const sectionCovered = section.items.filter((i) => i.covered).length;
+                                        const sectionTotal = section.items.length;
+                                        return (
+                                            <div key={section.id} className="bg-card border border-white/5 rounded-xl p-4">
                                                 <div className="flex items-center justify-between mb-3">
                                                     <div className="flex items-center gap-2">
-                                                        <h3 className="font-semibold text-foreground text-sm">Exam Coverage</h3>
-                                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
-                                                            AI Evaluated
-                                                        </span>
+                                                        <h3 className="font-semibold text-foreground text-sm">{section.label}</h3>
+                                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">Matched</span>
                                                     </div>
                                                     <span className={cn(
-                                                        "text-xs px-2 py-1 rounded-full font-medium",
-                                                        coverageComplete ? "bg-emerald-500/10 text-emerald-500" : "bg-amber-500/10 text-amber-500"
+                                                        'text-xs px-2 py-1 rounded-full font-medium',
+                                                        sectionCovered === sectionTotal ? 'bg-emerald-500/10 text-emerald-500' :
+                                                        sectionCovered > 0 ? 'bg-amber-500/10 text-amber-500' : 'bg-red-500/10 text-red-400'
                                                     )}>
-                                                        {coveredRequiredZones.length}/{requirements.zones.length} required
+                                                        {sectionCovered}/{sectionTotal}
                                                     </span>
                                                 </div>
-                                                <p className="text-xs text-muted-foreground mb-3">
-                                                    {hideCaseIdentity
-                                                        ? `Required examination areas: ${requirements.label}`
-                                                        : `Required for ${selectedCase?.title}: ${requirements.label}`}
-                                                </p>
-                                                <div className="space-y-2">
-                                                    {requirements.zones.map((zoneId) => {
-                                                        const zone = BODY_ZONES.find(z => z.id === zoneId);
-                                                        const isExamined = examinedZoneIds.includes(zoneId);
-                                                        return (
-                                                            <div 
-                                                                key={zoneId}
-                                                                className={cn(
-                                                                    "flex items-center gap-3 p-2 rounded-lg border",
-                                                                    isExamined 
-                                                                        ? "bg-emerald-500/10 border-emerald-500/30" 
-                                                                        : "bg-muted/20 border-white/5"
-                                                                )}
-                                                            >
-                                                                <div className={cn(
-                                                                    "w-5 h-5 rounded-full flex items-center justify-center",
-                                                                    isExamined ? "bg-emerald-500" : "bg-muted/50"
-                                                                )}>
-                                                                    {isExamined ? (
-                                                                        <CheckCircle2 size={12} className="text-white" />
-                                                                    ) : (
-                                                                        <X size={12} className="text-muted-foreground" />
-                                                                    )}
-                                                                </div>
-                                                                <span className={cn(
-                                                                    "text-sm",
-                                                                    isExamined ? "text-emerald-400" : "text-muted-foreground"
-                                                                )}>
-                                                                    {zone?.label || zoneId}
-                                                                </span>
-                                                                {isExamined && (
-                                                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 ml-auto">
-                                                                        Examined
-                                                                    </span>
-                                                                )}
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            </div>
-
-                                            {/* Physical Checklist (AI-filled) */}
-                                            <div className="bg-card border border-white/5 rounded-xl p-4">
-                                                <div className="flex items-center justify-between mb-3">
-                                                    <div className="flex items-center gap-2">
-                                                        <h3 className="font-semibold text-foreground text-sm">Physical Checklist</h3>
-                                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
-                                                            AI Detected
-                                                        </span>
-                                                    </div>
-                                                    <span className="text-xs text-muted-foreground">
-                                                        {physicalChecklistCompleted}/4 completed
-                                                    </span>
-                                                </div>
-                                                <div className="grid grid-cols-2 gap-2">
-                                                    {EXAM_CHECKLIST_ITEMS.map((item) => {
-                                                        const isChecked = aiPhysicalChecklist[item.id];
-                                                        const IconComponent = item.icon;
-                                                        return (
-                                                            <div 
-                                                                key={item.id}
-                                                                className={cn(
-                                                                    "flex items-center gap-2 p-2.5 rounded-lg border",
-                                                                    isChecked 
-                                                                        ? "bg-emerald-500/10 border-emerald-500/30" 
-                                                                        : "bg-red-500/10 border-red-500/30"
-                                                                )}
-                                                            >
-                                                                <div className={cn(
-                                                                    "w-4 h-4 rounded-full flex items-center justify-center",
-                                                                    isChecked ? "bg-emerald-500" : "bg-red-500/50"
-                                                                )}>
-                                                                    {isChecked ? (
-                                                                        <CheckCircle2 size={10} className="text-white" />
-                                                                    ) : (
-                                                                        <X size={10} className="text-white" />
-                                                                    )}
-                                                                </div>
-                                                                <IconComponent size={12} className={isChecked ? "text-emerald-400" : "text-red-400"} />
-                                                                <span className={cn(
-                                                                    "text-xs font-medium",
-                                                                    isChecked ? "text-emerald-400" : "text-red-400"
-                                                                )}>
-                                                                    {item.label}
-                                                                </span>
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            </div>
-
-                                            {/* OSCE Rubric (Physical) */}
-                                            <div className="bg-card border border-white/5 rounded-xl p-4">
-                                                <div className="flex items-center justify-between mb-3">
-                                                    <div className="flex items-center gap-2">
-                                                        <h3 className="font-semibold text-foreground text-sm">OSCE Rubric (Physical)</h3>
-                                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
-                                                            AI Scored
-                                                        </span>
-                                                    </div>
-                                                    <span className={cn(
-                                                        "text-xs px-2 py-1 rounded-full font-medium",
-                                                        physicalRubricTotal >= 8 ? "bg-emerald-500/10 text-emerald-500" :
-                                                        physicalRubricTotal >= 5 ? "bg-amber-500/10 text-amber-500" : "bg-red-500/10 text-red-500"
-                                                    )}>
-                                                        {physicalRubricTotal}/10
-                                                    </span>
-                                                </div>
-                                                <div className="space-y-2">
-                                                    {PHYSICAL_RUBRIC_CRITERIA.map(criterion => {
-                                                        const score = aiPhysicalRubric[criterion.key];
-                                                        return (
-                                                            <div 
-                                                                key={criterion.key}
-                                                                className={cn(
-                                                                    "flex items-center justify-between p-2.5 rounded-lg border",
-                                                                    score === 2 ? "bg-emerald-500/10 border-emerald-500/30" :
-                                                                    score === 1 ? "bg-amber-500/10 border-amber-500/30" : "bg-red-500/10 border-red-500/30"
-                                                                )}
-                                                            >
-                                                                <div className="flex flex-col">
-                                                                    <span className={cn(
-                                                                        "text-sm font-medium",
-                                                                        score === 2 ? "text-emerald-500" :
-                                                                        score === 1 ? "text-amber-500" : "text-red-400"
-                                                                    )}>{criterion.label}</span>
-                                                                    <span className="text-[10px] text-muted-foreground">Auto-scored</span>
-                                                                </div>
-                                                                <span className={cn(
-                                                                    "text-sm font-bold px-2 py-1 rounded",
-                                                                    score === 2 ? "bg-emerald-500/20 text-emerald-400" :
-                                                                    score === 1 ? "bg-amber-500/20 text-amber-400" : "bg-red-500/20 text-red-400"
-                                                                )}>
-                                                                    {score}/2
-                                                                </span>
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            </div>
-
-                                            {/* Key Physical Findings */}
-                                            <div className="bg-card border border-white/5 rounded-xl p-4">
-                                                <h3 className="font-semibold text-foreground text-sm mb-3 flex items-center gap-2">
-                                                    <Stethoscope size={14} className="text-primary" />
-                                                    Key Physical Findings
-                                                </h3>
-                                                {keyFindings.length > 0 ? (
-                                                    <div className="space-y-2">
-                                                        {keyFindings.map((finding, idx) => (
-                                                            <div key={idx} className="flex items-start gap-2 p-2 bg-muted/20 rounded-lg">
-                                                                <div className="w-2 h-2 rounded-full bg-primary mt-1.5 flex-shrink-0" />
-                                                                <div>
-                                                                    <span className="text-xs font-medium text-primary">{finding.zone}: </span>
-                                                                    <span className="text-xs text-foreground">{finding.finding}</span>
-                                                                </div>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                ) : (
-                                                    <p className="text-xs text-muted-foreground italic">No findings recorded.</p>
-                                                )}
-                                                {!coverageComplete && (
-                                                    <div className="mt-3 p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg">
-                                                        <p className="text-xs text-amber-400 flex items-center gap-1.5">
-                                                            <AlertTriangle size={12} />
-                                                            Incomplete coverage: some required zones were not examined.
-                                                        </p>
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            {/* Score + Feedback */}
-                                            <div className="bg-card border border-white/5 rounded-xl p-4">
-                                                <h3 className="font-semibold text-foreground text-sm mb-3">Physical Exam Score</h3>
-                                                <div className="flex items-center gap-4 mb-3">
-                                                    <div className="flex-1 h-3 bg-muted/50 rounded-full overflow-hidden">
-                                                        <div 
+                                                <div className="space-y-1.5">
+                                                    {section.items.map((item) => (
+                                                        <div
+                                                            key={item.num}
                                                             className={cn(
-                                                                "h-full rounded-full transition-all",
-                                                                physicalScore >= 8 ? "bg-emerald-500" :
-                                                                physicalScore >= 5 ? "bg-amber-500" : "bg-red-500"
+                                                                'flex items-start gap-2.5 px-3 py-2 rounded-lg border text-sm',
+                                                                item.covered
+                                                                    ? 'bg-emerald-500/8 border-emerald-500/20'
+                                                                    : 'bg-red-500/8 border-red-500/20'
                                                             )}
-                                                            style={{ width: `${physicalScore * 10}%` }}
-                                                        />
-                                                    </div>
-                                                    <span className={cn(
-                                                        "text-lg font-bold",
-                                                        physicalScore >= 8 ? "text-emerald-500" :
-                                                        physicalScore >= 5 ? "text-amber-500" : "text-red-500"
-                                                    )}>
-                                                        {physicalScore}/10
-                                                    </span>
-                                                </div>
-                                                <div className="p-3 bg-muted/20 rounded-lg">
-                                                    <p className="text-sm text-foreground">{getPhysicalFeedback()}</p>
+                                                        >
+                                                            <span className={cn(
+                                                                'shrink-0 w-4 h-4 mt-0.5 rounded-full flex items-center justify-center text-[10px] font-bold',
+                                                                item.covered ? 'bg-emerald-500 text-white' : 'bg-red-500/50 text-white'
+                                                            )}>
+                                                                {item.covered ? '✓' : '✗'}
+                                                            </span>
+                                                            <div className="flex-1 min-w-0">
+                                                                <span className={cn(
+                                                                    'leading-snug',
+                                                                    item.covered ? 'text-foreground/80' : 'text-muted-foreground'
+                                                                )}>
+                                                                    <span className="text-muted-foreground/50 mr-1">{item.num}.</span>
+                                                                    {item.text}
+                                                                </span>
+                                                                {item.notes && (
+                                                                    <p className="text-[11px] text-amber-400/80 mt-0.5">{item.notes}</p>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    ))}
                                                 </div>
                                             </div>
-                                        </>
+                                        );
+                                    })}
+
+                                    {physicalEvalResult && !physicalEvalLoading && showEvalPercentToStudent && (
+                                        <div className={cn(
+                                            'rounded-xl border p-4 flex items-start gap-3',
+                                            physicalEvalResult.structure_followed
+                                                ? 'bg-emerald-500/8 border-emerald-500/20'
+                                                : 'bg-amber-500/8 border-amber-500/20'
+                                        )}>
+                                            <span className={physicalEvalResult.structure_followed ? 'text-emerald-400' : 'text-amber-400'}>
+                                                {physicalEvalResult.structure_followed ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
+                                            </span>
+                                            <div>
+                                                <p className={cn('text-sm font-medium', physicalEvalResult.structure_followed ? 'text-emerald-400' : 'text-amber-400')}>
+                                                    {physicalEvalResult.structure_followed ? 'Correct section order followed' : 'Section order needs attention'}
+                                                </p>
+                                                {physicalEvalResult.structure_notes && (
+                                                    <p className="text-xs text-muted-foreground mt-0.5">{physicalEvalResult.structure_notes}</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {physicalEvalResult && !physicalEvalLoading && showEvalPercentToStudent && (
+                                        <div className="bg-card border border-white/5 rounded-xl p-4 space-y-3">
+                                            <h3 className="font-semibold text-foreground text-sm">Examiner Feedback</h3>
+                                            <p className="text-sm text-muted-foreground leading-relaxed">{physicalEvalResult.feedback}</p>
+                                            {physicalEvalResult.strengths?.length > 0 && (
+                                                <div>
+                                                    <p className="text-xs font-medium text-emerald-400 mb-1.5">Strengths</p>
+                                                    <ul className="space-y-1">
+                                                        {physicalEvalResult.strengths.map((s, i) => (
+                                                            <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
+                                                                <span className="text-emerald-500 mt-0.5 shrink-0">•</span>{s}
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                </div>
+                                            )}
+                                            {physicalEvalResult.areas_for_improvement?.length > 0 && (
+                                                <div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setShowMissedPhysicalItems((v) => !v)}
+                                                        className="w-full flex items-center justify-between text-xs font-medium text-amber-400 hover:text-amber-300 transition-colors"
+                                                    >
+                                                        <span>Areas for improvement ({physicalEvalResult.areas_for_improvement.length})</span>
+                                                        <ChevronRight size={14} className={cn('transition-transform', showMissedPhysicalItems && 'rotate-90')} />
+                                                    </button>
+                                                    {showMissedPhysicalItems && (
+                                                        <ul className="mt-2 space-y-1">
+                                                            {physicalEvalResult.areas_for_improvement.map((a, i) => (
+                                                                <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
+                                                                    <span className="text-amber-500 mt-0.5 shrink-0">•</span>{a}
+                                                                </li>
+                                                            ))}
+                                                        </ul>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {physicalEvalResult && !physicalEvalLoading && showEvalPercentToStudent && (
+                                        <div className="bg-card border border-white/5 rounded-xl p-4">
+                                            <button
+                                                type="button"
+                                                onClick={copyPhysicalEvaluationSummary}
+                                                disabled={physicalEvalLoading}
+                                                className={cn(
+                                                    'w-full py-2.5 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2 disabled:opacity-50',
+                                                    copiedPhysicalToClipboard
+                                                        ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/30'
+                                                        : 'bg-muted/50 text-foreground border border-white/5 hover:bg-muted'
+                                                )}
+                                            >
+                                                {copiedPhysicalToClipboard ? (
+                                                    <><CheckCircle2 size={16} /> Copied!</>
+                                                ) : (
+                                                    <><FileText size={16} /> Copy evaluation summary</>
+                                                )}
+                                            </button>
+                                        </div>
                                     )}
                                 </div>
 
-                                {/* RIGHT COLUMN: Snapshot */}
-                                <div className="hidden lg:flex flex-[2] flex-col gap-4 min-w-0">
-                                    {/* Case Info */}
+                                {/* RIGHT: Session snapshot (matches History Evaluation sidebar) */}
+                                <div className="flex flex-col gap-4 min-w-0 w-full lg:w-auto lg:flex-[2] shrink-0">
                                     <div className="bg-card border border-white/5 rounded-xl p-4">
-                                        <h3 className="font-semibold text-foreground mb-3 flex items-center gap-2 text-sm">
-                                            <Brain size={14} className="text-primary" />
+                                        <h3 className="font-semibold text-foreground text-sm mb-3 flex items-center gap-2">
+                                            <FileText size={14} className="text-primary" />
                                             Session Snapshot
                                         </h3>
-                                        <div className="space-y-2">
-                                            {!hideCaseIdentity && (
-                                            <>
-                                            <div className="flex items-center justify-between">
-                                                <span className="text-xs text-muted-foreground">Case</span>
-                                                <span className="text-xs font-medium text-foreground">{selectedCase?.title || 'N/A'}</span>
+                                        <div className="space-y-3">
+                                            <div className="flex justify-between items-center">
+                                                <span className="text-xs text-muted-foreground">Case:</span>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-sm font-medium text-foreground">
+                                                        {hideCaseIdentity ? 'Assigned case' : selectedCase?.title}
+                                                    </span>
+                                                    {selectedCase && !hideCaseIdentity && (
+                                                        <span className={cn(
+                                                            'text-[10px] px-1.5 py-0.5 rounded font-medium',
+                                                            selectedCase.category === 'Cardiac'
+                                                                ? 'bg-red-500/10 text-red-400'
+                                                                : 'bg-blue-500/10 text-blue-400'
+                                                        )}>
+                                                            {selectedCase.category}
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </div>
-                                            <div className="flex items-center justify-between">
-                                                <span className="text-xs text-muted-foreground">Category</span>
-                                                <span className="text-xs px-2 py-0.5 rounded bg-primary/10 text-primary">
-                                                    {selectedCase?.category || 'N/A'}
-                                                </span>
+                                            <div className="flex justify-between">
+                                                <span className="text-xs text-muted-foreground">Duration:</span>
+                                                <span className="text-sm font-medium text-foreground">{formatTime(elapsedTime)}</span>
                                             </div>
-                                            </>
-                                            )}
-                                            <div className="flex items-center justify-between">
-                                                <span className="text-xs text-muted-foreground">Session Time</span>
-                                                <span className="text-xs font-medium text-foreground flex items-center gap-1">
-                                                    <Clock size={10} />
-                                                    {formatTime(elapsedTime)}
+                                            <div className="flex justify-between">
+                                                <span className="text-xs text-muted-foreground">Exam actions:</span>
+                                                <span className="text-sm font-medium text-foreground">
+                                                    {physicalExamMessages.filter((m) => m.role === 'student').length + examLog.length}
                                                 </span>
                                             </div>
                                         </div>
                                     </div>
 
-                                    {/* Current Vitals */}
                                     <div className="bg-card border border-white/5 rounded-xl p-4">
-                                        <h3 className="font-semibold text-foreground mb-3 flex items-center gap-2 text-sm">
+                                        <h3 className="font-semibold text-foreground text-sm mb-3 flex items-center gap-2">
                                             <Activity size={14} className="text-primary" />
-                                            Patient Vitals
+                                            Current Vitals
                                         </h3>
                                         <div className="grid grid-cols-2 gap-2">
                                             <div className="p-2 bg-muted/30 rounded-lg text-center">
@@ -3478,14 +3483,11 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
                                                 <span className="text-[10px] text-muted-foreground block">HR</span>
                                                 <span className="text-xs font-semibold text-foreground">{patientStatus.heartRate}</span>
                                             </div>
-                                            <div className={cn(
-                                                "p-2 rounded-lg text-center",
-                                                patientStatus.spO2 < 95 ? "bg-red-500/20" : "bg-muted/30"
-                                            )}>
+                                            <div className="p-2 bg-muted/30 rounded-lg text-center">
                                                 <span className="text-[10px] text-muted-foreground block">SpO₂</span>
                                                 <span className={cn(
-                                                    "text-xs font-semibold",
-                                                    patientStatus.spO2 < 95 ? "text-red-500" : "text-emerald-500"
+                                                    'text-xs font-semibold',
+                                                    patientStatus.spO2 < 95 ? 'text-amber-500' : 'text-emerald-500'
                                                 )}>{patientStatus.spO2}%</span>
                                             </div>
                                             <div className="p-2 bg-muted/30 rounded-lg text-center">
@@ -3494,35 +3496,10 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
                                             </div>
                                         </div>
                                     </div>
-
-                                    {/* Exam Log Summary */}
-                                    <div className="flex-1 bg-card border border-white/5 rounded-xl p-4 overflow-hidden flex flex-col">
-                                        <h3 className="font-semibold text-foreground mb-3 flex items-center gap-2 text-sm flex-shrink-0">
-                                            <FileText size={14} className="text-primary" />
-                                            Exam Log ({examLog.length} zones)
-                                        </h3>
-                                        <div className="flex-1 overflow-y-auto space-y-1.5">
-                                            {examLog.length === 0 ? (
-                                                <p className="text-xs text-muted-foreground/50 italic text-center py-4">
-                                                    No zones examined
-                                                </p>
-                                            ) : (
-                                                examLog.slice(0, 6).map((entry, idx) => (
-                                                    <div 
-                                                        key={idx}
-                                                        className="p-2 bg-muted/20 rounded-lg border border-white/5"
-                                                    >
-                                                        <span className="text-xs font-medium text-foreground">{entry.zone}</span>
-                                                    </div>
-                                                ))
-                                            )}
-                                        </div>
-                                    </div>
                                 </div>
                             </div>
 
-                            {/* Navigation Buttons */}
-                            <div className="flex-shrink-0 border-t border-white/5 bg-card/50 px-6 py-4 flex items-center justify-between">
+                            <div className="flex-shrink-0 p-4 pt-0 flex justify-between">
                                 <button
                                     onClick={goBack}
                                     className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-muted/50 text-foreground border border-white/5 hover:bg-muted transition-colors"
@@ -3575,20 +3552,35 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
                             <p className="text-sm text-muted-foreground mb-4">
                                 Your {isAssignedExam ? 'exam' : 'practice'} session has been recorded successfully.
                             </p>
-                            {historyEvalResult?.total_items > 0 && !isAssignedExam && (
-                                <div className="mb-6 inline-flex flex-col items-center gap-1 px-6 py-4 rounded-xl bg-muted/30 border border-white/10">
-                                    <span className="text-xs text-muted-foreground uppercase tracking-wider">History-taking</span>
-                                    <span className="text-3xl font-bold text-primary tabular-nums">
-                                        {Math.round((historyEvalResult.items_covered / historyEvalResult.total_items) * 100)}%
-                                    </span>
-                                    <span className="text-xs text-muted-foreground">
-                                        {historyEvalResult.items_covered}/{historyEvalResult.total_items} checklist items
-                                    </span>
+                            {!isAssignedExam && (historyEvalResult?.total_items > 0 || physicalEvalResult?.total_items > 0) && (
+                                <div className="mb-6 flex flex-wrap justify-center gap-3">
+                                    {historyEvalResult?.total_items > 0 && (
+                                        <div className="inline-flex flex-col items-center gap-1 px-6 py-4 rounded-xl bg-muted/30 border border-white/10">
+                                            <span className="text-xs text-muted-foreground uppercase tracking-wider">History-taking</span>
+                                            <span className="text-3xl font-bold text-primary tabular-nums">
+                                                {Math.round((historyEvalResult.items_covered / historyEvalResult.total_items) * 100)}%
+                                            </span>
+                                            <span className="text-xs text-muted-foreground">
+                                                {historyEvalResult.items_covered}/{historyEvalResult.total_items} checklist items
+                                            </span>
+                                        </div>
+                                    )}
+                                    {physicalEvalResult?.total_items > 0 && (
+                                        <div className="inline-flex flex-col items-center gap-1 px-6 py-4 rounded-xl bg-muted/30 border border-white/10">
+                                            <span className="text-xs text-muted-foreground uppercase tracking-wider">Physical exam</span>
+                                            <span className="text-3xl font-bold text-primary tabular-nums">
+                                                {Math.round((physicalEvalResult.items_covered / physicalEvalResult.total_items) * 100)}%
+                                            </span>
+                                            <span className="text-xs text-muted-foreground">
+                                                {physicalEvalResult.items_covered}/{physicalEvalResult.total_items} checklist items
+                                            </span>
+                                        </div>
+                                    )}
                                 </div>
                             )}
-                            {isAssignedExam && role === 'student' && (historyEvalSaved || historyEvalResult) && (
-                                <p className="text-sm text-muted-foreground mb-6">
-                                    History score submitted for examiner review.
+                            {isAssignedExam && (historyEvalSaved || physicalEvalSaved) && (
+                                <p className="text-sm text-muted-foreground mb-6 max-w-md mx-auto">
+                                    Exam scores recorded. From <strong>OSCE Sessions</strong>, use Review <strong>H</strong> (history) and <strong>P</strong> (physical) to edit checklists and send results to the student.
                                 </p>
                             )}
                             {saveError && (

@@ -3,7 +3,14 @@ import { FileText, Calendar, Award, ChevronRight } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
 import { cn } from '../../lib/utils';
-import { pickHistoryEval, studentCanSeeHistoryScore } from '../../lib/historyEvaluations';
+import {
+  pickHistoryEval,
+  pickPhysicalEval,
+  studentCanSeeHistoryScore,
+  studentCanSeePhysicalScore,
+  HISTORY_EVAL_TYPE,
+  PHYSICAL_EVAL_TYPE,
+} from '../../lib/historyEvaluations';
 import { HistoryEvalDetailModal } from './HistoryEvalDetailModal';
 
 const TABS = [
@@ -93,6 +100,7 @@ export function StudentHistory() {
         <HistoryEvalDetailModal
           sessionId={detailSession.id}
           caseTitle={detailSession.title}
+          evaluationType={detailSession.evaluationType || HISTORY_EVAL_TYPE}
           onClose={() => setDetailSession(null)}
         />
       )}
@@ -140,18 +148,26 @@ export function StudentHistory() {
                 const isPractice = getSessionKind(s) === 'practice';
                 const isExam = getSessionKind(s) === 'exam';
                 const historyEval = pickHistoryEval(s.history_eval);
+                const physicalEval = pickPhysicalEval(s.history_eval);
                 const kind = getSessionKind(s);
                 const canShowHistoryScore = studentCanSeeHistoryScore(kind, historyEval);
+                const canShowPhysicalScore = studentCanSeePhysicalScore(kind, physicalEval);
                 const histPct = historyEval?.final_percent ?? historyEval?.ai_percent;
-                const scoreLabel = canShowHistoryScore && histPct != null
-                  ? `${histPct}%`
+                const physPct = physicalEval?.final_percent ?? physicalEval?.ai_percent;
+                const scoreParts = [];
+                if (canShowHistoryScore && histPct != null) scoreParts.push(`H ${histPct}%`);
+                if (canShowPhysicalScore && physPct != null) scoreParts.push(`P ${physPct}%`);
+                const scoreLabel = scoreParts.length
+                  ? scoreParts.join(' · ')
                   : isPractice
                     ? formatSessionScore(s.score)
                     : null;
-                const canShowScore = scoreLabel != null && (isPractice || historyEval?.released_to_student);
-                const examPending = isExam && historyEval && !historyEval.released_to_student;
-                const examReleased = isExam && historyEval?.released_to_student;
-                const isClickable = isPractice || examReleased;
+                const canShowScore = scoreLabel != null;
+                const examPendingHistory = isExam && historyEval && !historyEval.released_to_student;
+                const examPendingPhysical = isExam && physicalEval && !physicalEval.released_to_student;
+                const examReleasedHistory = isExam && historyEval?.released_to_student;
+                const examReleasedPhysical = isExam && physicalEval?.released_to_student;
+                const isClickable = isPractice || examReleasedHistory || examReleasedPhysical;
 
                 const card = (
                   <>
@@ -182,10 +198,14 @@ export function StudentHistory() {
                         )}
                       </div>
                     </div>
-                    {examPending && (
-                      <div className="flex flex-col items-end shrink-0 text-right">
-                        <span className="text-xs font-medium text-amber-400/90">History score</span>
-                        <span className="text-sm text-muted-foreground">Pending examiner review</span>
+                    {(examPendingHistory || examPendingPhysical) && (
+                      <div className="flex flex-col items-end shrink-0 text-right gap-1">
+                        {examPendingHistory && (
+                          <span className="text-xs text-muted-foreground">History: pending review</span>
+                        )}
+                        {examPendingPhysical && (
+                          <span className="text-xs text-muted-foreground">Physical: pending review</span>
+                        )}
                       </div>
                     )}
                     {canShowScore && (
@@ -195,10 +215,42 @@ export function StudentHistory() {
                             <Award size={16} className="text-amber-400" />
                             <span className="font-semibold text-foreground">{scoreLabel}</span>
                           </div>
-                          {isExam && historyEval && (
-                            <span className="text-[10px] text-muted-foreground">History-taking</span>
+                          {isExam && s.score != null && (
+                            <span className="text-[10px] text-muted-foreground">Combined {s.score}%</span>
                           )}
                         </div>
+                        {isClickable && (examReleasedHistory || isPractice) && historyEval && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDetailSession({
+                                id: s.id,
+                                title: isExam ? 'Exam session' : s.case?.title || 'Practice session',
+                                evaluationType: HISTORY_EVAL_TYPE,
+                              });
+                            }}
+                            className="text-[10px] px-2 py-1 rounded border border-white/10 text-muted-foreground hover:text-foreground"
+                          >
+                            History
+                          </button>
+                        )}
+                        {isClickable && (examReleasedPhysical || isPractice) && physicalEval && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDetailSession({
+                                id: s.id,
+                                title: isExam ? 'Exam session' : s.case?.title || 'Practice session',
+                                evaluationType: PHYSICAL_EVAL_TYPE,
+                              });
+                            }}
+                            className="text-[10px] px-2 py-1 rounded border border-white/10 text-muted-foreground hover:text-foreground"
+                          >
+                            Physical
+                          </button>
+                        )}
                         {isClickable && (
                           <ChevronRight size={18} className="text-muted-foreground" />
                         )}
@@ -219,6 +271,7 @@ export function StudentHistory() {
                         setDetailSession({
                           id: s.id,
                           title: isExam ? 'Exam session' : s.case?.title || 'Practice session',
+                          evaluationType: historyEval ? HISTORY_EVAL_TYPE : PHYSICAL_EVAL_TYPE,
                         })
                       }
                       className={cn(
