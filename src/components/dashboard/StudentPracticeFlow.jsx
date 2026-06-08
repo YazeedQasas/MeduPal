@@ -51,6 +51,7 @@ import {
     syncPhysicalScoreFromEvaluation,
     recomputeSessionTotalScore,
 } from '../../lib/sessionScores';
+import { resolveExamSoundUrl } from '../../lib/examSounds';
 
 const STEPS = [
     { id: 0, label: 'Case Selection', icon: Brain },
@@ -160,15 +161,17 @@ const CASE_PATIENT_REPLIES = {
     ]
 };
 
+// Positions tuned for the front-facing model-viewer torso (camera-orbit 0deg 75deg).
+// Screen-left = patient's right; screen-right = patient's left.
 const BODY_ZONES = [
-    { id: 'chest-left', label: 'Chest Left', type: 'lung', position: { top: '28%', left: '35%' } },
-    { id: 'chest-right', label: 'Chest Right', type: 'lung', position: { top: '28%', left: '55%' } },
-    { id: 'upper-back-left', label: 'Upper Back Left', type: 'lung', position: { top: '22%', left: '28%' } },
-    { id: 'upper-back-right', label: 'Upper Back Right', type: 'lung', position: { top: '22%', left: '62%' } },
-    { id: 'lower-back-left', label: 'Lower Back Left', type: 'lung', position: { top: '38%', left: '28%' } },
-    { id: 'lower-back-right', label: 'Lower Back Right', type: 'lung', position: { top: '38%', left: '62%' } },
-    { id: 'heart-aortic', label: 'Heart (Aortic)', type: 'cardiac', position: { top: '30%', left: '42%' } },
-    { id: 'heart-mitral', label: 'Heart (Mitral)', type: 'cardiac', position: { top: '36%', left: '48%' } }
+    { id: 'chest-right', label: 'Chest Right', type: 'lung', position: { top: '40%', left: '39%' } },
+    { id: 'chest-left', label: 'Chest Left', type: 'lung', position: { top: '40%', left: '61%' } },
+    { id: 'upper-back-right', label: 'Upper Back Right', type: 'lung', position: { top: '27%', left: '36%' } },
+    { id: 'upper-back-left', label: 'Upper Back Left', type: 'lung', position: { top: '27%', left: '64%' } },
+    { id: 'lower-back-right', label: 'Lower Back Right', type: 'lung', position: { top: '53%', left: '37%' } },
+    { id: 'lower-back-left', label: 'Lower Back Left', type: 'lung', position: { top: '53%', left: '63%' } },
+    { id: 'heart-aortic', label: 'Heart (Aortic)', type: 'cardiac', position: { top: '33%', left: '47%' } },
+    { id: 'heart-mitral', label: 'Heart (Mitral)', type: 'cardiac', position: { top: '43%', left: '55%' } },
 ];
 
 const ZONE_FINDINGS = {
@@ -321,6 +324,11 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
         auscultation: false
     });
     const [playingSoundDemo, setPlayingSoundDemo] = useState(false);
+    const examAudioRef = useRef(null);
+    const examPanelRef = useRef(null);
+    const activeAuscultationZoneIdRef = useRef(null);
+    const [stethoscopeDragging, setStethoscopeDragging] = useState(false);
+    const [stethoscopePos, setStethoscopePos] = useState({ top: '78%', left: '12%' });
     const [hasDeteriorated, setHasDeteriorated] = useState(false);
     const [isDeteriorating, setIsDeteriorating] = useState(false);
     const [redFlagRecognized, setRedFlagRecognized] = useState(false);
@@ -1363,33 +1371,173 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
         onExit();
     }, [onExit]);
 
-    // Physical Exam handlers
-    const handleZoneClick = useCallback((zone) => {
+    // Physical Exam handlers — drag stethoscope onto zones; sound loops until removed
+    const STETHOSCOPE_DOCK = { top: '82%', left: '10%' };
+    const AUSCULTATION_HIT_RADIUS_PX = 30;
+
+    const stopZoneSound = useCallback(() => {
+        if (examAudioRef.current) {
+            examAudioRef.current.pause();
+            examAudioRef.current.currentTime = 0;
+            examAudioRef.current = null;
+        }
+        setPlayingSoundDemo(false);
+    }, []);
+
+    const pointerToPanelPercent = useCallback((clientX, clientY) => {
+        const panel = examPanelRef.current;
+        if (!panel) return null;
+        const rect = panel.getBoundingClientRect();
+        if (!rect.width || !rect.height) return null;
+        const xPct = ((clientX - rect.left) / rect.width) * 100;
+        const yPct = ((clientY - rect.top) / rect.height) * 100;
+        return {
+            left: `${Math.max(4, Math.min(96, xPct))}%`,
+            top: `${Math.max(8, Math.min(92, yPct))}%`,
+        };
+    }, []);
+
+    const getZoneAtPanelPercent = useCallback((pos) => {
+        const panel = examPanelRef.current;
+        if (!panel || !pos) return null;
+        const rect = panel.getBoundingClientRect();
+        const tipX = (parseFloat(pos.left) / 100) * rect.width;
+        const tipY = (parseFloat(pos.top) / 100) * rect.height;
+
+        let closest = null;
+        let closestDist = AUSCULTATION_HIT_RADIUS_PX;
+
+        for (const zone of BODY_ZONES) {
+            const zx = (parseFloat(zone.position.left) / 100) * rect.width;
+            const zy = (parseFloat(zone.position.top) / 100) * rect.height;
+            const dist = Math.hypot(tipX - zx, tipY - zy);
+            if (dist <= closestDist) {
+                closest = zone;
+                closestDist = dist;
+            }
+        }
+        return closest;
+    }, []);
+
+    const recordZoneExamination = useCallback((zone) => {
         setSelectedZone(zone);
-        
         const caseKey = getCaseMockKey(selectedCase);
         const findings = ZONE_FINDINGS[caseKey] || ZONE_FINDINGS['pneumonia'];
         const finding = findings[zone.type] || 'Normal findings';
         setSelectedFinding(finding);
-        
-        // Add to exam log
-        const logEntry = {
-            zone: zone.label,
-            finding: finding,
-            timestamp: Date.now()
-        };
-        setExamLog(prev => [logEntry, ...prev].slice(0, 10));
-        
-        // Auto-check auscultation when clicking zones
-        setExamChecklist(prev => ({ ...prev, auscultation: true }));
+        setExamLog((prev) => {
+            if (prev.some((entry) => entry.zone === zone.label)) return prev;
+            return [{ zone: zone.label, finding, timestamp: Date.now() }, ...prev].slice(0, 10);
+        });
+        setExamChecklist((prev) => ({ ...prev, auscultation: true }));
     }, [selectedCase, getCaseMockKey]);
 
-    const handlePlaySound = useCallback(() => {
-        setPlayingSoundDemo(true);
-        setTimeout(() => {
+    const startZoneAuscultation = useCallback(async (zone) => {
+        if (activeAuscultationZoneIdRef.current === zone.id && examAudioRef.current && !examAudioRef.current.paused) {
+            return;
+        }
+
+        const caseKey = getCaseMockKey(selectedCase);
+        const url = await resolveExamSoundUrl(caseKey, zone);
+        if (!url) {
+            console.warn('[exam sound] No audio file for', caseKey, zone.type);
+            return;
+        }
+
+        if (activeAuscultationZoneIdRef.current !== zone.id) {
+            recordZoneExamination(zone);
+            activeAuscultationZoneIdRef.current = zone.id;
+        }
+
+        if (examAudioRef.current) {
+            examAudioRef.current.pause();
+            examAudioRef.current = null;
+        }
+
+        primeAudioContext();
+
+        const audio = new Audio(url);
+        audio.preload = 'auto';
+        audio.loop = true;
+        examAudioRef.current = audio;
+        audio.addEventListener('error', () => {
+            console.warn('[exam sound] Playback failed:', url);
             setPlayingSoundDemo(false);
-        }, 2000);
-    }, []);
+        }, { once: true });
+
+        try {
+            await audio.play();
+            setPlayingSoundDemo(true);
+        } catch (err) {
+            console.warn('[exam sound] play() blocked:', err);
+            setPlayingSoundDemo(false);
+        }
+    }, [selectedCase, getCaseMockKey, recordZoneExamination]);
+
+    const clearAuscultation = useCallback(() => {
+        activeAuscultationZoneIdRef.current = null;
+        stopZoneSound();
+    }, [stopZoneSound]);
+
+    const applyAuscultationAtPosition = useCallback((pos) => {
+        const zone = getZoneAtPanelPercent(pos);
+        if (zone) {
+            startZoneAuscultation(zone);
+        } else {
+            clearAuscultation();
+        }
+    }, [getZoneAtPanelPercent, startZoneAuscultation, clearAuscultation]);
+
+    const handleStethoscopePointerDown = useCallback((e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        setStethoscopeDragging(true);
+        primeAudioContext();
+        const pos = pointerToPanelPercent(e.clientX, e.clientY);
+        if (pos) {
+            setStethoscopePos(pos);
+            applyAuscultationAtPosition(pos);
+        }
+    }, [pointerToPanelPercent, applyAuscultationAtPosition]);
+
+    const handleStethoscopePointerMove = useCallback((e) => {
+        if (!stethoscopeDragging) return;
+        const pos = pointerToPanelPercent(e.clientX, e.clientY);
+        if (!pos) return;
+        setStethoscopePos(pos);
+        applyAuscultationAtPosition(pos);
+    }, [stethoscopeDragging, pointerToPanelPercent, applyAuscultationAtPosition]);
+
+    const handleStethoscopePointerUp = useCallback((e) => {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+            e.currentTarget.releasePointerCapture(e.pointerId);
+        }
+        setStethoscopeDragging(false);
+        const pos = pointerToPanelPercent(e.clientX, e.clientY);
+        if (pos) {
+            setStethoscopePos(pos);
+            applyAuscultationAtPosition(pos);
+        }
+    }, [pointerToPanelPercent, applyAuscultationAtPosition]);
+
+    const returnStethoscopeToDock = useCallback(() => {
+        setStethoscopePos(STETHOSCOPE_DOCK);
+        clearAuscultation();
+    }, [clearAuscultation]);
+
+    useEffect(() => {
+        if (currentStep === 3) return undefined;
+        activeAuscultationZoneIdRef.current = null;
+        if (examAudioRef.current) {
+            examAudioRef.current.pause();
+            examAudioRef.current = null;
+        }
+        setPlayingSoundDemo(false);
+        setStethoscopeDragging(false);
+        setStethoscopePos(STETHOSCOPE_DOCK);
+        return undefined;
+    }, [currentStep]);
 
     const toggleExamChecklistItem = useCallback((itemId) => {
         setExamChecklist(prev => ({
@@ -2949,54 +3097,127 @@ function StudentPracticeFlow({ onExit, standaloneHistoryOnly = false, assignedSe
                                         <Stethoscope size={16} className="text-primary" />
                                         <span className="font-semibold text-foreground text-sm">Physical Examination</span>
                                     </div>
-                                    <span className="text-xs text-muted-foreground">Click body zones to examine</span>
+                                    <span className="text-xs text-muted-foreground">Drag stethoscope onto chest zones</span>
                                 </div>
                                 <div className="flex-1 flex flex-col sm:flex-row min-h-0 gap-3 p-3">
-                                <div className="flex-1 flex items-center justify-center min-h-[240px] min-w-0">
-                                    <div className="relative w-full max-w-md h-full max-h-[520px] bg-gradient-to-b from-muted/30 to-muted/10 rounded-2xl border border-white/10">
-                                        <div className="absolute inset-0 flex items-center justify-center">
-                                            <div className="relative w-36 h-56">
-                                                <div
-                                                    className="absolute top-0 left-1/2 -translate-x-1/2 w-14 h-14 rounded-full border-2 border-white/20"
-                                                    style={{ background: 'linear-gradient(145deg, rgba(90,125,138,0.4) 0%, rgba(61,90,106,0.3) 100%)' }}
-                                                />
-                                                <div
-                                                    className="absolute top-16 left-1/2 -translate-x-1/2 w-24 h-32 rounded-t-2xl rounded-b-lg border-2 border-white/20"
-                                                    style={{ background: 'linear-gradient(145deg, rgba(90,125,138,0.3) 0%, rgba(61,90,106,0.2) 100%)' }}
-                                                />
-                                                <div className="absolute top-[4.5rem] -left-5 w-5 h-24 rounded-full border-2 border-white/20 bg-white/5" />
-                                                <div className="absolute top-[4.5rem] -right-5 w-5 h-24 rounded-full border-2 border-white/20 bg-white/5" />
-                                            </div>
-                                        </div>
-                                        {BODY_ZONES.map((zone) => (
-                                            <button
+                                <div
+                                    ref={examPanelRef}
+                                    className="flex-1 relative min-h-[280px] min-w-0 rounded-2xl overflow-hidden border border-white/10 touch-none"
+                                    style={{ background: 'radial-gradient(ellipse at 50% 30%, rgba(110,231,183,0.05) 0%, transparent 70%), hsl(var(--card))' }}
+                                >
+                                    <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1.5 rounded-full pointer-events-none"
+                                        style={{ background: 'rgba(10,10,10,0.6)', border: `1px solid ${P.border}`, backdropFilter: 'blur(10px)' }}>
+                                        <Stethoscope size={11} style={{ color: P.accent }} />
+                                        <span className="text-[11px] font-semibold" style={{ color: P.text }}>Auscultation</span>
+                                        <span className="text-[10px]" style={{ color: P.muted }}>· Hold &amp; place on zones</span>
+                                    </div>
+
+                                    {/* Same torso model as History Taking — static (no auto-rotate) */}
+                                    {/* eslint-disable-next-line react/no-unknown-property */}
+                                    <model-viewer
+                                        src="/human_anatomy_male_torso.glb"
+                                        alt="Patient torso"
+                                        disable-zoom
+                                        camera-orbit="0deg 75deg 2.2m"
+                                        interaction-prompt="none"
+                                        style={{
+                                            width: '100%',
+                                            height: '100%',
+                                            minHeight: 280,
+                                            background: 'transparent',
+                                            pointerEvents: 'none',
+                                            '--progress-bar-color': 'transparent',
+                                            '--progress-mask': 'transparent',
+                                        }}
+                                    />
+
+                                    {BODY_ZONES.map((zone) => {
+                                        const isActive = playingSoundDemo && selectedZone?.id === zone.id;
+                                        return (
+                                            <div
                                                 key={zone.id}
-                                                type="button"
-                                                onClick={() => handleZoneClick(zone)}
                                                 className={cn(
-                                                    'absolute w-9 h-9 rounded-full flex items-center justify-center transition-all duration-200 border-2',
-                                                    selectedZone?.id === zone.id
+                                                    'absolute z-20 w-10 h-10 rounded-full flex items-center justify-center transition-all duration-200 border-2 pointer-events-none',
+                                                    isActive
                                                         ? zone.type === 'cardiac'
-                                                            ? 'bg-red-500 border-red-400 text-white scale-110 shadow-lg shadow-red-500/30'
-                                                            : 'bg-blue-500 border-blue-400 text-white scale-110 shadow-lg shadow-blue-500/30'
+                                                            ? 'bg-red-500 border-red-400 text-white scale-110 shadow-lg shadow-red-500/40 ring-2 ring-red-300/50'
+                                                            : 'bg-blue-500 border-blue-400 text-white scale-110 shadow-lg shadow-blue-500/40 ring-2 ring-blue-300/50'
                                                         : zone.type === 'cardiac'
-                                                            ? 'bg-red-500/20 border-red-500/50 text-red-400 hover:bg-red-500/40 hover:scale-105'
-                                                            : 'bg-blue-500/20 border-blue-500/50 text-blue-400 hover:bg-blue-500/40 hover:scale-105'
+                                                            ? 'bg-red-500/15 border-red-500/40 text-red-400'
+                                                            : 'bg-blue-500/15 border-blue-500/40 text-blue-400'
                                                 )}
                                                 style={{
                                                     top: zone.position.top,
                                                     left: zone.position.left,
-                                                    transform: `translate(-50%, -50%) ${selectedZone?.id === zone.id ? 'scale(1.1)' : ''}`,
+                                                    transform: 'translate(-50%, -50%)',
                                                 }}
                                                 title={zone.label}
                                             >
                                                 {zone.type === 'cardiac' ? <Heart size={14} /> : <Wind size={14} />}
-                                            </button>
-                                        ))}
-                                        <div className="absolute bottom-3 left-3 right-3 flex flex-wrap gap-1 justify-center">
-                                            <span className="text-[10px] px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30">Lung zones</span>
-                                            <span className="text-[10px] px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30">Heart zones</span>
+                                            </div>
+                                        );
+                                    })}
+
+                                    {/* Draggable stethoscope — sound plays while placed on a zone */}
+                                    <button
+                                        type="button"
+                                        aria-label="Drag stethoscope to auscultation zone"
+                                        onPointerDown={handleStethoscopePointerDown}
+                                        onPointerMove={handleStethoscopePointerMove}
+                                        onPointerUp={handleStethoscopePointerUp}
+                                        onPointerCancel={handleStethoscopePointerUp}
+                                        className={cn(
+                                            'absolute z-40 w-12 h-12 rounded-full flex items-center justify-center border-2 transition-shadow select-none cursor-grab active:cursor-grabbing',
+                                            stethoscopeDragging && 'scale-110',
+                                            playingSoundDemo
+                                                ? 'border-primary bg-primary/25 shadow-lg shadow-primary/30'
+                                                : 'border-white/25 bg-black/50 hover:bg-black/70'
+                                        )}
+                                        style={{
+                                            top: stethoscopePos.top,
+                                            left: stethoscopePos.left,
+                                            transform: 'translate(-50%, -50%)',
+                                            touchAction: 'none',
+                                        }}
+                                    >
+                                        <Stethoscope
+                                            size={22}
+                                            className={cn(playingSoundDemo && 'animate-pulse')}
+                                            style={{ color: playingSoundDemo ? P.accent : '#e4e4e7' }}
+                                        />
+                                    </button>
+
+                                    {selectedZone && (
+                                        <div className="absolute bottom-14 left-3 right-3 z-20 px-3 py-2.5 rounded-xl"
+                                            style={{ background: 'rgba(10,10,10,0.75)', border: `1px solid ${P.border}`, backdropFilter: 'blur(10px)' }}>
+                                            <div className="flex items-center justify-between gap-2">
+                                                <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: P.muted }}>
+                                                    {selectedZone.label}
+                                                    {playingSoundDemo && (
+                                                        <span className="ml-2 inline-flex items-center gap-1" style={{ color: P.accent }}>
+                                                            <Volume2 size={10} className="animate-pulse" /> Playing
+                                                        </span>
+                                                    )}
+                                                </p>
+                                                {playingSoundDemo && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={returnStethoscopeToDock}
+                                                        className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold transition-colors hover:bg-white/10 shrink-0"
+                                                        style={{ color: '#f87171', border: '1px solid rgba(248,113,113,0.25)' }}
+                                                        title="Remove stethoscope"
+                                                    >
+                                                        <Square size={10} fill="currentColor" />
+                                                        Remove
+                                                    </button>
+                                                )}
+                                            </div>
                                         </div>
+                                    )}
+
+                                    <div className="absolute bottom-3 left-3 right-3 z-20 flex flex-wrap gap-1 justify-center pointer-events-none">
+                                        <span className="text-[10px] px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30">Lung zones</span>
+                                        <span className="text-[10px] px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30">Heart zones</span>
                                     </div>
                                 </div>
 
